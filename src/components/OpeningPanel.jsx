@@ -41,7 +41,7 @@ export default function OpeningPanel() {
   // Push current form state to store so Canvas can show a live preview
   useEffect(() => {
     if (!selectedWallId) return
-    setDraftOpening({ type, width: Number(width), height: Number(height), offset: Number(offset), orient })
+    setDraftOpening({ type, width: Number(width) * GRID_IN, height: Number(height) * GRID_IN, offset: Number(offset) * GRID_IN, orient })
   }, [type, width, height, offset, orient, selectedWallId])
 
   // Clear preview when panel unmounts

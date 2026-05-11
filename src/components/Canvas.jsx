@@ -33,8 +33,8 @@ function getWallSegments(a, b, openings) {
   const segments = [], gaps = []
   let cur = 0
   for (const o of sorted) {
-    const gStart = Math.min(o.offset * FOOT_PX, totalPx)
-    const gEnd   = Math.min(gStart + o.width * FOOT_PX, totalPx)
+    const gStart = Math.min(o.offset * PX_PER_INCH, totalPx)
+    const gEnd   = Math.min(gStart + o.width * PX_PER_INCH, totalPx)
     if (gEnd <= gStart) continue
     if (gStart > cur) segments.push({ x1: ax+cur*dx, y1: ay+cur*dy, x2: ax+gStart*dx, y2: ay+gStart*dy })
     gaps.push({ x1: ax+gStart*dx, y1: ay+gStart*dy, x2: ax+gEnd*dx, y2: ay+gEnd*dy, type: o.type })
@@ -507,8 +507,8 @@ export default function Canvas() {
               {/* Door swing arcs — computed in SVG-group space (Y-flipped ux/uy correct for screen) */}
               {(wall.openings || []).filter(op => op.type === 'door').map(op => {
                 if (totalPx === 0) return null
-                const gStart = Math.min(op.offset * FOOT_PX, totalPx)
-                const gEnd   = Math.min(gStart + op.width * FOOT_PX, totalPx)
+                const gStart = Math.min(op.offset * PX_PER_INCH, totalPx)
+                const gEnd   = Math.min(gStart + op.width * PX_PER_INCH, totalPx)
                 const doorW  = gEnd - gStart
                 if (doorW <= 0) return null
                 const orient       = op.orient ?? 0
@@ -614,8 +614,8 @@ export default function Canvas() {
           const ux = (bx - ax) / totalPx
           const uy = (by - ay) / totalPx
           const { type: dType, offset: dOff, width: dW, orient: dOrient } = draftOpening
-          const gStart = Math.min(dOff * FOOT_PX, totalPx)
-          const gEnd   = Math.min(gStart + dW * FOOT_PX, totalPx)
+          const gStart = Math.min(dOff * PX_PER_INCH, totalPx)
+          const gEnd   = Math.min(gStart + dW * PX_PER_INCH, totalPx)
           const doorW  = gEnd - gStart
           if (doorW <= 0) return null
           const startPt = { x: ax + gStart * ux, y: ay + gStart * uy }
