@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
-
-const GRID = 20
+import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 
 function Row({ label, value, sub }) {
   return (
@@ -54,12 +53,12 @@ export default function RoomDetailPanel() {
     if (!w) return null
     const a = nodes[w.n1], b = nodes[w.n2]
     if (!a || !b) return null
-    const lenFt      = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID * 100) / 100
-    const h          = w.height ?? 10
+    const lenFt      = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN * 100) / 100
+    const hFt        = Math.round((w.height ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN * 100) / 100
     const openings   = w.openings || []
-    const openingArea = openings.reduce((s, o) => s + o.width * o.height, 0)
-    const netArea    = Math.round(Math.max(0, lenFt * h - openingArea) * 100) / 100
-    return { id: wid, lenFt, h, openings, netArea, isVirtual: w.isVirtual ?? false, isPlot: w.isPlot ?? false }
+    const openingArea = openings.reduce((s, o) => s + (o.width / GRID_IN) * (o.height / GRID_IN), 0)
+    const netArea    = Math.round(Math.max(0, lenFt * hFt - openingArea) * 100) / 100
+    return { id: wid, lenFt, hFt, openings, netArea, isVirtual: w.isVirtual ?? false, isPlot: w.isPlot ?? false }
   }).filter(Boolean)
 
   const realWalls    = wallDetails.filter(w => !w.isVirtual)
@@ -163,7 +162,7 @@ export default function RoomDetailPanel() {
               </div>
               {doors.map((d, i) => (
                 <div key={i} style={{ fontSize: 11, color: '#888', marginLeft: 10, marginBottom: 1 }}>
-                  • {fmtLen(d.width)} × {fmtLen(d.height)}
+                  • {fmtLen(Math.round(d.width/GRID_IN*10)/10)} × {fmtLen(Math.round(d.height/GRID_IN*10)/10)}
                 </div>
               ))}
             </div>
@@ -176,7 +175,7 @@ export default function RoomDetailPanel() {
               </div>
               {windows.map((w, i) => (
                 <div key={i} style={{ fontSize: 11, color: '#888', marginLeft: 10, marginBottom: 1 }}>
-                  • {fmtLen(w.width)} × {fmtLen(w.height)}
+                  • {fmtLen(Math.round(w.width/GRID_IN*10)/10)} × {fmtLen(Math.round(w.height/GRID_IN*10)/10)}
                 </div>
               ))}
             </div>
@@ -215,14 +214,14 @@ export default function RoomDetailPanel() {
                   <span style={{ color: w.isVirtual ? '#888' : '#333', fontWeight: 600 }}>
                     {w.isVirtual ? '┅ Virtual' : w.isPlot ? '⬛ Plot wall' : `Wall ${i + 1}`}
                   </span>
-                  <span style={{ color: '#555' }}>{fmtLen(w.lenFt)} × h{w.h}ft</span>
+                  <span style={{ color: '#555' }}>{fmtLen(w.lenFt)} × h{w.hFt}ft</span>
                 </div>
                 {!w.isVirtual && (
                   <div style={{ color: '#888' }}>
                     Net area: {fmtArea(w.netArea)}
                     {w.openings.length > 0 && (
                       <span style={{ marginLeft: 6 }}>
-                        ({w.openings.map(o => `${o.type === 'door' ? 'D' : 'W'} ${o.width}×${o.height}`).join(', ')})
+                        ({w.openings.map(o => `${o.type === 'door' ? 'D' : 'W'} ${Math.round(o.width/GRID_IN*10)/10}×${Math.round(o.height/GRID_IN*10)/10}`).join(', ')})
                       </span>
                     )}
                   </div>

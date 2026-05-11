@@ -1,9 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
+import {
+  w2s, screenToWorld, screenToWorldRaw, snapIn,
+  PX_PER_INCH, GRID_IN, DEFAULT_WALL_THICK_IN,
+  closestPointOnSegment,
+} from '../geometry'
 
-const GRID = 20
+// Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
+const sx = x =>  x * PX_PER_INCH
+const sy = y => -y * PX_PER_INCH
 
-function snap(v) { return Math.round(v / GRID) * GRID }
+// 20 px per foot in SVG-group space (= GRID_IN * PX_PER_INCH = 12 * 5/3)
+const FOOT_PX = GRID_IN * PX_PER_INCH
 
 function apply90(startNode, x, y) {
   const dx = Math.abs(x - startNode.x)
@@ -11,55 +19,53 @@ function apply90(startNode, x, y) {
   return dx >= dy ? { x, y: startNode.y } : { x: startNode.x, y }
 }
 
+// a, b are world-inch nodes; returns SVG-group-coord segments/gaps
 function getWallSegments(a, b, openings) {
-  const totalPx = Math.hypot(b.x - a.x, b.y - a.y)
+  const ax = sx(a.x), ay = sy(a.y)
+  const bx = sx(b.x), by = sy(b.y)
+  const totalPx = Math.hypot(bx - ax, by - ay)
   if (totalPx === 0 || !openings || openings.length === 0) {
-    return { segments: [{ x1: a.x, y1: a.y, x2: b.x, y2: b.y }], gaps: [] }
+    return { segments: [{ x1: ax, y1: ay, x2: bx, y2: by }], gaps: [] }
   }
-  const dx = (b.x - a.x) / totalPx
-  const dy = (b.y - a.y) / totalPx
+  const dx = (bx - ax) / totalPx
+  const dy = (by - ay) / totalPx
   const sorted = [...openings].sort((p, q) => p.offset - q.offset)
   const segments = [], gaps = []
   let cur = 0
   for (const o of sorted) {
-    const gStart = Math.min(o.offset * GRID, totalPx)
-    const gEnd   = Math.min(gStart + o.width * GRID, totalPx)
+    const gStart = Math.min(o.offset * FOOT_PX, totalPx)
+    const gEnd   = Math.min(gStart + o.width * FOOT_PX, totalPx)
     if (gEnd <= gStart) continue
-    if (gStart > cur) segments.push({ x1: a.x+cur*dx, y1: a.y+cur*dy, x2: a.x+gStart*dx, y2: a.y+gStart*dy })
-    gaps.push({ x1: a.x+gStart*dx, y1: a.y+gStart*dy, x2: a.x+gEnd*dx, y2: a.y+gEnd*dy, type: o.type })
+    if (gStart > cur) segments.push({ x1: ax+cur*dx, y1: ay+cur*dy, x2: ax+gStart*dx, y2: ay+gStart*dy })
+    gaps.push({ x1: ax+gStart*dx, y1: ay+gStart*dy, x2: ax+gEnd*dx, y2: ay+gEnd*dy, type: o.type })
     cur = gEnd
   }
-  if (cur < totalPx) segments.push({ x1: a.x+cur*dx, y1: a.y+cur*dy, x2: b.x, y2: b.y })
+  if (cur < totalPx) segments.push({ x1: ax+cur*dx, y1: ay+cur*dy, x2: bx, y2: by })
   return { segments, gaps }
 }
 
-function applyLockedLength(startNode, cursor, lengthUnits) {
-  const px = lengthUnits * GRID
+// startNode, cursor: world inches; lengthFt: feet → returns world-inch snapped endpoint (ortho)
+function applyLockedLength(startNode, cursor, lengthFt) {
+  const lengthIn = lengthFt * GRID_IN
   const dx = cursor.x - startNode.x
   const dy = cursor.y - startNode.y
-  if (Math.abs(dx) >= Math.abs(dy)) return { x: startNode.x + (dx >= 0 ? px : -px), y: startNode.y }
-  return { x: startNode.x, y: startNode.y + (dy >= 0 ? px : -px) }
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: startNode.x + (dx >= 0 ? lengthIn : -lengthIn), y: startNode.y }
+  return { x: startNode.x, y: startNode.y + (dy >= 0 ? lengthIn : -lengthIn) }
 }
 
-function applyLockedLengthFree(startNode, cursor, lengthUnits) {
-  const px   = lengthUnits * GRID
-  const dx   = cursor.x - startNode.x
-  const dy   = cursor.y - startNode.y
+// Free-angle locked length (world inches)
+function applyLockedLengthFree(startNode, cursor, lengthFt) {
+  const lengthIn = lengthFt * GRID_IN
+  const dx = cursor.x - startNode.x
+  const dy = cursor.y - startNode.y
   const dist = Math.hypot(dx, dy)
-  if (dist === 0) return { x: startNode.x + px, y: startNode.y }
-  return { x: snap(startNode.x + (dx / dist) * px), y: snap(startNode.y + (dy / dist) * px) }
+  if (dist === 0) return { x: startNode.x + lengthIn, y: startNode.y }
+  return { x: snapIn(startNode.x + (dx / dist) * lengthIn), y: snapIn(startNode.y + (dy / dist) * lengthIn) }
 }
 
-function closestPointOnSegment(px, py, ax, ay, bx, by) {
-  const dx = bx - ax, dy = by - ay
-  const lenSq = dx*dx + dy*dy
-  if (lenSq === 0) return { x: snap(ax), y: snap(ay) }
-  const t = Math.max(0, Math.min(1, ((px-ax)*dx + (py-ay)*dy) / lenSq))
-  return { x: snap(ax + t*dx), y: snap(ay + t*dy) }
-}
-
+// a, b: world-inch nodes → returns length in feet
 function wallLength(a, b) {
-  return Math.round(Math.hypot(b.x-a.x, b.y-a.y) / GRID * 10) / 10
+  return Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN * 10) / 10
 }
 
 function fmtLen(ft, unit) {
@@ -95,6 +101,7 @@ export default function Canvas() {
   const showDimensions = useStore(s => s.showDimensions)
   const unit           = useStore(s => s.unit)
   const draftOpening   = useStore(s => s.draftOpening)
+  const selectedRoomId = useStore(s => s.selectedRoomId)
 
   const setTool = useStore(s => s.setTool)
   const {
@@ -117,16 +124,31 @@ export default function Canvas() {
   const panStartRef  = useRef(null)
   const [spaceDown,    setSpaceDown]    = useState(false)
   const [shiftDown,    setShiftDown]    = useState(false)
-  const [cursor,       setCursor]       = useState(null)
+  const [cursor,       setCursor]       = useState(null)   // world inches (Y-up)
   const [hoveredWallId, setHoveredWallId] = useState(null)
   const [lockedLength, setLockedLength] = useState('')
-  const selectedRoomId = useStore(s => s.selectedRoomId)
-  const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY }
+  const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY } in world inches
 
   useEffect(() => { panRef.current  = pan  }, [pan])
   useEffect(() => { zoomRef.current = zoom }, [zoom])
 
-  // Global pan handlers — attached to window so dragging past the SVG edge doesn't cancel the pan.
+  // Set initial pan so the world origin (SW corner) appears near bottom-left
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const h = entries[0]?.contentRect.height
+      if (!h) return
+      const init = { x: 100, y: h - 100 }
+      panRef.current = init
+      setPan(init)
+      ro.disconnect()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Global pan handlers
   useEffect(() => {
     function onMove(e) {
       if (!isPanningRef.current || !panStartRef.current) return
@@ -168,11 +190,9 @@ export default function Canvas() {
     function onKeyDown(e) {
       if (e.code === 'Space' && !e.target.closest('input')) { e.preventDefault(); setSpaceDown(true) }
       if (e.key === 'Shift') setShiftDown(true)
-      if (e.key === 'Escape') { cancelAction(); setEditingRoomId(null); return }
-      // Undo / Redo
+      if (e.key === 'Escape') { cancelAction(); return }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return }
-      // Delete
       if (e.key === 'Delete') {
         if (selectedStampId) { deleteStamp(selectedStampId); return }
         if (selectedWallId)  { deleteWall(selectedWallId);  return }
@@ -193,24 +213,16 @@ export default function Canvas() {
   const parsedLength = parseFloat(lockedLength)
   const hasLock      = !isNaN(parsedLength) && parsedLength > 0
 
+  // ghostEnd is in world inches
   const ghostEnd = startNode && cursor
     ? (hasLock
         ? (shiftDown ? applyLockedLengthFree(startNode, cursor, parsedLength) : applyLockedLength(startNode, cursor, parsedLength))
         : (shiftDown ? cursor : apply90(startNode, cursor.x, cursor.y)))
     : null
 
-  function toCanvas(clientX, clientY) {
-    const rect = svgRef.current.getBoundingClientRect()
-    return { x: snap((clientX - rect.left - pan.x) / zoom), y: snap((clientY - rect.top - pan.y) / zoom) }
-  }
-
-  function toCanvasRaw(clientX, clientY) {
-    const rect = svgRef.current.getBoundingClientRect()
-    return { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom }
-  }
+  function getRect() { return svgRef.current.getBoundingClientRect() }
 
   function handleMouseDown(e) {
-    // Right-click, middle-click, or Space+left-click all pan
     if (e.button === 2 || e.button === 1 || (e.button === 0 && spaceDown)) {
       e.preventDefault()
       isPanningRef.current = true
@@ -220,16 +232,14 @@ export default function Canvas() {
   }
 
   function handleMouseMove(e) {
-    // Pan is handled by the global window listener; only update cursor position here.
     if (isPanningRef.current) return
     if (draggingStamp) {
-      const { x, y } = toCanvasRaw(e.clientX, e.clientY)
-      moveStamp(draggingStamp.stampId, snap(x - draggingStamp.offX), snap(y - draggingStamp.offY))
+      const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), panRef.current, zoomRef.current)
+      moveStamp(draggingStamp.stampId, snapIn(x - draggingStamp.offX), snapIn(y - draggingStamp.offY))
       return
     }
     if (!svgRef.current) return
-    const rect = svgRef.current.getBoundingClientRect()
-    setCursor({ x: snap((e.clientX - rect.left - pan.x) / zoom), y: snap((e.clientY - rect.top - pan.y) / zoom) })
+    setCursor(screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom))
   }
 
   function handleMouseUp(e) {
@@ -241,9 +251,8 @@ export default function Canvas() {
   function handleSVGClick(e) {
     if (isPanningRef.current || spaceDown) return
 
-    // Stamp placement — place one then switch to Select so it can be dragged/deleted
     if (activeTool === 'stairs' || activeTool === 'lift') {
-      const { x, y } = toCanvas(e.clientX, e.clientY)
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
       addStamp(activeTool, x, y)
       setTool('select')
       return
@@ -252,9 +261,9 @@ export default function Canvas() {
     if (activeTool === 'select') { selectWall(null); selectStamp(null); return }
     if (activeTool !== 'draw') return
 
-    const { x, y } = toCanvas(e.clientX, e.clientY)
+    const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
     if (!drawStartId) { setDrawStart(getOrCreateNode(x, y)); return }
-    const snapped   = hasLock
+    const snapped = hasLock
       ? (shiftDown ? applyLockedLengthFree(startNode, { x, y }, parsedLength) : applyLockedLength(startNode, { x, y }, parsedLength))
       : (shiftDown ? { x, y } : apply90(startNode, x, y))
     const endNodeId = getOrCreateNode(snapped.x, snapped.y)
@@ -274,7 +283,7 @@ export default function Canvas() {
       e.stopPropagation()
       const wall = walls[wallId]
       const a = nodes[wall.n1], b = nodes[wall.n2]
-      const { x, y } = toCanvasRaw(e.clientX, e.clientY)
+      const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), pan, zoom)
       const pt = closestPointOnSegment(x, y, a.x, a.y, b.x, b.y)
       splitWall(wallId, pt.x, pt.y)
       return
@@ -290,8 +299,8 @@ export default function Canvas() {
     if (activeTool !== 'select' || e.button !== 0) return
     e.stopPropagation()
     selectStamp(stamp.id)
-    useStore.getState()._save()   // save before drag so undo restores pre-drag position
-    const { x, y } = toCanvasRaw(e.clientX, e.clientY)
+    useStore.getState()._save()
+    const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), panRef.current, zoomRef.current)
     setDraggingStamp({ stampId: stamp.id, offX: x - stamp.x, offY: y - stamp.y })
   }
 
@@ -355,16 +364,15 @@ export default function Canvas() {
       onContextMenu={e => e.preventDefault()}
     >
       <defs>
-        <pattern id="smallGrid" width={GRID} height={GRID} patternUnits="userSpaceOnUse">
-          <path d={`M ${GRID} 0 L 0 0 0 ${GRID}`} fill="none" stroke="#e0e0e0" strokeWidth={0.5}/>
+        <pattern id="smallGrid" width={FOOT_PX} height={FOOT_PX} patternUnits="userSpaceOnUse">
+          <path d={`M ${FOOT_PX} 0 L 0 0 0 ${FOOT_PX}`} fill="none" stroke="#e0e0e0" strokeWidth={0.5}/>
         </pattern>
-        <pattern id="grid" width={GRID*5} height={GRID*5} patternUnits="userSpaceOnUse">
-          <rect width={GRID*5} height={GRID*5} fill="url(#smallGrid)"/>
-          <path d={`M ${GRID*5} 0 L 0 0 0 ${GRID*5}`} fill="none" stroke="#ccc" strokeWidth={1}/>
+        <pattern id="grid" width={FOOT_PX*5} height={FOOT_PX*5} patternUnits="userSpaceOnUse">
+          <rect width={FOOT_PX*5} height={FOOT_PX*5} fill="url(#smallGrid)"/>
+          <path d={`M ${FOOT_PX*5} 0 L 0 0 0 ${FOOT_PX*5}`} fill="none" stroke="#ccc" strokeWidth={1}/>
         </pattern>
-        {/* Stair hatch pattern */}
-        <pattern id="stairHatch" width={GRID} height={GRID*0.6} patternUnits="userSpaceOnUse">
-          <line x1="0" y1={GRID*0.6} x2={GRID} y2={GRID*0.6} stroke="#aaa" strokeWidth={0.8}/>
+        <pattern id="stairHatch" width={FOOT_PX} height={FOOT_PX*0.6} patternUnits="userSpaceOnUse">
+          <line x1="0" y1={FOOT_PX*0.6} x2={FOOT_PX} y2={FOOT_PX*0.6} stroke="#aaa" strokeWidth={0.8}/>
         </pattern>
       </defs>
 
@@ -378,25 +386,32 @@ export default function Canvas() {
           if (!isRoomValid(room.id)) return null
           const poly = getRoomPolygon(room.id)
           if (!poly || poly.length < 3) return null
-          const pts       = poly.map(p => `${p.x},${p.y}`).join(' ')
-          const color     = ROOM_COLORS[idx % ROOM_COLORS.length]
-          const isSelRoom = room.id === selectedRoomId
+          const pts   = poly.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')
+          const color = ROOM_COLORS[idx % ROOM_COLORS.length]
+          const isSel = room.id === selectedRoomId
           return (
             <polygon key={room.id} points={pts}
-              fill={color} fillOpacity={isSelRoom ? 0.25 : 0.12}
-              stroke={color} strokeOpacity={isSelRoom ? 0.8 : 0.3}
-              strokeWidth={isSelRoom ? 2 : 1}
+              fill={color} fillOpacity={isSel ? 0.25 : 0.12}
+              stroke={color} strokeOpacity={isSel ? 0.8 : 0.3}
+              strokeWidth={isSel ? 2 : 1}
               style={{ cursor: activeTool === 'select' ? 'pointer' : 'default' }}
               onClick={activeTool === 'select' ? e => { e.stopPropagation(); selectRoom(room.id) } : undefined}
             />
           )
         })}
 
-        {/* Stamps */}
+        {/* Stamps — x/y is bottom-left corner in world inches */}
         {Object.values(stamps).map(stamp => {
           const isSelected = stamp.id === selectedStampId
-          const color = isSelected ? '#e74c3c' : '#555'
+          const color    = isSelected ? '#e74c3c' : '#555'
           const isDragging = draggingStamp?.stampId === stamp.id
+          // SVG rect: top-left = (sx, sy of top-left corner in Y-up = (stamp.x, stamp.y+stamp.h))
+          const rx = sx(stamp.x)
+          const ry = sy(stamp.y + stamp.h)   // Y-flip: top in SVG = -(bottom + height)
+          const rw = stamp.w * PX_PER_INCH
+          const rh = stamp.h * PX_PER_INCH
+          const cx = sx(stamp.x + stamp.w / 2)
+          const cy = sy(stamp.y + stamp.h / 2)
           return (
             <g key={stamp.id}
               onClick={e => handleStampClick(e, stamp.id)}
@@ -404,11 +419,11 @@ export default function Canvas() {
               style={{ cursor: activeTool === 'select' ? (isDragging ? 'grabbing' : 'grab') : 'default' }}>
               {stamp.type === 'stairs' ? (
                 <>
-                  <rect x={stamp.x} y={stamp.y} width={stamp.w} height={stamp.h}
+                  <rect x={rx} y={ry} width={rw} height={rh}
                     fill="url(#stairHatch)" stroke={color} strokeWidth={isSelected ? 2 : 1.5}/>
-                  <rect x={stamp.x} y={stamp.y} width={stamp.w} height={stamp.h}
+                  <rect x={rx} y={ry} width={rw} height={rh}
                     fill="none" stroke={color} strokeWidth={isSelected ? 2 : 1.5}/>
-                  <text x={stamp.x + stamp.w/2} y={stamp.y + stamp.h/2}
+                  <text x={cx} y={cy}
                     textAnchor="middle" dominantBaseline="middle"
                     fontSize={10} fontWeight="600" fill={color}
                     style={{ pointerEvents: 'none', userSelect: 'none' }}>
@@ -417,12 +432,12 @@ export default function Canvas() {
                 </>
               ) : (
                 <>
-                  <rect x={stamp.x} y={stamp.y} width={stamp.w} height={stamp.h}
+                  <rect x={rx} y={ry} width={rw} height={rh}
                     fill="#e8f0f8" stroke={color} strokeWidth={isSelected ? 2 : 1.5}/>
-                  <circle cx={stamp.x + stamp.w/2} cy={stamp.y + stamp.h/2}
-                    r={Math.min(stamp.w, stamp.h) * 0.32}
+                  <circle cx={cx} cy={cy}
+                    r={Math.min(rw, rh) * 0.32}
                     fill="none" stroke={color} strokeWidth={1}/>
-                  <text x={stamp.x + stamp.w/2} y={stamp.y + stamp.h/2}
+                  <text x={cx} y={cy}
                     textAnchor="middle" dominantBaseline="middle"
                     fontSize={10} fontWeight="600" fill={color}
                     style={{ pointerEvents: 'none', userSelect: 'none' }}>
@@ -449,21 +464,28 @@ export default function Canvas() {
                       : wall.isPlot     ? '#a0522d'
                       : isVirtual       ? '#888'
                       : '#333'
-          const thickPx = Math.max(2, (wall.thickness ?? 0.5) * GRID)
+          const thickPx = Math.max(2, (wall.thickness ?? DEFAULT_WALL_THICK_IN) * PX_PER_INCH)
           const strokeW = (isSelected || isPending || isMultiSelected) ? thickPx + 2 : isVirtual ? 1.5 : thickPx
-          const dashArray  = isVirtual ? '8 5' : undefined
-          const hitW       = Math.max(14, thickPx + 8)
-          const len        = wallLength(a, b)
-          const mx         = (a.x + b.x) / 2
-          const my         = (a.y + b.y) / 2
-          const angle  = Math.atan2(b.y - a.y, b.x - a.x)
-          const perpX  = -Math.sin(angle) * 10
-          const perpY  =  Math.cos(angle) * 10
+          const dashArray = isVirtual ? '8 5' : undefined
+          const hitW      = Math.max(14, thickPx + 8)
+          const len       = wallLength(a, b)
+          // SVG-group coords for the wall nodes
+          const ax = sx(a.x), ay = sy(a.y)
+          const bx = sx(b.x), by = sy(b.y)
+          const mx = (ax + bx) / 2
+          const my = (ay + by) / 2
+          const angle = Math.atan2(by - ay, bx - ax)
+          const perpX = -Math.sin(angle) * 10
+          const perpY =  Math.cos(angle) * 10
+          // Wall total length in SVG pixels (for opening geometry)
+          const totalPx = Math.hypot(bx - ax, by - ay)
+          const ux = totalPx > 0 ? (bx - ax) / totalPx : 0
+          const uy = totalPx > 0 ? (by - ay) / totalPx : 0
           return (
             <g key={wall.id} onClick={e => handleWallClick(e, wall.id)}
               onMouseEnter={() => setHoveredWallId(wall.id)}
               onMouseLeave={() => setHoveredWallId(null)}>
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              <line x1={ax} y1={ay} x2={bx} y2={by}
                 stroke="transparent" strokeWidth={hitW} style={{ cursor: wallHitCursor }}/>
               {(() => {
                 const { segments, gaps } = getWallSegments(a, b, wall.openings)
@@ -482,32 +504,24 @@ export default function Canvas() {
                   )}
                 </>
               })()}
-              {/* Door swing arcs */}
+              {/* Door swing arcs — computed in SVG-group space (Y-flipped ux/uy correct for screen) */}
               {(wall.openings || []).filter(op => op.type === 'door').map(op => {
-                const totalPx = Math.hypot(b.x - a.x, b.y - a.y)
                 if (totalPx === 0) return null
-                const ux = (b.x - a.x) / totalPx
-                const uy = (b.y - a.y) / totalPx
-                const gStart = Math.min(op.offset * GRID, totalPx)
-                const gEnd   = Math.min(gStart + op.width * GRID, totalPx)
+                const gStart = Math.min(op.offset * FOOT_PX, totalPx)
+                const gEnd   = Math.min(gStart + op.width * FOOT_PX, totalPx)
                 const doorW  = gEnd - gStart
                 if (doorW <= 0) return null
                 const orient       = op.orient ?? 0
                 const hingeAtStart = orient === 0 || orient === 1
                 const openLeft     = orient === 0 || orient === 2
-                // Hinge point
-                const hx = a.x + (hingeAtStart ? gStart : gEnd) * ux
-                const hy = a.y + (hingeAtStart ? gStart : gEnd) * uy
-                // Normal direction for swing
+                const hx = ax + (hingeAtStart ? gStart : gEnd) * ux
+                const hy = ay + (hingeAtStart ? gStart : gEnd) * uy
                 const nx = openLeft ? -uy : uy
-                const ny = openLeft ? ux  : -ux
-                // Door leaf endpoint
+                const ny = openLeft ?  ux : -ux
                 const dx = hx + doorW * nx
                 const dy = hy + doorW * ny
-                // Arc start (other side of gap)
-                const ax2 = a.x + (hingeAtStart ? gEnd : gStart) * ux
-                const ay2 = a.y + (hingeAtStart ? gEnd : gStart) * uy
-                // Sweep: orient 0,3 → CW in SVG; orient 1,2 → CCW
+                const ax2 = ax + (hingeAtStart ? gEnd : gStart) * ux
+                const ay2 = ay + (hingeAtStart ? gEnd : gStart) * uy
                 const sweep = (orient === 0 || orient === 3) ? 1 : 0
                 return (
                   <g key={op.id} style={{ pointerEvents: 'none' }}>
@@ -518,7 +532,6 @@ export default function Canvas() {
                   </g>
                 )
               })}
-
               {(isHovered || isSelected || isMultiSelected || isPending || showDimensions) && (
                 <text x={mx + perpX} y={my + perpY}
                   textAnchor="middle" dominantBaseline="middle"
@@ -535,14 +548,16 @@ export default function Canvas() {
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {
-          const len        = wallLength(startNode, ghostEnd)
-          const mx         = (startNode.x + ghostEnd.x) / 2
-          const my         = (startNode.y + ghostEnd.y) / 2
+          const saX = sx(startNode.x), saY = sy(startNode.y)
+          const geX = sx(ghostEnd.x),  geY = sy(ghostEnd.y)
+          const len       = wallLength(startNode, ghostEnd)
+          const mx        = (saX + geX) / 2
+          const my        = (saY + geY) / 2
           const ghostColor = drawVirtual ? '#888' : shiftDown ? '#e67e22' : '#4a90e2'
           const ghostDash  = drawVirtual ? '8 5' : '6 4'
           return (
             <g style={{ pointerEvents: 'none' }}>
-              <line x1={startNode.x} y1={startNode.y} x2={ghostEnd.x} y2={ghostEnd.y}
+              <line x1={saX} y1={saY} x2={geX} y2={geY}
                 stroke={ghostColor} strokeWidth={drawVirtual ? 1.5 : 2} strokeDasharray={ghostDash}/>
               <text x={mx} y={my - 10} textAnchor="middle" fontSize={11} fill={ghostColor}>
                 {fmtLen(len, unit)}
@@ -555,13 +570,13 @@ export default function Canvas() {
         {Object.values(nodes).map(node => {
           const isStart = node.id === drawStartId
           return (
-            <circle key={node.id} cx={node.x} cy={node.y}
+            <circle key={node.id} cx={sx(node.x)} cy={sy(node.y)}
               r={isStart ? 7 : 5} fill={isStart ? '#e74c3c' : '#4a90e2'}
               stroke="#fff" strokeWidth={2} style={{ pointerEvents: 'none' }}/>
           )
         })}
 
-        {/* Room-mode corner indicators — show open vs closed corners */}
+        {/* Room-mode corner indicators */}
         {activeTool === 'room' && pendingWallIds.length > 0 && (() => {
           const connections = {}
           pendingWallIds.forEach(wid => {
@@ -572,14 +587,12 @@ export default function Canvas() {
           return Object.entries(connections).map(([nodeId, count]) => {
             const node = nodes[nodeId]; if (!node) return null
             const closed = count >= 2
+            const nx = sx(node.x), ny = sy(node.y)
             return (
               <g key={nodeId} style={{ pointerEvents: 'none' }}>
-                <circle cx={node.x} cy={node.y} r={9}
-                  fill={closed ? '#27ae60' : '#e74c3c'} opacity={0.2}/>
-                <circle cx={node.x} cy={node.y} r={6}
-                  fill={closed ? '#27ae60' : '#e74c3c'}
-                  stroke="#fff" strokeWidth={2}/>
-                <text x={node.x} y={node.y} textAnchor="middle" dominantBaseline="middle"
+                <circle cx={nx} cy={ny} r={9} fill={closed ? '#27ae60' : '#e74c3c'} opacity={0.2}/>
+                <circle cx={nx} cy={ny} r={6} fill={closed ? '#27ae60' : '#e74c3c'} stroke="#fff" strokeWidth={2}/>
+                <text x={nx} y={ny} textAnchor="middle" dominantBaseline="middle"
                   fontSize={8} fill="#fff" fontWeight="700">
                   {closed ? '✓' : '!'}
                 </text>
@@ -594,17 +607,19 @@ export default function Canvas() {
           if (!wall) return null
           const a = nodes[wall.n1], b = nodes[wall.n2]
           if (!a || !b) return null
-          const totalPx = Math.hypot(b.x - a.x, b.y - a.y)
+          const ax = sx(a.x), ay = sy(a.y)
+          const bx = sx(b.x), by = sy(b.y)
+          const totalPx = Math.hypot(bx - ax, by - ay)
           if (totalPx === 0) return null
-          const ux = (b.x - a.x) / totalPx
-          const uy = (b.y - a.y) / totalPx
+          const ux = (bx - ax) / totalPx
+          const uy = (by - ay) / totalPx
           const { type: dType, offset: dOff, width: dW, orient: dOrient } = draftOpening
-          const gStart = Math.min(dOff * GRID, totalPx)
-          const gEnd   = Math.min(gStart + dW * GRID, totalPx)
+          const gStart = Math.min(dOff * FOOT_PX, totalPx)
+          const gEnd   = Math.min(gStart + dW * FOOT_PX, totalPx)
           const doorW  = gEnd - gStart
           if (doorW <= 0) return null
-          const startPt = { x: a.x + gStart * ux, y: a.y + gStart * uy }
-          const endPt   = { x: a.x + gEnd   * ux, y: a.y + gEnd   * uy }
+          const startPt = { x: ax + gStart * ux, y: ay + gStart * uy }
+          const endPt   = { x: ax + gEnd   * ux, y: ay + gEnd   * uy }
 
           if (dType === 'window') {
             return (
@@ -617,29 +632,24 @@ export default function Canvas() {
             )
           }
 
-          // Door preview
           const hingeAtStart = dOrient === 0 || dOrient === 1
           const openLeft     = dOrient === 0 || dOrient === 2
-          const hx = a.x + (hingeAtStart ? gStart : gEnd) * ux
-          const hy = a.y + (hingeAtStart ? gStart : gEnd) * uy
+          const hx = ax + (hingeAtStart ? gStart : gEnd) * ux
+          const hy = ay + (hingeAtStart ? gStart : gEnd) * uy
           const nx = openLeft ? -uy : uy
-          const ny = openLeft ? ux  : -ux
+          const ny = openLeft ?  ux : -ux
           const dx = hx + doorW * nx
           const dy = hy + doorW * ny
-          const ax2   = a.x + (hingeAtStart ? gEnd : gStart) * ux
-          const ay2   = a.y + (hingeAtStart ? gEnd : gStart) * uy
+          const ax2   = ax + (hingeAtStart ? gEnd : gStart) * ux
+          const ay2   = ay + (hingeAtStart ? gEnd : gStart) * uy
           const sweep = (dOrient === 0 || dOrient === 3) ? 1 : 0
           return (
             <g style={{ pointerEvents: 'none' }}>
-              {/* Gap highlight */}
               <line x1={startPt.x} y1={startPt.y} x2={endPt.x} y2={endPt.y}
                 stroke="#4a90e2" strokeWidth={6} strokeLinecap="round" opacity={0.2}/>
-              {/* Hinge dot */}
               <circle cx={hx} cy={hy} r={4} fill="#4a90e2" opacity={0.9}/>
-              {/* Door leaf */}
               <line x1={hx} y1={hy} x2={dx} y2={dy}
                 stroke="#4a90e2" strokeWidth={2} strokeLinecap="round"/>
-              {/* Swing arc */}
               <path d={`M ${ax2} ${ay2} A ${doorW} ${doorW} 0 0 ${sweep} ${dx} ${dy}`}
                 fill="none" stroke="#4a90e2" strokeWidth={1.5} strokeDasharray="4 2"/>
             </g>
@@ -648,7 +658,7 @@ export default function Canvas() {
 
         {/* Ghost snap dot */}
         {ghostEnd && (
-          <circle cx={ghostEnd.x} cy={ghostEnd.y} r={4}
+          <circle cx={sx(ghostEnd.x)} cy={sy(ghostEnd.y)} r={4}
             fill="#4a90e2" opacity={0.5} style={{ pointerEvents: 'none' }}/>
         )}
 
@@ -657,17 +667,19 @@ export default function Canvas() {
           const midpoints = room.wallIds.map(wid => {
             const w = walls[wid]; if (!w) return null
             const a = nodes[w.n1], b = nodes[w.n2]; if (!a || !b) return null
-            return { x: (a.x+b.x)/2, y: (a.y+b.y)/2 }
+            return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
           }).filter(Boolean)
           if (!midpoints.length) return null
-          const cx      = midpoints.reduce((s, p) => s+p.x, 0) / midpoints.length
-          const cy      = midpoints.reduce((s, p) => s+p.y, 0) / midpoints.length
+          // Average in world inches then convert to SVG-group
+          const wx = midpoints.reduce((s, p) => s + p.x, 0) / midpoints.length
+          const wy = midpoints.reduce((s, p) => s + p.y, 0) / midpoints.length
+          const cx = sx(wx), cy = sy(wy)
           const invalid = !isRoomValid(room.id)
-          const isSelRoom = room.id === selectedRoomId
+          const isSel   = room.id === selectedRoomId
           return (
             <text key={room.id} x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
               fontSize={13} fontWeight="600"
-              fill={invalid ? '#e74c3c' : isSelRoom ? '#1a6e3a' : '#27ae60'}
+              fill={invalid ? '#e74c3c' : isSel ? '#1a6e3a' : '#27ae60'}
               style={{
                 pointerEvents: activeTool === 'select' ? 'auto' : 'none',
                 userSelect: 'none',

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
-
-const GRID = 20
+import { GRID_IN } from '../geometry'
 
 export default function StampPanel() {
   const selectedStampId = useStore(s => s.selectedStampId)
@@ -16,8 +15,8 @@ export default function StampPanel() {
 
   useEffect(() => {
     if (stamp) {
-      setW(Math.round(stamp.w / GRID * 10) / 10)
-      setH(Math.round(stamp.h / GRID * 10) / 10)
+      setW(Math.round(stamp.w / GRID_IN * 10) / 10)
+      setH(Math.round(stamp.h / GRID_IN * 10) / 10)
     }
   }, [selectedStampId, stamp?.w, stamp?.h])
 
@@ -28,13 +27,13 @@ export default function StampPanel() {
   function handleW(val) {
     setW(val)
     const n = parseFloat(val)
-    if (n > 0) resizeStamp(stamp.id, n, parseFloat(h) || stamp.h / GRID)
+    if (n > 0) resizeStamp(stamp.id, n, parseFloat(h) || stamp.h / GRID_IN)
   }
 
   function handleH(val) {
     setH(val)
     const n = parseFloat(val)
-    if (n > 0) resizeStamp(stamp.id, parseFloat(w) || stamp.w / GRID, n)
+    if (n > 0) resizeStamp(stamp.id, parseFloat(w) || stamp.w / GRID_IN, n)
   }
 
   return (

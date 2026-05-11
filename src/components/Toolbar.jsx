@@ -56,7 +56,7 @@ export default function Toolbar() {
   const fileInputRef = useRef(null)
 
   function handleSave() {
-    const data = JSON.stringify({ nodes, walls, rooms, stamps }, null, 2)
+    const data = JSON.stringify({ version: 2, unit: 'inch', nodes, walls, rooms, stamps }, null, 2)
     const blob = new Blob([data], { type: 'application/json' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')

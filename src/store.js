@@ -1,16 +1,11 @@
 import { create } from 'zustand'
+import {
+  SNAP_IN, GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN,
+  findNearbyNode, isOnSegment, collinearOverlap, pointInPolygon, normalizePolygonWinding,
+} from './geometry'
 
 let nextId = 1
 const uid = () => String(nextId++)
-
-const GRID        = 20
-const WALL_HEIGHT = 10
-const WALL_THICK  = 0.5
-const SNAP        = 6
-
-function findNode(nodes, x, y) {
-  return Object.values(nodes).find(n => Math.abs(n.x - x) < SNAP && Math.abs(n.y - y) < SNAP) || null
-}
 
 function removeOrphanNodes(nodes, walls) {
   const used = new Set()
@@ -18,41 +13,6 @@ function removeOrphanNodes(nodes, walls) {
   const cleaned = { ...nodes }
   Object.keys(cleaned).forEach(id => { if (!used.has(id)) delete cleaned[id] })
   return cleaned
-}
-
-function isOnSegment(px, py, ax, ay, bx, by) {
-  const cross = Math.abs((py - ay) * (bx - ax) - (px - ax) * (by - ay))
-  const len = Math.hypot(bx - ax, by - ay)
-  if (len === 0) return false
-  if (cross / len > SNAP) return false
-  const minX = Math.min(ax, bx) - SNAP
-  const maxX = Math.max(ax, bx) + SNAP
-  const minY = Math.min(ay, by) - SNAP
-  const maxY = Math.max(ay, by) + SNAP
-  return px >= minX && px <= maxX && py >= minY && py <= maxY
-}
-
-function collinearOverlap(ax, ay, bx, by, cx, cy, dx, dy) {
-  const lenAB = Math.hypot(bx - ax, by - ay)
-  if (lenAB === 0) return false
-  const crossC = Math.abs((cy - ay) * (bx - ax) - (cx - ax) * (by - ay))
-  const crossD = Math.abs((dy - ay) * (bx - ax) - (dx - ax) * (by - ay))
-  if (crossC / lenAB > SNAP || crossD / lenAB > SNAP) return false
-  const tC = ((cx - ax) * (bx - ax) + (cy - ay) * (by - ay)) / (lenAB * lenAB)
-  const tD = ((dx - ax) * (bx - ax) + (dy - ay) * (by - ay)) / (lenAB * lenAB)
-  const lo = Math.max(0, Math.min(tC, tD))
-  const hi = Math.min(1, Math.max(tC, tD))
-  return hi - lo > 0.01
-}
-
-function pointInPolygon(px, py, polygon) {
-  let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x, yi = polygon[i].y
-    const xj = polygon[j].x, yj = polygon[j].y
-    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside
-  }
-  return inside
 }
 
 function buildPlotPolygon(walls, nodes) {
@@ -84,6 +44,35 @@ function buildPlotPolygon(walls, nodes) {
   return best.map(id => nodes[id]).filter(Boolean)
 }
 
+// Walk adjacency graph to find polygon node order
+function walkPolygon(wallIds, walls) {
+  const adj = {}
+  for (const wid of wallIds) {
+    const w = walls[wid]
+    if (!w) continue
+    if (!adj[w.n1]) adj[w.n1] = []
+    if (!adj[w.n2]) adj[w.n2] = []
+    adj[w.n1].push(w.n2)
+    adj[w.n2].push(w.n1)
+  }
+  const nodeIds = Object.keys(adj)
+  if (nodeIds.length < 3) return null
+  let best = []
+  for (const startId of nodeIds) {
+    const p = [startId]
+    let prev = null, current = startId
+    for (let i = 0; i < nodeIds.length - 1; i++) {
+      const next = (adj[current] || []).find(n => n !== prev && !p.includes(n))
+      if (!next) break
+      p.push(next); prev = current; current = next
+    }
+    if (p.length > best.length) best = p
+    if (best.length === nodeIds.length) break
+  }
+  const isClosed = best.length === nodeIds.length && (adj[best[best.length - 1]] || []).includes(best[0])
+  return isClosed ? best : null
+}
+
 export const useStore = create((set, get) => ({
   nodes:  {},
   walls:  {},
@@ -93,15 +82,15 @@ export const useStore = create((set, get) => ({
   history: [],
   future:  [],
 
-  activeTool:       'draw',
-  drawVirtual:      false,
-  drawStartId:      null,
-  selectedWallId:   null,
-  selectedWallIds:  [],
-  selectedStampId:  null,
-  selectedRoomId:   null,
-  pendingWallIds:   [],
-  draftOpening:     null,
+  activeTool:      'draw',
+  drawVirtual:     false,
+  drawStartId:     null,
+  selectedWallId:  null,
+  selectedWallIds: [],
+  selectedStampId: null,
+  selectedRoomId:  null,
+  pendingWallIds:  [],
+  draftOpening:    null,
 
   unit:           'ft',
   showDimensions: false,
@@ -152,15 +141,16 @@ export const useStore = create((set, get) => ({
     set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, pendingWallIds: [], draftOpening: null })
   },
 
-  toggleDrawVirtual()     { set(s => ({ drawVirtual: !s.drawVirtual })) },
-  setUnit(unit)           { set({ unit }) },
-  toggleShowDimensions()  { set(s => ({ showDimensions: !s.showDimensions })) },
-  setDraftOpening(data)   { set({ draftOpening: data }) },
+  toggleDrawVirtual()    { set(s => ({ drawVirtual: !s.drawVirtual })) },
+  setUnit(unit)          { set({ unit }) },
+  toggleShowDimensions() { set(s => ({ showDimensions: !s.showDimensions })) },
+  setDraftOpening(data)  { set({ draftOpening: data }) },
 
   // ── Nodes ─────────────────────────────────────────────────────────────
 
+  // x, y are world inches (Y-up)
   getOrCreateNode(x, y) {
-    const existing = findNode(get().nodes, x, y)
+    const existing = findNearbyNode(get().nodes, x, y)
     if (existing) return existing.id
 
     // If the point lies on the body of an existing wall, auto-split it so the
@@ -170,8 +160,7 @@ export const useStore = create((set, get) => ({
       const a = currentNodes[wall.n1], b = currentNodes[wall.n2]
       if (!a || !b) continue
       if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) continue
-      // isOnSegment already passes with SNAP tolerance; skip if basically at an endpoint
-      if (Math.hypot(x - a.x, y - a.y) < SNAP || Math.hypot(x - b.x, y - b.y) < SNAP) continue
+      if (Math.hypot(x - a.x, y - a.y) < SNAP_IN || Math.hypot(x - b.x, y - b.y) < SNAP_IN) continue
       const newNodeId = uid()
       const w1Id = uid(), w2Id = uid()
       set(s => {
@@ -226,7 +215,7 @@ export const useStore = create((set, get) => ({
     const id = uid()
     const isVirtual = get().drawVirtual
     set(s => ({
-      walls: { ...s.walls, [id]: { id, n1, n2, height: WALL_HEIGHT, thickness: WALL_THICK, isPlot: false, isVirtual, openings: [] } },
+      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, isPlot: false, isVirtual, openings: [] } },
       drawStartId: null,
     }))
   },
@@ -252,9 +241,7 @@ export const useStore = create((set, get) => ({
     set(s => {
       const already = s.selectedWallIds.includes(wallId)
       return {
-        selectedWallIds: already
-          ? s.selectedWallIds.filter(id => id !== wallId)
-          : [...s.selectedWallIds, wallId],
+        selectedWallIds: already ? s.selectedWallIds.filter(id => id !== wallId) : [...s.selectedWallIds, wallId],
         selectedWallId:  null,
         selectedStampId: null,
         draftOpening:    null,
@@ -270,8 +257,10 @@ export const useStore = create((set, get) => ({
       return { walls }
     })
   },
+
   setDrawStart(nodeId) { set({ drawStartId: nodeId }) },
 
+  // x, y are world inches
   splitWall(wallId, x, y) {
     const { walls, nodes } = get()
     const wall = walls[wallId]
@@ -279,13 +268,12 @@ export const useStore = create((set, get) => ({
     const a = nodes[wall.n1], b = nodes[wall.n2]
     if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) return null
     if (
-      (Math.abs(x - a.x) < SNAP && Math.abs(y - a.y) < SNAP) ||
-      (Math.abs(x - b.x) < SNAP && Math.abs(y - b.y) < SNAP)
+      (Math.abs(x - a.x) < SNAP_IN && Math.abs(y - a.y) < SNAP_IN) ||
+      (Math.abs(x - b.x) < SNAP_IN && Math.abs(y - b.y) < SNAP_IN)
     ) return null
     get()._save()
     const newNodeId = uid()
-    const w1Id = uid()
-    const w2Id = uid()
+    const w1Id = uid(), w2Id = uid()
     set(s => {
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
@@ -311,7 +299,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // ── Openings ──────────────────────────────────────────────────────────
+  // ── Openings — offset/width/height stored in inches ───────────────────
 
   addOpening(wallId, { offset, width, height, type = 'door', orient = 0 }) {
     get()._save()
@@ -345,9 +333,10 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  setWallHeight(wallId, height) {
+  // heightIn is in inches
+  setWallHeight(wallId, heightIn) {
     get()._save()
-    const h = Math.max(1, Number(height) || WALL_HEIGHT)
+    const h = Math.max(1, Number(heightIn) || DEFAULT_WALL_HEIGHT_IN)
     set(s => {
       const wall = s.walls[wallId]
       if (!wall) return {}
@@ -355,9 +344,10 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  setWallThickness(wallId, thickness) {
+  // thicknessIn is in inches
+  setWallThickness(wallId, thicknessIn) {
     get()._save()
-    const t = Math.max(0.1, Number(thickness) || WALL_THICK)
+    const t = Math.max(0.5, Number(thicknessIn) || DEFAULT_WALL_THICK_IN)
     set(s => {
       const wall = s.walls[wallId]
       if (!wall) return {}
@@ -383,12 +373,13 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // ── Stamps ────────────────────────────────────────────────────────────
+  // ── Stamps — x/y/w/h stored in inches ────────────────────────────────
 
   addStamp(type, x, y) {
     get()._save()
     const id = uid()
-    const defaults = type === 'stairs' ? { w: 4 * GRID, h: 8 * GRID } : { w: 5 * GRID, h: 5 * GRID }
+    // Defaults in inches: stairs 4ft×8ft, lift 5ft×5ft
+    const defaults = type === 'stairs' ? { w: 48, h: 96 } : { w: 60, h: 60 }
     set(s => ({
       stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults } },
     }))
@@ -411,13 +402,14 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // wFt/hFt in feet — stored as inches
   resizeStamp(stampId, wFt, hFt) {
-    const w = Math.max(GRID, wFt * GRID)
-    const h = Math.max(GRID, hFt * GRID)
+    const wIn = Math.max(GRID_IN, wFt * GRID_IN)
+    const hIn = Math.max(GRID_IN, hFt * GRID_IN)
     set(s => {
       const stamp = s.stamps[stampId]
       if (!stamp) return {}
-      return { stamps: { ...s.stamps, [stampId]: { ...stamp, w, h } } }
+      return { stamps: { ...s.stamps, [stampId]: { ...stamp, w: wIn, h: hIn } } }
     })
   },
 
@@ -426,7 +418,7 @@ export const useStore = create((set, get) => ({
   // ── Rooms ─────────────────────────────────────────────────────────────
 
   saveRoom(name) {
-    const { pendingWallIds } = get()
+    const { pendingWallIds, walls, nodes } = get()
     if (!pendingWallIds.length) return
     get()._save()
     const id = uid()
@@ -468,56 +460,39 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // ── BOQ helpers ───────────────────────────────────────────────────────
+  // ── BOQ helpers — return feet / sq ft for display ─────────────────────
 
   getRoomPolygon(roomId) {
     const { rooms, walls, nodes } = get()
     const room = rooms[roomId]
     if (!room || room.wallIds.length < 3) return null
-    const adj = {}
-    for (const wid of room.wallIds) {
-      const w = walls[wid]
-      if (!w) continue
-      if (!adj[w.n1]) adj[w.n1] = []
-      if (!adj[w.n2]) adj[w.n2] = []
-      adj[w.n1].push(w.n2)
-      adj[w.n2].push(w.n1)
-    }
-    const nodeIds = Object.keys(adj)
-    if (nodeIds.length < 3) return null
-    let best = []
-    for (const startId of nodeIds) {
-      const p = [startId]
-      let prev = null, current = startId
-      for (let i = 0; i < nodeIds.length - 1; i++) {
-        const next = (adj[current] || []).find(n => n !== prev && !p.includes(n))
-        if (!next) break
-        p.push(next); prev = current; current = next
-      }
-      if (p.length > best.length) best = p
-      if (best.length === nodeIds.length) break
-    }
-    const isClosed = best.length === nodeIds.length && (adj[best[best.length - 1]] || []).includes(best[0])
-    if (!isClosed) return null
-    return best.map(id => nodes[id]).filter(Boolean)
+    const nodeOrder = walkPolygon(room.wallIds, walls)
+    if (!nodeOrder) return null
+    return nodeOrder.map(id => nodes[id]).filter(Boolean)
   },
 
+  // Returns wall length in feet
   getWallLength(wallId) {
     const { nodes, walls } = get()
     const wall = walls[wallId]
     if (!wall) return 0
     const a = nodes[wall.n1], b = nodes[wall.n2]
     if (!a || !b) return 0
-    return Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID * 100) / 100
+    const lengthIn = Math.hypot(b.x - a.x, b.y - a.y)
+    return Math.round(lengthIn / GRID_IN * 100) / 100
   },
 
+  // Returns net wall area in sq ft (gross - openings)
   getWallArea(wallId) {
     const { walls } = get()
     const wall = walls[wallId]
     if (!wall || wall.isVirtual) return 0
-    const length = get().getWallLength(wallId)
-    const grossArea = length * (wall.height ?? WALL_HEIGHT)
-    const openingArea = (wall.openings || []).reduce((sum, o) => sum + o.width * o.height, 0)
+    const lengthFt  = get().getWallLength(wallId)
+    const heightFt  = (wall.height  ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN
+    const grossArea = lengthFt * heightFt
+    const openingArea = (wall.openings || []).reduce(
+      (sum, o) => sum + (o.width / GRID_IN) * (o.height / GRID_IN), 0
+    )
     return Math.round(Math.max(0, grossArea - openingArea) * 100) / 100
   },
 
@@ -530,68 +505,24 @@ export const useStore = create((set, get) => ({
     const { rooms, walls } = get()
     const room = rooms[roomId]
     if (!room || room.wallIds.length < 3) return false
-    const adj = {}
-    for (const wid of room.wallIds) {
-      const w = walls[wid]
-      if (!w) continue
-      if (!adj[w.n1]) adj[w.n1] = []
-      if (!adj[w.n2]) adj[w.n2] = []
-      adj[w.n1].push(w.n2)
-      adj[w.n2].push(w.n1)
-    }
-    const nodeIds = Object.keys(adj)
-    if (nodeIds.length < 3) return false
-    let best = []
-    for (const startId of nodeIds) {
-      const p = [startId]
-      let prev = null, current = startId
-      for (let i = 0; i < nodeIds.length - 1; i++) {
-        const next = (adj[current] || []).find(n => n !== prev && !p.includes(n))
-        if (!next) break
-        p.push(next); prev = current; current = next
-      }
-      if (p.length > best.length) best = p
-      if (best.length === nodeIds.length) break
-    }
-    return best.length === nodeIds.length && (adj[best[best.length - 1]] || []).includes(best[0])
+    return walkPolygon(room.wallIds, walls) !== null
   },
 
+  // Returns room floor area in sq ft
   getRoomArea(roomId) {
     const { rooms, walls, nodes } = get()
     const room = rooms[roomId]
     if (!room || room.wallIds.length < 2) return 0
-    const adj = {}
-    for (const wid of room.wallIds) {
-      const w = walls[wid]
-      if (!w) continue
-      if (!adj[w.n1]) adj[w.n1] = []
-      if (!adj[w.n2]) adj[w.n2] = []
-      adj[w.n1].push(w.n2)
-      adj[w.n2].push(w.n1)
-    }
-    const nodeIds = Object.keys(adj)
-    if (nodeIds.length < 3) return 0
-    let best = []
-    for (const startId of nodeIds) {
-      const p = [startId]
-      let prev = null, current = startId
-      for (let i = 0; i < nodeIds.length - 1; i++) {
-        const next = (adj[current] || []).find(n => n !== prev && !p.includes(n))
-        if (!next) break
-        p.push(next); prev = current; current = next
-      }
-      if (p.length > best.length) best = p
-      if (best.length === nodeIds.length) break
-    }
-    if (best.length < 3) return 0
-    const pts = best.map(id => nodes[id]).filter(Boolean)
+    const nodeOrder = walkPolygon(room.wallIds, walls)
+    if (!nodeOrder || nodeOrder.length < 3) return 0
+    const pts = nodeOrder.map(id => nodes[id]).filter(Boolean)
     let area = 0
     for (let i = 0; i < pts.length; i++) {
       const j = (i + 1) % pts.length
-      area += pts[i].x * pts[j].y
-      area -= pts[j].x * pts[i].y
+      area += pts[i].x * pts[j].y - pts[j].x * pts[i].y
     }
-    return Math.round(Math.abs(area) / 2 / (GRID * GRID) * 100) / 100
+    // area is in in² — divide by GRID_IN² (144) to get sq ft
+    return Math.round(Math.abs(area) / 2 / (GRID_IN * GRID_IN) * 100) / 100
   },
 
   getTotalFloorArea() {
@@ -604,13 +535,14 @@ export const useStore = create((set, get) => ({
     ) / 100
   },
 
+  // Returns total wall length in feet (excluding virtual walls)
   getAllWallsLength() {
     const { nodes, walls } = get()
     return Object.values(walls).reduce((total, wall) => {
       if (wall.isVirtual) return total
       const a = nodes[wall.n1], b = nodes[wall.n2]
       if (!a || !b) return total
-      return total + Math.hypot(b.x - a.x, b.y - a.y) / GRID
+      return total + Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN
     }, 0)
   },
 }))

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
+import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -50,7 +51,7 @@ export default function OpeningPanel() {
   const wall = walls[selectedWallId]
   if (!wall) return null
 
-  const wallHeight = wall.height ?? 10
+  const wallHeight = Math.round((wall.height ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN * 100) / 100
   const wallLen    = getWallLength(selectedWallId)
   const openings   = wall.openings || []
 
@@ -60,7 +61,7 @@ export default function OpeningPanel() {
 
   const errHeight  = h > wallHeight ? `Opening height (${h} ft) exceeds wall height (${wallHeight} ft)` : null
   const errFit     = (o + w) > wallLen ? `Doesn't fit — ${o} + ${w} = ${o + w} ft, wall is ${wallLen} ft` : null
-  const errOverlap = openings.some(ex => !(o + w <= ex.offset || o >= ex.offset + ex.width))
+  const errOverlap = openings.some(ex => !(o + w <= ex.offset / GRID_IN || o >= ex.offset / GRID_IN + ex.width / GRID_IN))
     ? 'Overlaps an existing opening' : null
   const errNeg     = o < 0 ? 'Offset cannot be negative' : null
   const error      = errNeg || errFit || errHeight || errOverlap
@@ -79,7 +80,7 @@ export default function OpeningPanel() {
 
   function handleAdd() {
     if (error) return
-    addOpening(selectedWallId, { offset: o, width: w, height: h, type, orient: type === 'door' ? orient : 0 })
+    addOpening(selectedWallId, { offset: o * GRID_IN, width: w * GRID_IN, height: h * GRID_IN, type, orient: type === 'door' ? orient : 0 })
   }
 
   const btnBase = { padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, border: '1px solid #ccc' }
@@ -105,7 +106,7 @@ export default function OpeningPanel() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <label style={{ color: '#555', flex: 1 }}>Height</label>
         <input type="number" value={wallHeight} min={1}
-          onChange={e => setWallHeight(selectedWallId, e.target.value)}
+          onChange={e => setWallHeight(selectedWallId, Number(e.target.value) * GRID_IN)}
           onKeyDown={e => e.stopPropagation()}
           style={{ width: 52, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
         />
@@ -115,8 +116,8 @@ export default function OpeningPanel() {
       {/* Wall thickness */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <label style={{ color: '#555', flex: 1 }}>Thickness</label>
-        <input type="number" value={wall.thickness ?? 0.5} min={0.1} step={0.1}
-          onChange={e => setWallThickness(selectedWallId, e.target.value)}
+        <input type="number" value={Math.round((wall.thickness ?? DEFAULT_WALL_THICK_IN) / GRID_IN * 100) / 100} min={0.1} step={0.1}
+          onChange={e => setWallThickness(selectedWallId, Number(e.target.value) * GRID_IN)}
           onKeyDown={e => e.stopPropagation()}
           style={{ width: 52, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
         />
@@ -233,7 +234,7 @@ export default function OpeningPanel() {
             <div>
               <span style={{ color: '#555', fontSize: 12 }}>
                 {op.type === 'window' ? '▭ Window' : '▮ Door'}{' '}
-                {op.width}×{op.height} ft @ {op.offset} ft
+                {Math.round(op.width/GRID_IN*10)/10}×{Math.round(op.height/GRID_IN*10)/10} ft @ {Math.round(op.offset/GRID_IN*10)/10} ft
               </span>
               {/* Flip swing button for existing doors */}
               {op.type === 'door' && (
