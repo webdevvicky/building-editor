@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
+import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
 
 function Row({ label, value, sub }) {
   return (
@@ -32,9 +33,11 @@ export default function RoomDetailPanel() {
   const unit           = useStore(s => s.unit)
   const getRoomArea    = useStore(s => s.getRoomArea)
   const isRoomValid    = useStore(s => s.isRoomValid)
-  const renameRoom     = useStore(s => s.renameRoom)
-  const deleteRoom     = useStore(s => s.deleteRoom)
-  const selectRoom     = useStore(s => s.selectRoom)
+  const renameRoom      = useStore(s => s.renameRoom)
+  const deleteRoom      = useStore(s => s.deleteRoom)
+  const selectRoom      = useStore(s => s.selectRoom)
+  const setRoomType     = useStore(s => s.setRoomType)
+  const setRoomFinishes = useStore(s => s.setRoomFinishes)
 
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal]         = useState('')
@@ -137,6 +140,51 @@ export default function RoomDetailPanel() {
           Walls don't form a closed polygon. Add missing walls or virtual walls to complete the boundary.
         </div>
       )}
+
+      {/* Room type selector */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
+          letterSpacing: 0.6, marginBottom: 5 }}>Room Type</div>
+        <select value={room.type || 'OTHER'}
+          onChange={e => setRoomType(room.id, e.target.value)}
+          style={{ width: '100%', padding: '5px 8px', border: '1px solid #ccc',
+            borderRadius: 4, fontSize: 13, color: '#333', background: '#fff' }}>
+          {ROOM_TYPES.map(t => (
+            <option key={t} value={t}>{ROOM_TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Finish flags */}
+      {(() => {
+        const finishes = room.finishes ? { ...ALL_FINISHES, ...room.finishes } : { ...ALL_FINISHES }
+        const FLAGS = [
+          ['flooring',       'Flooring'],
+          ['wallPlaster',    'Wall plaster'],
+          ['ceilingPlaster', 'Ceiling'],
+          ['paint',          'Paint'],
+          ['waterproofing',  'Waterproof'],
+          ['roofing',        'Roofing'],
+        ]
+        return (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
+              letterSpacing: 0.6, marginBottom: 6 }}>Finishes</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 8px' }}>
+              {FLAGS.map(([key, label]) => (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5,
+                  fontSize: 12, color: '#444', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={finishes[key]}
+                    onChange={e => setRoomFinishes(room.id, { [key]: e.target.checked })}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {valid && <>
         {/* Measurements */}

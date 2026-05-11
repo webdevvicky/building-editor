@@ -3,6 +3,7 @@ import {
   SNAP_IN, GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN,
   findNearbyNode, isOnSegment, collinearOverlap, pointInPolygon, normalizePolygonWinding,
 } from './geometry'
+import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 
 let nextId = 1
 const uid = () => String(nextId++)
@@ -417,15 +418,55 @@ export const useStore = create((set, get) => ({
 
   // ── Rooms ─────────────────────────────────────────────────────────────
 
-  saveRoom(name) {
-    const { pendingWallIds, walls, nodes } = get()
+  saveRoom(name, type = 'OTHER') {
+    const { pendingWallIds } = get()
     if (!pendingWallIds.length) return
     get()._save()
-    const id = uid()
+    const id       = uid()
+    const safeType = ROOM_PRESETS[type] ? type : 'OTHER'
     set(s => ({
-      rooms: { ...s.rooms, [id]: { id, name, wallIds: [...s.pendingWallIds] } },
+      rooms: {
+        ...s.rooms,
+        [id]: {
+          id,
+          name,
+          wallIds:    [...s.pendingWallIds],
+          type:       safeType,
+          customType: null,
+          finishes:   getPresetFinishes(safeType),
+        },
+      },
       pendingWallIds: [],
     }))
+  },
+
+  setRoomType(roomId, type) {
+    get()._save()
+    const safeType = ROOM_PRESETS[type] ? type : 'OTHER'
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return {
+        rooms: {
+          ...s.rooms,
+          [roomId]: { ...room, type: safeType, finishes: getPresetFinishes(safeType) },
+        },
+      }
+    })
+  },
+
+  setRoomFinishes(roomId, partialFinishes) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return {
+        rooms: {
+          ...s.rooms,
+          [roomId]: { ...room, finishes: { ...room.finishes, ...partialFinishes } },
+        },
+      }
+    })
   },
 
   renameRoom(roomId, name) {
@@ -450,10 +491,24 @@ export const useStore = create((set, get) => ({
   },
 
   loadProject(data) {
+    // Migrate rooms: add type/finishes if missing, validate type against known presets
+    const migratedRooms = {}
+    for (const [id, room] of Object.entries(data.rooms || {})) {
+      const safeType = ROOM_PRESETS[room.type] ? room.type : 'OTHER'
+      migratedRooms[id] = {
+        type:       safeType,
+        customType: null,
+        ...room,
+        type:       safeType,    // re-assert after spread in case room.type was invalid
+        finishes:   room.finishes
+          ? { ...ALL_FINISHES, ...room.finishes }   // fill any missing keys from newer schema
+          : { ...ALL_FINISHES },                    // old room — all true (preserves BOQ behavior)
+      }
+    }
     set({
       nodes:  data.nodes  || {},
       walls:  data.walls  || {},
-      rooms:  data.rooms  || {},
+      rooms:  migratedRooms,
       stamps: data.stamps || {},
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
@@ -497,6 +552,7 @@ export const useStore = create((set, get) => ({
   },
 
   getTotalWallArea() {
+    // TODO Phase 1b: respect room.finishes flags — currently treats all rooms as fully finished
     const { walls } = get()
     return Math.round(Object.keys(walls).reduce((t, id) => t + get().getWallArea(id), 0) * 100) / 100
   },
@@ -526,6 +582,7 @@ export const useStore = create((set, get) => ({
   },
 
   getTotalFloorArea() {
+    // TODO Phase 1b: respect room.finishes flags — currently treats all rooms as fully finished
     const { rooms } = get()
     return Math.round(
       Object.keys(rooms)

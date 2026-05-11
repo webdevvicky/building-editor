@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
+import { ROOM_TYPES, ROOM_TYPE_LABELS } from '../roomPresets'
 
 export default function RoomPanel() {
   const activeTool     = useStore(s => s.activeTool)
@@ -12,7 +13,8 @@ export default function RoomPanel() {
   const saveRoom       = useStore(s => s.saveRoom)
   const deleteRoom     = useStore(s => s.deleteRoom)
 
-  const [name, setName] = useState('')
+  const [name,        setName]        = useState('')
+  const [pendingType, setPendingType] = useState('OTHER')
 
   if (activeTool !== 'room') return null
 
@@ -30,8 +32,9 @@ export default function RoomPanel() {
   function handleSave() {
     const trimmed = name.trim()
     if (!trimmed || !isClosed) return
-    saveRoom(trimmed)
+    saveRoom(trimmed, pendingType)
     setName('')
+    setPendingType('OTHER')
   }
 
   function fmtArea(sqFt) {
@@ -98,7 +101,14 @@ export default function RoomPanel() {
         </div>
       )}
 
-      {/* Name + save */}
+      {/* Type + name + save */}
+      <select value={pendingType} onChange={e => setPendingType(e.target.value)}
+        style={{ padding: '5px 8px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13,
+          color: '#333', background: '#fff' }}>
+        {ROOM_TYPES.map(t => (
+          <option key={t} value={t}>{ROOM_TYPE_LABELS[t]}</option>
+        ))}
+      </select>
       <input type="text" placeholder="Room name" value={name}
         onChange={e => setName(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && handleSave()}
