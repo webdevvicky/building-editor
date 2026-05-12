@@ -2,7 +2,7 @@
 
 ## Current Phase Status
 
-Phase 1a–1c-3 complete and on `main`. Phase 1d not started.
+Phase 1a–1c-4 complete and on `main`. Phase 1d not started.
 
 ---
 
@@ -96,6 +96,27 @@ Phase 1a–1c-3 complete and on `main`. Phase 1d not started.
 - Fix: moved all four context panels from `right: 16` → `left: 16`.
 - Layout is now: left = editing context (mutually exclusive), right = BOQ, canvas in middle.
 - Canvas working area: ~694px at 1366px wide, ~1248px at 1920px wide.
+
+### Phase 1c-4: Formula transparency for BOQ
+
+**New file `src/formulas.js`:**
+- 17 exported pure functions: `explainWallArea`, `explainFlooring`, `explainPlasterWalls`, `explainPlasterCeiling`, `explainPaintWalls`, `explainPaintCeiling`, `explainWaterproofing`, `explainRoofing`, `explainUnits`, `explainCement`, `explainSand`, `explainAdhesive`, `explainCivilExcavation`, `explainCivilBrickwork`, `explainCivilRCC`, `explainCivilPlaster`, `explainCivilWaterproofing`
+- Each takes `state = { walls, nodes, rooms, stamps, getWallArea, getValidRoomIds, getRoomArea, getRoomWallArea }` plus optional `matKey` or `stampType`
+- Returns `{ title, steps: [{ label, value, bold? }], note? }` — consumed by FormulaPopover
+- Internal helpers: `wallLengthFt`, `wallOpeningAreaFt2`, `matVolumes` (unrounded intermediates to match store), `roomAreaSteps`, `civilStamps`
+- Intermediate computations are NOT rounded before `Math.ceil`/`Math.round` final step — avoids ±1 discrepancy vs store values
+- Notes document hardcoded constants (mortar ratio, 5% wastage) and deferred behaviors (plaster walls ungated, waterproofing approximation)
+
+**BOQPanel additions:**
+- `getFormulaData(id, state)` dispatcher — module-level, maps popover IDs to formula functions
+- `InfoIcon` component — ⓘ button with `data-info-btn=""` attribute (prevents close-on-mousedown race)
+- `FormulaPopover` component — `position: fixed` (escapes scroll container), closes on outside click or Escape
+- `infoId`/`openId`/`onInfoClick` props added to `Row`, `PricedRow`, `PricedSubRow`
+- ⓘ icon placed in label cell (col 1) — avoids overflow in 68px qty column
+- Civil popover IDs: `sump_{rateKey}` / `septic_{rateKey}` (not the shared rate key, which can't be unique per stamp type)
+- matKey parsing for popover IDs: strip `mat_`, `lastIndexOf('_')` splits matKey from suffix (handles multi-underscore keys)
+- Popover closes on BOQPanel scroll (`onScroll` handler on outer div)
+- 5 new store subscriptions: `nodes`, `getWallArea`, `getValidRoomIds`, `getRoomArea`, `getRoomWallArea`
 
 ### Phase 1c-3: Per-wall material types with bonding-aware BOQ
 
