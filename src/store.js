@@ -380,8 +380,15 @@ export const useStore = create((set, get) => ({
   addStamp(type, x, y) {
     get()._save()
     const id = uid()
-    // Defaults in inches: stairs 4ft×8ft, lift 5ft×5ft
-    const defaults = type === 'stairs' ? { w: 48, h: 96 } : { w: 60, h: 60 }
+    // w, h = footprint dimensions (plan view, inches)
+    // depth = vertical depth (civil stamps only — undefined for stairs/lift)
+    const defaults = {
+      stairs:        { w: 48, h: 96 },
+      lift:          { w: 60, h: 60 },
+      sump:          { w: 72, h: 60, depth: 72,  name: 'Sump' },
+      overhead_tank: { w: 60, h: 60, depth: 48,  name: 'OHT' },
+      septic_tank:   { w: 96, h: 72, depth: 60,  name: 'Septic Tank' },
+    }[type] || { w: 48, h: 48 }
     set(s => ({
       stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults } },
     }))
@@ -412,6 +419,16 @@ export const useStore = create((set, get) => ({
       const stamp = s.stamps[stampId]
       if (!stamp) return {}
       return { stamps: { ...s.stamps, [stampId]: { ...stamp, w: wIn, h: hIn } } }
+    })
+  },
+
+  // Generic partial update for civil stamps — no undo history by design,
+  // matches the resizeStamp pattern used for stairs/lift
+  updateStamp(stampId, fields) {
+    set(s => {
+      const stamp = s.stamps[stampId]
+      if (!stamp) return {}
+      return { stamps: { ...s.stamps, [stampId]: { ...stamp, ...fields } } }
     })
   },
 
@@ -521,8 +538,8 @@ export const useStore = create((set, get) => ({
         ...room,
         type:       safeType,    // re-assert after spread in case room.type was invalid
         finishes:   room.finishes
-          ? { ...ALL_FINISHES, ...room.finishes }   // fill any missing keys from newer schema
-          : { ...ALL_FINISHES },                    // old room — all true (preserves BOQ behavior)
+          ? { ...ALL_FINISHES, ...room.finishes }   // fill any missing flag keys
+          : getPresetFinishes(safeType),             // v1/v2 rooms: use type preset (OTHER=ALL_FINISHES)
       }
     }
     if (import.meta.env.DEV) {
@@ -559,11 +576,25 @@ export const useStore = create((set, get) => ({
       }
     }
 
+    // ── Migrate stamps (v1/v2/v3 → v4): inject depth/name defaults for civil types ──
+    const CIVIL_STAMP_DEFAULTS = {
+      sump:          { depth: 72,  name: 'Sump' },
+      overhead_tank: { depth: 48,  name: 'OHT' },
+      septic_tank:   { depth: 60,  name: 'Septic Tank' },
+    }
+    const migratedStamps = {}
+    for (const [id, stamp] of Object.entries(data.stamps || {})) {
+      const civilDefaults = CIVIL_STAMP_DEFAULTS[stamp.type]
+      migratedStamps[id] = civilDefaults
+        ? { ...civilDefaults, ...stamp }   // defaults first so saved values win
+        : { ...stamp }
+    }
+
     set({
       nodes:  data.nodes  || {},
       walls:  data.walls  || {},
       rooms:  migratedRooms,
-      stamps: data.stamps || {},
+      stamps: migratedStamps,
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
     })
@@ -605,8 +636,21 @@ export const useStore = create((set, get) => ({
     return Math.round(Math.max(0, grossArea - openingArea) * 100) / 100
   },
 
+  // Sum of net wall area for all walls in a room (virtual walls return 0 from getWallArea)
+  getRoomWallArea(roomId) {
+    const { rooms } = get()
+    const room = rooms[roomId]
+    if (!room) return 0
+    return Math.round(room.wallIds.reduce((t, wid) => t + get().getWallArea(wid), 0) * 100) / 100
+  },
+
+  // Ceiling + all wall faces in sq ft — basis for per-room paint area
+  getRoomPaintArea(roomId) {
+    return Math.round((get().getRoomArea(roomId) + get().getRoomWallArea(roomId)) * 100) / 100
+  },
+
   getTotalWallArea() {
-    // TODO Phase 1b: respect room.finishes flags — currently treats all rooms as fully finished
+    // Wall plaster and bricks are global wall-map aggregates by design — not gated by room.finishes.
     // Iterates the walls map directly — each wallId is unique, so shared walls are counted once.
     // Do NOT change to iterate room.wallIds across rooms (that path double-counts shared walls).
     const { walls } = get()
@@ -646,6 +690,37 @@ export const useStore = create((set, get) => ({
     return get().getOverlappingRoomName(roomId) !== null
   },
 
+  // Returns ids of structurally valid, non-overlapping rooms.
+  // All finish-gated totals and getTotalFloorArea filter THIS set — never raw Object.keys(rooms).
+  getValidRoomIds() {
+    const { rooms } = get()
+    const structuralIds = Object.keys(rooms).filter(id => get().isRoomStructurallyValid(id))
+    const polys = structuralIds.map(id => ({ id, poly: get().getRoomPolygon(id) })).filter(r => r.poly)
+    const overlapExcluded = new Set()
+    for (let i = 0; i < polys.length; i++) {
+      for (let j = i + 1; j < polys.length; j++) {
+        if (doRoomsOverlap(polys[i].poly, polys[j].poly)) {
+          if (import.meta.env.DEV)
+            console.warn(`[topology] Rooms "${rooms[polys[i].id].name}" and "${rooms[polys[j].id].name}" overlap — both excluded.`)
+          overlapExcluded.add(polys[i].id)
+          overlapExcluded.add(polys[j].id)
+        }
+      }
+    }
+    return polys.filter(r => !overlapExcluded.has(r.id)).map(r => r.id)
+  },
+
+  // Generic: sum getRoomArea over valid rooms where predicate(room) is true.
+  // Used by all finish-gated total selectors — avoids duplicating the filter+reduce pattern.
+  sumRoomAreas(predicate) {
+    const { rooms } = get()
+    return Math.round(
+      get().getValidRoomIds()
+        .filter(id => predicate(rooms[id]))
+        .reduce((t, id) => t + get().getRoomArea(id), 0)
+    * 100) / 100
+  },
+
   // Returns room floor area in sq ft
   getRoomArea(roomId) {
     const { rooms, walls, nodes } = get()
@@ -664,33 +739,24 @@ export const useStore = create((set, get) => ({
   },
 
   getTotalFloorArea() {
-    // TODO Phase 1b: respect room.finishes flags — currently treats all rooms as fully finished
-    //
-    // Filters by isRoomStructurallyValid (not isRoomValid) so the pairwise overlap loop
-    // sees overlapping rooms — required for the undo/redo edge case where overlapping rooms
-    // can be restored without going through saveRoom's save-time prevention.
-    const { rooms } = get()
-    const structuralIds = Object.keys(rooms).filter(id => get().isRoomStructurallyValid(id))
-    const polys = structuralIds.map(id => ({ id, poly: get().getRoomPolygon(id) })).filter(r => r.poly)
-
-    const overlapExcluded = new Set()
-    for (let i = 0; i < polys.length; i++) {
-      for (let j = i + 1; j < polys.length; j++) {
-        if (doRoomsOverlap(polys[i].poly, polys[j].poly)) {
-          if (import.meta.env.DEV)
-            console.warn(`[topology] Rooms "${rooms[polys[i].id].name}" and "${rooms[polys[j].id].name}" overlap — both excluded from floor area total.`)
-          overlapExcluded.add(polys[i].id)
-          overlapExcluded.add(polys[j].id)
-        }
-      }
-    }
-
     return Math.round(
-      polys
-        .filter(r => !overlapExcluded.has(r.id))
-        .reduce((t, r) => t + get().getRoomArea(r.id), 0)
-      * 100
-    ) / 100
+      get().getValidRoomIds().reduce((t, id) => t + get().getRoomArea(id), 0)
+    * 100) / 100
+  },
+
+  getTotalFlooringArea()       { return get().sumRoomAreas(r => r?.finishes?.flooring) },
+  getTotalCeilingPlasterArea() { return get().sumRoomAreas(r => r?.finishes?.ceilingPlaster) },
+  getTotalWaterproofingArea()  { return get().sumRoomAreas(r => r?.finishes?.waterproofing) },
+  getTotalRoofingArea()        { return get().sumRoomAreas(r => r?.finishes?.roofing) },
+
+  getTotalPaintArea() {
+    const { rooms } = get()
+    // TODO Phase 1c: split Paint into walls/ceiling for labor rate asymmetry
+    return Math.round(
+      get().getValidRoomIds()
+        .filter(id => rooms[id]?.finishes?.paint)
+        .reduce((t, id) => t + get().getRoomPaintArea(id), 0)
+    * 100) / 100
   },
 
   // Returns total wall length in feet (excluding virtual walls)
@@ -702,5 +768,18 @@ export const useStore = create((set, get) => ({
       if (!a || !b) return total
       return total + Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN
     }, 0)
+  },
+
+  // Excavation volume in cubic feet for sump + septic_tank stamps
+  getTotalExcavationVolumeFt3() {
+    return Math.round(
+      Object.values(get().stamps)
+        .filter(s => (s.type === 'sump' || s.type === 'septic_tank') && s.depth)
+        .reduce((t, s) => t + (s.w * s.h * s.depth) / 1728, 0)
+    * 100) / 100
+  },
+
+  getStampsByType(type) {
+    return Object.values(get().stamps).filter(s => s.type === type)
   },
 }))

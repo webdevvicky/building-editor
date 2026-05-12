@@ -6,8 +6,11 @@ const TOOLS = [
   { id: 'select', label: '↖ Select' },
   { id: 'split',  label: '✂ Split' },
   { id: 'room',   label: '⬡ Room' },
-  { id: 'stairs', label: '⬜ Stairs' },
-  { id: 'lift',   label: '⬛ Lift' },
+  { id: 'stairs',        label: '⬜ Stairs' },
+  { id: 'lift',          label: '⬛ Lift' },
+  { id: 'sump',          label: '⬜ Sump' },
+  { id: 'overhead_tank', label: '⬜ OHT' },
+  { id: 'septic_tank',   label: '⬜ Septic' },
 ]
 
 const btn = (active, color) => ({
@@ -56,7 +59,7 @@ export default function Toolbar() {
   const fileInputRef = useRef(null)
 
   function handleSave() {
-    const data = JSON.stringify({ version: 3, unit: 'inch', nodes, walls, rooms, stamps }, null, 2)
+    const data = JSON.stringify({ version: 4, unit: 'inch', nodes, walls, rooms, stamps }, null, 2)
     const blob = new Blob([data], { type: 'application/json' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')

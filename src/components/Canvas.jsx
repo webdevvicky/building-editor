@@ -76,13 +76,18 @@ function fmtLen(ft, unit) {
 const ROOM_COLORS = ['#3498db','#e74c3c','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#16a085']
 
 const TOOL_CURSOR = {
-  draw:   'crosshair',
-  split:  'crosshair',
-  select: 'default',
-  room:   'default',
-  stairs: 'crosshair',
-  lift:   'crosshair',
+  draw:          'crosshair',
+  split:         'crosshair',
+  select:        'default',
+  room:          'default',
+  stairs:        'crosshair',
+  lift:          'crosshair',
+  sump:          'crosshair',
+  overhead_tank: 'crosshair',
+  septic_tank:   'crosshair',
 }
+
+const STAMP_TOOLS = new Set(['stairs', 'lift', 'sump', 'overhead_tank', 'septic_tank'])
 
 export default function Canvas() {
   const nodes          = useStore(s => s.nodes)
@@ -251,7 +256,7 @@ export default function Canvas() {
   function handleSVGClick(e) {
     if (isPanningRef.current || spaceDown) return
 
-    if (activeTool === 'stairs' || activeTool === 'lift') {
+    if (STAMP_TOOLS.has(activeTool)) {
       const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
       addStamp(activeTool, x, y)
       setTool('select')
@@ -344,11 +349,17 @@ export default function Canvas() {
     </div>
 
     {/* Stamp tool hint */}
-    {(activeTool === 'stairs' || activeTool === 'lift') && (
+    {STAMP_TOOLS.has(activeTool) && (
       <div style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
         background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: '6px 14px',
         zIndex: 20, fontSize: 12, color: '#555' }}>
-        Click to place {activeTool === 'stairs' ? 'staircase' : 'lift'} — switch to Select to move/delete
+        Click to place {
+          activeTool === 'stairs'        ? 'staircase'    :
+          activeTool === 'lift'          ? 'lift'          :
+          activeTool === 'sump'          ? 'sump'          :
+          activeTool === 'overhead_tank' ? 'overhead tank' :
+                                           'septic tank'
+        } — switch to Select to move/delete
       </div>
     )}
 
@@ -444,7 +455,7 @@ export default function Canvas() {
                     STAIRS
                   </text>
                 </>
-              ) : (
+              ) : stamp.type === 'lift' ? (
                 <>
                   <rect x={rx} y={ry} width={rw} height={rh}
                     fill="#e8f0f8" stroke={color} strokeWidth={isSelected ? 2 : 1.5}/>
@@ -456,6 +467,46 @@ export default function Canvas() {
                     fontSize={10} fontWeight="600" fill={color}
                     style={{ pointerEvents: 'none', userSelect: 'none' }}>
                     LIFT
+                  </text>
+                </>
+              ) : stamp.type === 'sump' ? (
+                <>
+                  <rect x={rx} y={ry} width={rw} height={rh}
+                    fill="#dce8f5" stroke={color} strokeWidth={isSelected ? 2 : 1.5}
+                    strokeDasharray={isSelected ? undefined : '5 3'}/>
+                  <text x={cx} y={cy}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={10} fontWeight="600" fill={color}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                    {stamp.name || 'SUMP'}
+                  </text>
+                </>
+              ) : stamp.type === 'overhead_tank' ? (
+                <>
+                  <rect x={rx} y={ry} width={rw} height={rh}
+                    fill="#d4eaf7" stroke={color} strokeWidth={isSelected ? 2 : 1.5}/>
+                  <rect x={rx + rw * 0.1} y={ry + rh * 0.1} width={rw * 0.8} height={rh * 0.8}
+                    fill="none" stroke={color} strokeWidth={0.8}/>
+                  <text x={cx} y={cy}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={10} fontWeight="600" fill={color}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                    {stamp.name || 'OHT'}
+                  </text>
+                </>
+              ) : (
+                // septic_tank
+                <>
+                  <rect x={rx} y={ry} width={rw} height={rh}
+                    fill="#e8f0e0" stroke={color} strokeWidth={isSelected ? 2 : 1.5}/>
+                  <line x1={rx + rw * 0.5} y1={ry} x2={rx + rw * 0.5} y2={ry + rh}
+                    stroke={color} strokeWidth={0.8} opacity={0.5}
+                    style={{ pointerEvents: 'none' }}/>
+                  <text x={cx} y={cy}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={10} fontWeight="600" fill={color}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                    {stamp.name || 'SEPTIC'}
                   </text>
                 </>
               )}

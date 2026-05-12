@@ -173,7 +173,6 @@ export default function RoomDetailPanel() {
         const finishes = room.finishes ? { ...ALL_FINISHES, ...room.finishes } : { ...ALL_FINISHES }
         const FLAGS = [
           ['flooring',       'Flooring'],
-          ['wallPlaster',    'Wall plaster'],
           ['ceilingPlaster', 'Ceiling'],
           ['paint',          'Paint'],
           ['waterproofing',  'Waterproof'],
@@ -247,16 +246,23 @@ export default function RoomDetailPanel() {
 
         {/* Materials */}
         <Section title="Materials needed">
-          <Row label="Flooring"        value={fmtArea(flooringArea)} />
-          <Row label="Plaster (walls)" value={fmtArea(totalWallArea)} />
-          <Row label="Plaster (ceiling)" value={fmtArea(ceilingArea)} />
-          <Row label="Paint total"     value={fmtArea(paintArea)} />
-          {doors.length > 0 && (
-            <Row label="Door frames"   value={`${doors.length} unit${doors.length > 1 ? 's' : ''}`} />
-          )}
-          {windows.length > 0 && (
-            <Row label="Window frames" value={`${windows.length} unit${windows.length > 1 ? 's' : ''}`} />
-          )}
+          {(() => {
+            const fin = room.finishes || {}
+            return <>
+              <Row label="Flooring"          value={fmtArea(fin.flooring       ? flooringArea  : 0)} />
+              <Row label="Plaster (walls)"   value={fmtArea(totalWallArea)} />
+              <Row label="Plaster (ceiling)" value={fmtArea(fin.ceilingPlaster ? ceilingArea   : 0)} />
+              <Row label="Paint total"       value={fmtArea(fin.paint          ? paintArea     : 0)} />
+              <Row label="Waterproofing"     value={fmtArea(fin.waterproofing  ? floorArea     : 0)} />
+              <Row label="Roofing"           value={fmtArea(fin.roofing        ? floorArea     : 0)} />
+              {doors.length > 0 && (
+                <Row label="Door frames"   value={`${doors.length} unit${doors.length > 1 ? 's' : ''}`} />
+              )}
+              {windows.length > 0 && (
+                <Row label="Window frames" value={`${windows.length} unit${windows.length > 1 ? 's' : ''}`} />
+              )}
+            </>
+          })()}
         </Section>
 
         {/* Wall breakdown (collapsible) */}
