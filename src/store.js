@@ -9,6 +9,13 @@ import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 let nextId = 1
 const uid = () => String(nextId++)
 
+function getStampDimensionsFt(stamp) {
+  const wFt = (stamp.w || 0) / 12
+  const hFt = (stamp.h || 0) / 12
+  const dFt = (stamp.depth || 0) / 12
+  return { wFt, hFt, dFt, perimeterFt: 2 * (wFt + hFt), footprintFt2: wFt * hFt }
+}
+
 function removeOrphanNodes(nodes, walls) {
   const used = new Set()
   Object.values(walls).forEach(w => { used.add(w.n1); used.add(w.n2) })
@@ -749,14 +756,21 @@ export const useStore = create((set, get) => ({
   getTotalWaterproofingArea()  { return get().sumRoomAreas(r => r?.finishes?.waterproofing) },
   getTotalRoofingArea()        { return get().sumRoomAreas(r => r?.finishes?.roofing) },
 
-  getTotalPaintArea() {
+  getTotalPaintWallsArea() {
     const { rooms } = get()
-    // TODO Phase 1c: split Paint into walls/ceiling for labor rate asymmetry
     return Math.round(
       get().getValidRoomIds()
         .filter(id => rooms[id]?.finishes?.paint)
-        .reduce((t, id) => t + get().getRoomPaintArea(id), 0)
+        .reduce((t, id) => t + get().getRoomWallArea(id), 0)
     * 100) / 100
+  },
+
+  getTotalPaintCeilingArea() {
+    return get().sumRoomAreas(r => r?.finishes?.paint)
+  },
+
+  getTotalPaintArea() {
+    return Math.round((get().getTotalPaintWallsArea() + get().getTotalPaintCeilingArea()) * 100) / 100
   },
 
   // Returns total wall length in feet (excluding virtual walls)
@@ -777,6 +791,47 @@ export const useStore = create((set, get) => ({
         .filter(s => (s.type === 'sump' || s.type === 'septic_tank') && s.depth)
         .reduce((t, s) => t + (s.w * s.h * s.depth) / 1728, 0)
     * 100) / 100
+  },
+
+  // Returns { excavFt3, brickFt3, rccBottomFt3, rccTopFt3, plasterFt2 } summed over all sump stamps.
+  // rccBottomFt3 / rccTopFt3 are identical today (6" slab each) but split for future rate/spec divergence.
+  getSumpCivilQty() {
+    return Object.values(get().stamps)
+      .filter(s => s.type === 'sump' && s.depth)
+      .reduce((acc, s) => {
+        const { wFt, hFt, dFt, perimeterFt, footprintFt2 } = getStampDimensionsFt(s)
+        acc.excavFt3    += footprintFt2 * dFt
+        acc.brickFt3    += perimeterFt * dFt * 0.75
+        acc.rccBottomFt3 += footprintFt2 * 0.5
+        acc.rccTopFt3    += footprintFt2 * 0.5
+        // Approximation: waterproofing assumed on all internal plastered
+        // faces for underground tanks. Real systems vary (floor only,
+        // floor + wall upturn, external membrane, full tank). Revisit
+        // in Phase 1.5+ with material spec inputs.
+        acc.plasterFt2  += perimeterFt * dFt + footprintFt2
+        return acc
+      }, { excavFt3: 0, brickFt3: 0, rccBottomFt3: 0, rccTopFt3: 0, plasterFt2: 0 })
+  },
+
+  // Returns { excavFt3, brickFt3, rccBottomFt3, rccTopFt3, plasterFt2 } summed over all septic_tank stamps.
+  // Brickwork includes 1 internal partition wall spanning the shorter footprint dimension (standard 2-chamber design).
+  getSepticCivilQty() {
+    return Object.values(get().stamps)
+      .filter(s => s.type === 'septic_tank' && s.depth)
+      .reduce((acc, s) => {
+        const { wFt, hFt, dFt, perimeterFt, footprintFt2 } = getStampDimensionsFt(s)
+        const partitionFt = Math.min(wFt, hFt)
+        acc.excavFt3    += footprintFt2 * dFt
+        acc.brickFt3    += (perimeterFt + partitionFt) * dFt * 0.75
+        acc.rccBottomFt3 += footprintFt2 * 0.5
+        acc.rccTopFt3    += footprintFt2 * 0.5
+        // Approximation: waterproofing assumed on all internal plastered
+        // faces for underground tanks. Real systems vary (floor only,
+        // floor + wall upturn, external membrane, full tank). Revisit
+        // in Phase 1.5+ with material spec inputs.
+        acc.plasterFt2  += (perimeterFt + partitionFt) * dFt + footprintFt2
+        return acc
+      }, { excavFt3: 0, brickFt3: 0, rccBottomFt3: 0, rccTopFt3: 0, plasterFt2: 0 })
   },
 
   getStampsByType(type) {
