@@ -7,7 +7,7 @@ export const PX_PER_INCH          = 5 / 3   // 20px per foot — preserves origi
 export const GRID_IN               = 12      // snap grid = 1 foot
 export const SNAP_IN               = 4       // zoom-invariant snap tolerance in inches
 export const DEFAULT_WALL_HEIGHT_IN = 120    // 10 ft
-export const DEFAULT_WALL_THICK_IN  = 6      // 0.5 ft = 6 in
+export const DEFAULT_WALL_THICK_IN  = 9      // 0.75 ft = 9 in (full brick, Indian residential standard)
 
 // Snap world inches to 1-foot grid
 export function snapIn(inches) {
