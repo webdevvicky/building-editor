@@ -143,6 +143,7 @@ export default function BOQPanel() {
   const getStampsByType             = useStore(s => s.getStampsByType)
   const getSumpCivilQty             = useStore(s => s.getSumpCivilQty)
   const getSepticCivilQty           = useStore(s => s.getSepticCivilQty)
+  const getTotalBricks              = useStore(s => s.getTotalBricks)
 
   const [rates, setRates] = useState({
     bricks: '',
@@ -161,14 +162,11 @@ export default function BOQPanel() {
   })
   const setRate = (key, val) => setRates(prev => ({ ...prev, [key]: val }))
 
-  const BRICK_FACE = 0.2 * 0.1
-  const WASTAGE    = 1.05
-
-  const wallCount          = Object.values(walls).filter(w => !w.isVirtual).length
-  const totalLenFt         = Math.round(getAllWallsLength() * 100) / 100
-  const totalWallArea      = getTotalWallArea()
-  const totalFloorArea     = getTotalFloorArea()
-  const bricks             = Math.ceil(totalWallArea / BRICK_FACE * WASTAGE)
+  const wallCount     = Object.values(walls).filter(w => !w.isVirtual).length
+  const totalLenFt    = Math.round(getAllWallsLength() * 100) / 100
+  const totalWallArea = getTotalWallArea()
+  const totalFloorArea = getTotalFloorArea()
+  const bricks        = getTotalBricks()
 
   const flooringArea       = getTotalFlooringArea()
   const ceilingPlasterArea = getTotalCeilingPlasterArea()

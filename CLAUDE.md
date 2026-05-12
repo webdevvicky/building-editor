@@ -2,7 +2,7 @@
 
 ## Current Phase Status
 
-Phase 1a–1c-1 complete and on `main`. Phase 1c Part 2 not started.
+Phase 1a–1c-2 complete and on `main`. Phase 1d not started.
 
 ---
 
@@ -67,6 +67,36 @@ Phase 1a–1c-1 complete and on `main`. Phase 1c Part 2 not started.
 - Paint section: two rows — `Paint (walls)` and `Paint (ceiling)`. Combined row removed.
 - Excavation section renamed to **Civil Works** with per-type `StampGroup` sub-rows (6 lines each: excavation, brickwork, RCC bottom, RCC top, plaster, waterproofing). OHT shows as count. Total excavation row at bottom.
 
+### Phase 1c-2: Rate inputs + BOQ CSV export + layout fix
+
+**Rate inputs (ephemeral — React `useState` only, intentional):**
+- 13 priceable lines each get a `<input type="number" step="0.01">` rate field
+- Rates live in BOQPanel component state (`useState`) — reset on refresh, not persisted, not in store.
+  This is intentional scaffolding; will be replaced by ERP product-catalog dropdown in a future phase.
+- Bricks: rate is ₹/1000 bricks; cost = `(qty / 1000) × rate` (special case)
+- All other lines: cost = `qty × rate`
+- Total cost row always rendered (shows "—" when all rates empty)
+- Disclaimer: "Preview pricing — for estimation only. Final rates from ERP product catalog."
+
+**Helpers (module-level in BOQPanel.jsx — single source of truth):**
+- `getPriceableLines(rates, quantities)` → array of line objects for main section
+- `getCivilLinesForStamp(stampType, stampQty, rates)` → array of line objects for each civil stamp type
+- Both helpers are consumed by the render loop, the total cost computation, AND the CSV export — no duplication.
+- RCC bottom + top slabs merged at UI/rate layer (single `rcc` rate key) while data layer keeps them split for future spec divergence.
+
+**CSV export:**
+- "Export BOQ (CSV)" button → downloads `boq-export-YYYY-MM-DD.csv`
+- Columns: Item | Quantity | Unit | Rate (₹) | Cost (₹)
+- All 13 priceable lines exported including zero-qty rows (stable structure for procurement).
+- Vanilla `Blob + <a>` download — no library.
+
+**Layout fix:**
+- BOQ panel grew to 380px minWidth and its `bottom: 16` anchor caused it to cover StampPanel,
+  OpeningPanel, RoomPanel, BulkWallPanel (all were `top: 56, right: 16`).
+- Fix: moved all four context panels from `right: 16` → `left: 16`.
+- Layout is now: left = editing context (mutually exclusive), right = BOQ, canvas in middle.
+- Canvas working area: ~694px at 1366px wide, ~1248px at 1920px wide.
+
 ---
 
 ## Known issues / Phase 1.5 backlog
@@ -83,6 +113,10 @@ Phase 1a–1c-1 complete and on `main`. Phase 1c Part 2 not started.
 - **OHT material formulas** — deferred to Phase 1.5+ (sits on roof slab, needs structural context).
 
 - **Septic soak pit** — not modelled. Deferred.
+
+- **Brick formula unit mismatch** — `BRICK_FACE = 0.2 * 0.1` is intended as m² (200mm × 100mm modular
+  brick face) but `totalWallArea` is in ft². Division produces ~10.76× overcount. Current code lives in
+  `BOQPanel.jsx` (should move to store.js). Fix options under investigation — see Phase 1d discussion.
 
 ---
 

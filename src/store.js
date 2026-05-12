@@ -664,6 +664,22 @@ export const useStore = create((set, get) => ({
     return Math.round(Object.keys(walls).reduce((t, id) => t + get().getWallArea(id), 0) * 100) / 100
   },
 
+  // IS modular brick (200×100×100mm nominal with 10mm mortar joints): ~11.5 bricks per ft³ of
+  // brickwork volume (English bond). 5% wastage. Respects per-wall thickness (stored in inches).
+  // Uses getWallArea so door/window openings are already deducted from the volume.
+  // Phase 2+: multi-material support (red clay / fly ash / AAC blocks — different bricks/ft³).
+  getTotalBricks() {
+    const BRICKS_PER_FT3 = 11.5
+    const WASTAGE        = 1.05
+    const { walls }      = get()
+    const totalVolume = Object.values(walls).reduce((sum, w) => {
+      const areaFt2     = get().getWallArea(w.id)          // net of openings; 0 for virtual walls
+      const thicknessFt = (w.thickness ?? DEFAULT_WALL_THICK_IN) / GRID_IN
+      return sum + areaFt2 * thicknessFt
+    }, 0)
+    return Math.ceil(totalVolume * BRICKS_PER_FT3 * WASTAGE)
+  },
+
   // Pure topology: walls exist + form a closed loop. No overlap check.
   // Used as the filter inside overlap routines to avoid composing with itself.
   isRoomStructurallyValid(roomId) {
