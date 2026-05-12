@@ -1,6 +1,15 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { MATERIAL_LIBRARY, BONDING } from '../materials'
+import {
+  explainWallArea, explainFlooring,
+  explainPlasterWalls, explainPlasterCeiling,
+  explainPaintWalls, explainPaintCeiling,
+  explainWaterproofing, explainRoofing,
+  explainUnits, explainCement, explainSand, explainAdhesive,
+  explainCivilExcavation, explainCivilBrickwork, explainCivilRCC,
+  explainCivilPlaster, explainCivilWaterproofing,
+} from '../formulas'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -83,15 +92,53 @@ function getCivilLinesForStamp(stampType, stampQty, rates) {
   }))
 }
 
+// ── formula dispatcher ───────────────────────────────────────────────────────
+
+function getFormulaData(id, state) {
+  if (id === 'wallArea')        return explainWallArea(state)
+  if (id === 'flooring')        return explainFlooring(state)
+  if (id === 'plasterWalls')    return explainPlasterWalls(state)
+  if (id === 'plasterCeiling')  return explainPlasterCeiling(state)
+  if (id === 'paintWalls')      return explainPaintWalls(state)
+  if (id === 'paintCeiling')    return explainPaintCeiling(state)
+  if (id === 'waterproofing')   return explainWaterproofing(state)
+  if (id === 'roofing')         return explainRoofing(state)
+  if (id === 'sump_excavation')         return explainCivilExcavation(state, 'sump')
+  if (id === 'sump_brickwork')          return explainCivilBrickwork(state, 'sump')
+  if (id === 'sump_rcc')                return explainCivilRCC(state, 'sump')
+  if (id === 'sump_plasterInner')       return explainCivilPlaster(state, 'sump')
+  if (id === 'sump_waterproofingInner') return explainCivilWaterproofing(state, 'sump')
+  if (id === 'septic_excavation')         return explainCivilExcavation(state, 'septic_tank')
+  if (id === 'septic_brickwork')          return explainCivilBrickwork(state, 'septic_tank')
+  if (id === 'septic_rcc')                return explainCivilRCC(state, 'septic_tank')
+  if (id === 'septic_plasterInner')       return explainCivilPlaster(state, 'septic_tank')
+  if (id === 'septic_waterproofingInner') return explainCivilWaterproofing(state, 'septic_tank')
+  if (id.startsWith('mat_')) {
+    // id = 'mat_{MATERIAL_KEY}_{suffix}' — matKey may contain underscores
+    const withoutPrefix   = id.slice(4)
+    const lastUnderscore  = withoutPrefix.lastIndexOf('_')
+    const matKey = withoutPrefix.slice(0, lastUnderscore)
+    const suffix = withoutPrefix.slice(lastUnderscore + 1)
+    if (suffix === 'unit')     return explainUnits(state, matKey)
+    if (suffix === 'cement')   return explainCement(state, matKey)
+    if (suffix === 'sand')     return explainSand(state, matKey)
+    if (suffix === 'adhesive') return explainAdhesive(state, matKey)
+  }
+  return null
+}
+
 // ── display components ────────────────────────────────────────────────────────
 
 const COL = '1fr 68px 88px 70px'
 const GAP = 3
 
-function Row({ label, value }) {
+function Row({ label, value, infoId, openId, onInfoClick }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-      <span style={{ color: '#555' }}>{label}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ color: '#555' }}>{label}</span>
+        {infoId && <InfoIcon id={infoId} openId={openId} onInfoClick={onInfoClick} />}
+      </div>
       <span style={{ fontWeight: 600 }}>{value}</span>
     </div>
   )
@@ -103,10 +150,13 @@ const rateInputStyle = {
   textAlign: 'right', outline: 'none',
 }
 
-function PricedRow({ label, qtyDisplay, unitLabel, rateKey, rates, onRateChange, cost }) {
+function PricedRow({ label, qtyDisplay, unitLabel, rateKey, rates, onRateChange, cost, infoId, openId, onInfoClick }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: COL, gap: GAP, marginBottom: 6, alignItems: 'center' }}>
-      <span style={{ color: '#555', fontSize: 12 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ color: '#555', fontSize: 12 }}>{label}</span>
+        {infoId && <InfoIcon id={infoId} openId={openId} onInfoClick={onInfoClick} />}
+      </div>
       <span style={{ fontWeight: 600, textAlign: 'right', fontSize: 12 }}>{qtyDisplay}</span>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
         <input
@@ -126,10 +176,13 @@ function PricedRow({ label, qtyDisplay, unitLabel, rateKey, rates, onRateChange,
   )
 }
 
-function PricedSubRow({ label, qtyDisplay, unitLabel, rateKey, rates, onRateChange, cost }) {
+function PricedSubRow({ label, qtyDisplay, unitLabel, rateKey, rates, onRateChange, cost, infoId, openId, onInfoClick }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: COL, gap: GAP, marginBottom: 4, paddingLeft: 10, alignItems: 'center' }}>
-      <span style={{ color: '#888', fontSize: 11 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ color: '#888', fontSize: 11 }}>{label}</span>
+        {infoId && <InfoIcon id={infoId} openId={openId} onInfoClick={onInfoClick} />}
+      </div>
       <span style={{ fontWeight: 500, textAlign: 'right', fontSize: 11 }}>{qtyDisplay}</span>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
         <input
@@ -160,6 +213,66 @@ function StampGroup({ title, count, children }) {
   )
 }
 
+function InfoIcon({ id, openId, onInfoClick }) {
+  return (
+    <button
+      data-info-btn=""
+      onClick={e => onInfoClick(id, e)}
+      title="Show formula"
+      style={{
+        background: 'none', border: 'none', cursor: 'pointer',
+        fontSize: 12, color: openId === id ? '#555' : '#bbb',
+        padding: '0 1px', lineHeight: 1, flexShrink: 0,
+      }}
+    >ⓘ</button>
+  )
+}
+
+function FormulaPopover({ data, pos, popoverRef }) {
+  if (!data || !pos) return null
+  return (
+    <div ref={popoverRef} style={{
+      position: 'fixed',
+      top: pos.top,
+      left: Math.max(8, pos.left),
+      width: 240,
+      background: '#fff',
+      border: '1px solid #ddd',
+      borderRadius: 6,
+      padding: '10px 12px',
+      zIndex: 200,
+      boxShadow: '0 2px 14px rgba(0,0,0,0.16)',
+      fontSize: 11,
+      lineHeight: 1.5,
+    }}>
+      <div style={{ fontWeight: 700, color: '#333', marginBottom: 6, fontSize: 12 }}>{data.title}</div>
+      <div style={{ borderTop: '1px solid #f0f0f0', marginBottom: 6 }} />
+      {data.steps.map((step, i) => (
+        <div key={i} style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          gap: 8,
+          marginBottom: 3,
+          fontWeight: step.bold ? 700 : 400,
+          ...(step.bold ? { borderTop: '1px solid #f0f0f0', paddingTop: 4, marginTop: 4 } : {}),
+        }}>
+          <span style={{ color: step.bold ? '#333' : '#666', flex: 1 }}>{step.label}</span>
+          <span style={{ color: step.bold ? '#111' : '#444', whiteSpace: 'nowrap' }}>{step.value}</span>
+        </div>
+      ))}
+      {data.note && (
+        <div style={{
+          marginTop: 8, borderTop: '1px solid #f0f0f0', paddingTop: 6,
+          color: '#aaa', fontStyle: 'italic', fontSize: 10, lineHeight: 1.4,
+        }}>
+          {data.note}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function BOQPanel() {
@@ -181,6 +294,12 @@ export default function BOQPanel() {
   const getSumpCivilQty             = useStore(s => s.getSumpCivilQty)
   const getSepticCivilQty           = useStore(s => s.getSepticCivilQty)
   const getMaterialQuantities       = useStore(s => s.getMaterialQuantities)
+  // Extra subscriptions for formula state (stable function refs, no re-render cost)
+  const nodes           = useStore(s => s.nodes)
+  const getWallArea     = useStore(s => s.getWallArea)
+  const getValidRoomIds = useStore(s => s.getValidRoomIds)
+  const getRoomArea     = useStore(s => s.getRoomArea)
+  const getRoomWallArea = useStore(s => s.getRoomWallArea)
 
   const [rates, setRates] = useState(() => ({
     plasterWalls: '',
@@ -198,6 +317,10 @@ export default function BOQPanel() {
     ...buildMaterialRateKeys(),
   }))
   const setRate = (key, val) => setRates(prev => ({ ...prev, [key]: val }))
+
+  const [openPopoverId, setOpenPopoverId] = useState(null)
+  const [popoverPos,    setPopoverPos]    = useState(null)
+  const popoverRef = useRef(null)
 
   const wallCount     = Object.values(walls).filter(w => !w.isVirtual).length
   const totalLenFt    = Math.round(getAllWallsLength() * 100) / 100
@@ -250,6 +373,33 @@ export default function BOQPanel() {
     ? allCosts.reduce((sum, c) => sum + (c ?? 0), 0)
     : null
 
+  const formulaState = { walls, nodes, rooms, stamps, getWallArea, getValidRoomIds, getRoomArea, getRoomWallArea }
+  const formulaData  = openPopoverId ? getFormulaData(openPopoverId, formulaState) : null
+
+  function handleInfoClick(id, e) {
+    e.stopPropagation()
+    if (openPopoverId === id) { setOpenPopoverId(null); return }
+    const rect = e.currentTarget.getBoundingClientRect()
+    setPopoverPos({ top: rect.top, left: rect.left - 248 })
+    setOpenPopoverId(id)
+  }
+
+  useEffect(() => {
+    if (!openPopoverId) return
+    function onDown(e) {
+      if (e.target.closest('[data-info-btn]')) return // let click handler manage ⓘ buttons
+      if (popoverRef.current && !popoverRef.current.contains(e.target))
+        setOpenPopoverId(null)
+    }
+    function onKey(e) { if (e.key === 'Escape') setOpenPopoverId(null) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown',   onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown',   onKey)
+    }
+  }, [openPopoverId])
+
   function handleExportCSV() {
     const allLines = [...mainLines.slice(0, 1), ...materialLines, ...mainLines.slice(1), ...sumpLines, ...septicLines]
     const rows = [['Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
@@ -271,12 +421,15 @@ export default function BOQPanel() {
   }
 
   return (
-    <div style={{
-      position: 'absolute', bottom: 16, right: 16,
-      background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-      padding: '12px 16px', zIndex: 10, minWidth: 380, fontSize: 13,
-      maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-    }}>
+    <div
+      onScroll={() => openPopoverId && setOpenPopoverId(null)}
+      style={{
+        position: 'absolute', bottom: 16, right: 16,
+        background: '#fff', border: '1px solid #ccc', borderRadius: 8,
+        padding: '12px 16px', zIndex: 10, minWidth: 380, fontSize: 13,
+        maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
+      }}
+    >
       <div style={{ fontWeight: 700, marginBottom: 6, color: '#333' }}>BOQ Summary</div>
       <div style={{ fontSize: 11, fontStyle: 'italic', color: '#aaa', marginBottom: 10 }}>
         Preview pricing — for estimation only. Final rates from ERP product catalog.
@@ -285,7 +438,8 @@ export default function BOQPanel() {
       {/* Informational structure */}
       <Row label="Walls"        value={wallCount} />
       <Row label="Total length" value={fmtLen(totalLenFt)} />
-      <Row label="Wall area"    value={fmtArea(totalWallArea)} />
+      <Row label="Wall area"    value={fmtArea(totalWallArea)}
+        infoId="wallArea" openId={openPopoverId} onInfoClick={handleInfoClick} />
       <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
       <Row label="Floor area" value={fmtArea(totalFloorArea)} />
       <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
@@ -303,6 +457,7 @@ export default function BOQPanel() {
         <PricedRow key={line.rateKey} label={line.label}
           qtyDisplay={fmtArea(line.qty)} unitLabel="₹/ft²"
           rateKey={line.rateKey} rates={rates} onRateChange={setRate} cost={line.cost}
+          infoId={line.rateKey} openId={openPopoverId} onInfoClick={handleInfoClick}
         />
       ))}
 
@@ -324,23 +479,27 @@ export default function BOQPanel() {
                 qtyDisplay={qty.unitCount.toLocaleString('en-IN')} unitLabel={isBrick ? '₹/1000' : '₹/block'}
                 rateKey={unitKey} rates={rates} onRateChange={setRate}
                 cost={calcCost(qty.unitCount, rates[unitKey] ?? '', isBrick)}
+                infoId={unitKey} openId={openPopoverId} onInfoClick={handleInfoClick}
               />
               {mat.bondingType === BONDING.CEMENT_SAND ? <>
                 <PricedSubRow label="Cement"
                   qtyDisplay={`${qty.cementBags} bags`} unitLabel="₹/bag"
                   rateKey={cKey} rates={rates} onRateChange={setRate}
                   cost={calcCost(qty.cementBags, rates[cKey] ?? '')}
+                  infoId={cKey} openId={openPopoverId} onInfoClick={handleInfoClick}
                 />
                 <PricedSubRow label="Sand"
                   qtyDisplay={fmtVol(qty.sandFt3)} unitLabel="₹/ft³"
                   rateKey={sKey} rates={rates} onRateChange={setRate}
                   cost={calcCost(qty.sandFt3, rates[sKey] ?? '')}
+                  infoId={sKey} openId={openPopoverId} onInfoClick={handleInfoClick}
                 />
               </> :
                 <PricedSubRow label="Adhesive"
                   qtyDisplay={`${qty.adhesiveBags} bags`} unitLabel="₹/bag"
                   rateKey={aKey} rates={rates} onRateChange={setRate}
                   cost={calcCost(qty.adhesiveBags, rates[aKey] ?? '')}
+                  infoId={aKey} openId={openPopoverId} onInfoClick={handleInfoClick}
                 />
               }
             </div>
@@ -354,6 +513,7 @@ export default function BOQPanel() {
         <PricedRow key={line.rateKey} label={line.label}
           qtyDisplay={fmtArea(line.qty)} unitLabel="₹/ft²"
           rateKey={line.rateKey} rates={rates} onRateChange={setRate} cost={line.cost}
+          infoId={line.rateKey} openId={openPopoverId} onInfoClick={handleInfoClick}
         />
       ))}
 
@@ -378,6 +538,9 @@ export default function BOQPanel() {
                     rates={rates}
                     onRateChange={setRate}
                     cost={line.cost}
+                    infoId={`sump_${line.rateKey}`}
+                    openId={openPopoverId}
+                    onInfoClick={handleInfoClick}
                   />
                 )
               })}
@@ -401,6 +564,9 @@ export default function BOQPanel() {
                     rates={rates}
                     onRateChange={setRate}
                     cost={line.cost}
+                    infoId={`septic_${line.rateKey}`}
+                    openId={openPopoverId}
+                    onInfoClick={handleInfoClick}
                   />
                 )
               })}
@@ -440,6 +606,8 @@ export default function BOQPanel() {
       >
         Export BOQ (CSV)
       </button>
+
+      <FormulaPopover data={formulaData} pos={popoverPos} popoverRef={popoverRef} />
     </div>
   )
 }
