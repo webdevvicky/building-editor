@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   SNAP_IN, GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN,
   findNearbyNode, isOnSegment, collinearOverlap, pointInPolygon, normalizePolygonWinding,
+  doRoomsOverlap,
 } from './geometry'
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 
@@ -50,7 +51,7 @@ function walkPolygon(wallIds, walls) {
   const adj = {}
   for (const wid of wallIds) {
     const w = walls[wid]
-    if (!w) continue
+    if (!w) return null   // stale reference — refuse to compute a partial polygon
     if (!adj[w.n1]) adj[w.n1] = []
     if (!adj[w.n2]) adj[w.n2] = []
     adj[w.n1].push(w.n2)
@@ -419,8 +420,26 @@ export const useStore = create((set, get) => ({
   // ── Rooms ─────────────────────────────────────────────────────────────
 
   saveRoom(name, type = 'OTHER') {
-    const { pendingWallIds } = get()
-    if (!pendingWallIds.length) return
+    const { pendingWallIds, rooms, walls, nodes } = get()
+    if (!pendingWallIds.length) return null
+
+    // Overlap check — runs before _save() so history is not polluted by a blocked save.
+    // Only checks rooms that are fully valid (isRoomValid = structural + no overlap).
+    // Invalid existing rooms are not a reference for blocking new saves.
+    const nodeOrder = walkPolygon(pendingWallIds, walls)
+    if (nodeOrder) {
+      const candidatePoly = nodeOrder.map(id => nodes[id]).filter(Boolean)
+      if (candidatePoly.length >= 3) {
+        for (const room of Object.values(rooms)) {
+          if (!get().isRoomValid(room.id)) continue
+          const existingPoly = get().getRoomPolygon(room.id)
+          if (doRoomsOverlap(candidatePoly, existingPoly)) {
+            return { error: 'overlap', conflictName: room.name }
+          }
+        }
+      }
+    }
+
     get()._save()
     const id       = uid()
     const safeType = ROOM_PRESETS[type] ? type : 'OTHER'
@@ -438,6 +457,7 @@ export const useStore = create((set, get) => ({
       },
       pendingWallIds: [],
     }))
+    return null
   },
 
   setRoomType(roomId, type) {
@@ -505,6 +525,40 @@ export const useStore = create((set, get) => ({
           : { ...ALL_FINISHES },                    // old room — all true (preserves BOQ behavior)
       }
     }
+    if (import.meta.env.DEV) {
+      const loadedWalls = data.walls || {}
+      const wallRoomCount = {}
+      for (const room of Object.values(migratedRooms)) {
+        const missing = room.wallIds.filter(wid => !loadedWalls[wid])
+        if (missing.length)
+          console.warn(`[topology] Room "${room.name}" has missing wallIds:`, missing)
+        for (const wid of room.wallIds)
+          wallRoomCount[wid] = (wallRoomCount[wid] || 0) + 1
+      }
+      for (const [wid, count] of Object.entries(wallRoomCount)) {
+        if (count > 2)
+          console.warn(`[topology] Wall ${wid} referenced by ${count} rooms (expected ≤2)`)
+      }
+      for (const room of Object.values(migratedRooms)) {
+        if (room.wallIds.length >= 3 && walkPolygon(room.wallIds, loadedWalls) === null)
+          console.warn(`[topology] Room "${room.name}" walls don't form a closed loop`)
+      }
+
+      // Pairwise overlap check — uses only structurally valid rooms as comparison targets
+      const structuralRooms = Object.values(migratedRooms).filter(r =>
+        r.wallIds.length >= 3 && walkPolygon(r.wallIds, loadedWalls) !== null
+      )
+      for (let i = 0; i < structuralRooms.length; i++) {
+        for (let j = i + 1; j < structuralRooms.length; j++) {
+          const rA = structuralRooms[i], rB = structuralRooms[j]
+          const pA = walkPolygon(rA.wallIds, loadedWalls).map(id => (data.nodes || {})[id]).filter(Boolean)
+          const pB = walkPolygon(rB.wallIds, loadedWalls).map(id => (data.nodes || {})[id]).filter(Boolean)
+          if (pA.length >= 3 && pB.length >= 3 && doRoomsOverlap(pA, pB))
+            console.warn(`[topology] Rooms "${rA.name}" and "${rB.name}" overlap`)
+        }
+      }
+    }
+
     set({
       nodes:  data.nodes  || {},
       walls:  data.walls  || {},
@@ -553,15 +607,43 @@ export const useStore = create((set, get) => ({
 
   getTotalWallArea() {
     // TODO Phase 1b: respect room.finishes flags — currently treats all rooms as fully finished
+    // Iterates the walls map directly — each wallId is unique, so shared walls are counted once.
+    // Do NOT change to iterate room.wallIds across rooms (that path double-counts shared walls).
     const { walls } = get()
     return Math.round(Object.keys(walls).reduce((t, id) => t + get().getWallArea(id), 0) * 100) / 100
   },
 
-  isRoomValid(roomId) {
+  // Pure topology: walls exist + form a closed loop. No overlap check.
+  // Used as the filter inside overlap routines to avoid composing with itself.
+  isRoomStructurallyValid(roomId) {
     const { rooms, walls } = get()
     const room = rooms[roomId]
     if (!room || room.wallIds.length < 3) return false
     return walkPolygon(room.wallIds, walls) !== null
+  },
+
+  // Composite validity: structurally valid + does not overlap another structurally-valid room.
+  isRoomValid(roomId) {
+    return get().isRoomStructurallyValid(roomId) && !get().hasRoomOverlap(roomId)
+  },
+
+  // Returns name of first structurally-valid room that overlaps roomId, or null.
+  getOverlappingRoomName(roomId) {
+    const { rooms } = get()
+    const polyA = get().getRoomPolygon(roomId)
+    if (!polyA) return null
+    for (const [otherId, room] of Object.entries(rooms)) {
+      if (otherId === roomId) continue
+      if (!get().isRoomStructurallyValid(otherId)) continue
+      const polyB = get().getRoomPolygon(otherId)
+      if (!polyB) continue
+      if (doRoomsOverlap(polyA, polyB)) return room.name
+    }
+    return null
+  },
+
+  hasRoomOverlap(roomId) {
+    return get().getOverlappingRoomName(roomId) !== null
   },
 
   // Returns room floor area in sq ft
@@ -583,11 +665,30 @@ export const useStore = create((set, get) => ({
 
   getTotalFloorArea() {
     // TODO Phase 1b: respect room.finishes flags — currently treats all rooms as fully finished
+    //
+    // Filters by isRoomStructurallyValid (not isRoomValid) so the pairwise overlap loop
+    // sees overlapping rooms — required for the undo/redo edge case where overlapping rooms
+    // can be restored without going through saveRoom's save-time prevention.
     const { rooms } = get()
+    const structuralIds = Object.keys(rooms).filter(id => get().isRoomStructurallyValid(id))
+    const polys = structuralIds.map(id => ({ id, poly: get().getRoomPolygon(id) })).filter(r => r.poly)
+
+    const overlapExcluded = new Set()
+    for (let i = 0; i < polys.length; i++) {
+      for (let j = i + 1; j < polys.length; j++) {
+        if (doRoomsOverlap(polys[i].poly, polys[j].poly)) {
+          if (import.meta.env.DEV)
+            console.warn(`[topology] Rooms "${rooms[polys[i].id].name}" and "${rooms[polys[j].id].name}" overlap — both excluded from floor area total.`)
+          overlapExcluded.add(polys[i].id)
+          overlapExcluded.add(polys[j].id)
+        }
+      }
+    }
+
     return Math.round(
-      Object.keys(rooms)
-        .filter(id => get().isRoomValid(id))
-        .reduce((t, id) => t + get().getRoomArea(id), 0)
+      polys
+        .filter(r => !overlapExcluded.has(r.id))
+        .reduce((t, r) => t + get().getRoomArea(r.id), 0)
       * 100
     ) / 100
   },

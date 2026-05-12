@@ -383,7 +383,21 @@ export default function Canvas() {
 
         {/* Room fills */}
         {Object.values(rooms).map((room, idx) => {
-          if (!isRoomValid(room.id)) return null
+          if (!isRoomValid(room.id)) {
+            // Draw dashed red segments for each wall that still exists — broken outline shows corrupt state
+            return (
+              <g key={room.id}>
+                {room.wallIds.map(wid => {
+                  const w = walls[wid]; if (!w) return null
+                  const a = nodes[w.n1], b = nodes[w.n2]; if (!a || !b) return null
+                  return <line key={wid}
+                    x1={sx(a.x)} y1={sy(a.y)} x2={sx(b.x)} y2={sy(b.y)}
+                    stroke="#e74c3c" strokeWidth={2} strokeDasharray="6,4" opacity={0.6}
+                    style={{ pointerEvents: 'none' }} />
+                })}
+              </g>
+            )
+          }
           const poly = getRoomPolygon(room.id)
           if (!poly || poly.length < 3) return null
           const pts   = poly.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')

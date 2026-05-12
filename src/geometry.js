@@ -109,3 +109,42 @@ export function findNearbyNode(nodes, x, y) {
     n => Math.abs(n.x - x) < SNAP_IN && Math.abs(n.y - y) < SNAP_IN
   ) || null
 }
+
+// OVERLAP DEFINITION:
+// Two rooms overlap iff one polygon's centroid lies inside the other.
+//
+// NOT overlap (allowed):
+//   - Adjacent rooms sharing a wall (boundary contact)
+//   - Rooms touching at a corner (point contact)
+//
+// IS overlap (blocked):
+//   - Sub-room created inside parent room (the primary bug this fixes)
+//   - One room fully contained inside another
+//
+// Centroid-only detection. Sufficient for axis-aligned rectangular rooms
+// (current supported geometry). The centroid of a sub-room is always
+// unambiguously inside the parent — boundary-point ambiguity doesn't apply.
+//
+// Vertex containment was removed: shared corner/edge nodes are exactly on
+// the boundary of the neighbouring polygon, and pointInPolygon (ray-casting)
+// returns true for some boundary points, producing false positives on
+// adjacent rooms. Confirmed in testing (node at shared corner triggered it).
+//
+// Does NOT catch:
+//   - L-shaped rooms whose centroids don't cross but edges intersect
+//   - Diagonal/non-orthogonal layouts (future feature)
+//   - Partial overlaps where neither centroid is inside the other
+//
+// Upgrade to full segment-intersection algorithm in Phase 2 when
+// non-orthogonal walls and L-shaped rooms land.
+export function doRoomsOverlap(polyA, polyB) {
+  const cAx = polyA.reduce((s, p) => s + p.x, 0) / polyA.length
+  const cAy = polyA.reduce((s, p) => s + p.y, 0) / polyA.length
+  if (pointInPolygon(cAx, cAy, polyB)) return true
+
+  const cBx = polyB.reduce((s, p) => s + p.x, 0) / polyB.length
+  const cBy = polyB.reduce((s, p) => s + p.y, 0) / polyB.length
+  if (pointInPolygon(cBx, cBy, polyA)) return true
+
+  return false
+}

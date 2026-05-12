@@ -33,11 +33,12 @@ export default function RoomDetailPanel() {
   const unit           = useStore(s => s.unit)
   const getRoomArea    = useStore(s => s.getRoomArea)
   const isRoomValid    = useStore(s => s.isRoomValid)
-  const renameRoom      = useStore(s => s.renameRoom)
-  const deleteRoom      = useStore(s => s.deleteRoom)
-  const selectRoom      = useStore(s => s.selectRoom)
-  const setRoomType     = useStore(s => s.setRoomType)
-  const setRoomFinishes = useStore(s => s.setRoomFinishes)
+  const renameRoom           = useStore(s => s.renameRoom)
+  const deleteRoom           = useStore(s => s.deleteRoom)
+  const selectRoom           = useStore(s => s.selectRoom)
+  const setRoomType          = useStore(s => s.setRoomType)
+  const setRoomFinishes      = useStore(s => s.setRoomFinishes)
+  const getOverlappingRoomName = useStore(s => s.getOverlappingRoomName)
 
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal]         = useState('')
@@ -47,8 +48,12 @@ export default function RoomDetailPanel() {
   const room = rooms[selectedRoomId]
   if (!room) return null
 
-  const valid     = isRoomValid(selectedRoomId)
-  const floorArea = valid ? getRoomArea(selectedRoomId) : 0
+  const valid               = isRoomValid(selectedRoomId)
+  const hasMissingWalls     = room.wallIds.some(wid => !walls[wid])
+  const overlappingRoomName = !valid && !hasMissingWalls
+    ? getOverlappingRoomName(selectedRoomId)
+    : null
+  const floorArea           = valid ? getRoomArea(selectedRoomId) : 0
 
   // Build per-wall details
   const wallDetails = room.wallIds.map(wid => {
@@ -126,7 +131,11 @@ export default function RoomDetailPanel() {
             </div>
           )}
           <div style={{ fontSize: 11, marginTop: 2, color: valid ? '#27ae60' : '#e74c3c', fontWeight: 600 }}>
-            {valid ? '✓ Valid room' : '⚠ Not a closed loop'}
+            {valid
+              ? '✓ Valid room'
+              : hasMissingWalls    ? '⚠ Missing wall refs'
+              : overlappingRoomName ? '⚠ Overlaps another room'
+              : '⚠ Open loop'}
           </div>
         </div>
         <button onClick={() => selectRoom(null)}
@@ -137,7 +146,11 @@ export default function RoomDetailPanel() {
       {!valid && (
         <div style={{ background: '#fff5f5', border: '1px solid #fcc', borderRadius: 6,
           padding: '8px 10px', fontSize: 12, color: '#c0392b', marginBottom: 10 }}>
-          Walls don't form a closed polygon. Add missing walls or virtual walls to complete the boundary.
+          {hasMissingWalls
+            ? 'One or more wall references are missing — this room\'s geometry cannot be computed. Load a valid save to restore.'
+            : overlappingRoomName
+              ? `This room overlaps '${overlappingRoomName}'. Delete one of the rooms to resolve the conflict.`
+              : 'Walls don\'t form a closed polygon. Add missing walls or virtual walls to complete the boundary.'}
         </div>
       )}
 

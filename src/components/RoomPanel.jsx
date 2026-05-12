@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { ROOM_TYPES, ROOM_TYPE_LABELS } from '../roomPresets'
 
@@ -15,6 +15,9 @@ export default function RoomPanel() {
 
   const [name,        setName]        = useState('')
   const [pendingType, setPendingType] = useState('OTHER')
+  const [saveError,   setSaveError]   = useState(null)
+
+  useEffect(() => { setSaveError(null) }, [pendingWallIds])
 
   if (activeTool !== 'room') return null
 
@@ -32,9 +35,14 @@ export default function RoomPanel() {
   function handleSave() {
     const trimmed = name.trim()
     if (!trimmed || !isClosed) return
-    saveRoom(trimmed, pendingType)
-    setName('')
-    setPendingType('OTHER')
+    const result = saveRoom(trimmed, pendingType)
+    if (result?.error) {
+      setSaveError(result)
+    } else {
+      setName('')
+      setPendingType('OTHER')
+      setSaveError(null)
+    }
   }
 
   function fmtArea(sqFt) {
@@ -125,6 +133,17 @@ export default function RoomPanel() {
         }}>
         Save Room
       </button>
+
+      {/* Save blocked: overlap error */}
+      {saveError?.error === 'overlap' && (
+        <div style={{ fontSize: 11, color: '#c0392b', background: '#fff5f5',
+          border: '1px solid #fcc', borderRadius: 4, padding: '6px 8px', lineHeight: 1.6 }}>
+          <strong>Overlaps existing room '{saveError.conflictName}'.</strong><br/>
+          To proceed:<br/>
+          • Delete '{saveError.conflictName}' first, OR<br/>
+          • Adjust this room's boundaries to not overlap
+        </div>
+      )}
 
       {/* Saved rooms list */}
       {roomList.length > 0 && (
