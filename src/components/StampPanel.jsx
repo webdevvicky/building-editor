@@ -92,7 +92,7 @@ export default function StampPanel() {
 
   return (
     <div style={{
-      position: 'absolute', top: 56, right: 16,
+      position: 'absolute', top: 56, left: 16,
       background: '#fff', border: '1px solid #ccc', borderRadius: 8,
       padding: '12px 14px', zIndex: 10, minWidth: 200, fontSize: 13,
     }}>

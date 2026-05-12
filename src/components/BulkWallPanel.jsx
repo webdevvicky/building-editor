@@ -39,7 +39,7 @@ export default function BulkWallPanel() {
 
   return (
     <div style={{
-      position: 'absolute', top: 56, right: 16,
+      position: 'absolute', top: 56, left: 16,
       background: '#fff', border: '2px solid #e67e22', borderRadius: 8,
       padding: '12px 14px', zIndex: 10, minWidth: 230, fontSize: 13,
     }}>

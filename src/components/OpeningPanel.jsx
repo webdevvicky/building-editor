@@ -88,7 +88,7 @@ export default function OpeningPanel() {
 
   return (
     <div style={{
-      position: 'absolute', top: 56, right: 16,
+      position: 'absolute', top: 56, left: 16,
       background: '#fff', border: '1px solid #ccc', borderRadius: 8,
       padding: '12px 14px', zIndex: 10, minWidth: 220, fontSize: 13,
       maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
