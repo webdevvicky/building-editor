@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
+import { MATERIAL_LIBRARY } from '../materials'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -30,6 +31,7 @@ export default function OpeningPanel() {
   const setWallThickness  = useStore(s => s.setWallThickness)
   const setWallIsPlot     = useStore(s => s.setWallIsPlot)
   const setWallIsVirtual  = useStore(s => s.setWallIsVirtual)
+  const setWallMaterial   = useStore(s => s.setWallMaterial)
   const setDraftOpening   = useStore(s => s.setDraftOpening)
 
   const [type,   setType]   = useState('door')
@@ -123,6 +125,22 @@ export default function OpeningPanel() {
         />
         <span style={{ color: '#999', fontSize: 11 }}>ft</span>
       </div>
+
+      {/* Material picker */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <label style={{ color: '#555', flex: 1 }}>Material</label>
+        <select
+          value={wall.materialKey ?? 'IS_MODULAR_BRICK'}
+          onChange={e => setWallMaterial(selectedWallId, e.target.value)}
+          onKeyDown={e => e.stopPropagation()}
+          style={{ fontSize: 11, padding: '3px 4px', border: '1px solid #ccc', borderRadius: 4, maxWidth: 140 }}
+        >
+          {Object.entries(MATERIAL_LIBRARY).map(([key, mat]) => (
+            <option key={key} value={key}>{mat.name}</option>
+          ))}
+        </select>
+      </div>
+
       <div style={{ color: '#999', fontSize: 11, marginBottom: 12 }}>Length: {wallLen} ft</div>
 
       {/* Plot boundary toggle */}

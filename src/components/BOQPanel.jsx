@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
+import { MATERIAL_LIBRARY, BONDING } from '../materials'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -19,7 +20,6 @@ function r2(n) { return Math.round(n * 100) / 100 }
 function getPriceableLines(rates, quantities) {
   return [
     { label: 'Flooring',          qty: quantities.flooringArea,       unit: 'ft²', rateKey: 'flooring' },
-    { label: 'Bricks',            qty: quantities.bricks,             unit: 'nos', rateKey: 'bricks', isPer1000: true },
     { label: 'Plaster (walls)',   qty: quantities.totalWallArea,      unit: 'ft²', rateKey: 'plasterWalls' },
     { label: 'Plaster (ceiling)', qty: quantities.ceilingPlasterArea, unit: 'ft²', rateKey: 'plasterCeiling' },
     { label: 'Paint (walls)',     qty: quantities.paintWallsArea,     unit: 'ft²', rateKey: 'paintWalls' },
@@ -28,8 +28,45 @@ function getPriceableLines(rates, quantities) {
     { label: 'Roofing',           qty: quantities.roofingArea,        unit: 'ft²', rateKey: 'roofing' },
   ].map(line => ({
     ...line,
-    cost: calcCost(line.qty, rates[line.rateKey], line.isPer1000 || false),
+    cost: calcCost(line.qty, rates[line.rateKey], false),
   }))
+}
+
+// Returns initial rate keys for all materials (empty string = no rate entered)
+function buildMaterialRateKeys() {
+  const keys = {}
+  for (const [matKey, mat] of Object.entries(MATERIAL_LIBRARY)) {
+    keys[`mat_${matKey}_unit`] = ''
+    if (mat.bondingType === BONDING.CEMENT_SAND) {
+      keys[`mat_${matKey}_cement`] = ''
+      keys[`mat_${matKey}_sand`]   = ''
+    } else {
+      keys[`mat_${matKey}_adhesive`] = ''
+    }
+  }
+  return keys
+}
+
+// Flat list of priced lines for all active materials — used for cost totals and CSV.
+function buildMaterialLines(matQty, rates) {
+  const lines = []
+  for (const [matKey, qty] of Object.entries(matQty)) {
+    const mat = MATERIAL_LIBRARY[matKey]
+    if (!mat || !qty) continue
+    const isBrick    = mat.bricksPerFt3 !== undefined
+    const unitKey    = `mat_${matKey}_unit`
+    lines.push({ label: `${mat.name} – ${isBrick ? 'Bricks' : 'Blocks'}`, qty: qty.unitCount, unit: 'nos', rateKey: unitKey, isPer1000: isBrick, cost: calcCost(qty.unitCount, rates[unitKey] ?? '', isBrick) })
+    if (mat.bondingType === BONDING.CEMENT_SAND) {
+      const cKey = `mat_${matKey}_cement`
+      const sKey = `mat_${matKey}_sand`
+      lines.push({ label: `${mat.name} – Cement`, qty: qty.cementBags, unit: 'bags', rateKey: cKey, cost: calcCost(qty.cementBags, rates[cKey] ?? '') })
+      lines.push({ label: `${mat.name} – Sand`,   qty: qty.sandFt3,    unit: 'ft³',  rateKey: sKey, cost: calcCost(qty.sandFt3, rates[sKey] ?? '') })
+    } else {
+      const aKey = `mat_${matKey}_adhesive`
+      lines.push({ label: `${mat.name} – Adhesive`, qty: qty.adhesiveBags, unit: 'bags', rateKey: aKey, cost: calcCost(qty.adhesiveBags, rates[aKey] ?? '') })
+    }
+  }
+  return lines
 }
 
 function getCivilLinesForStamp(stampType, stampQty, rates) {
@@ -143,10 +180,9 @@ export default function BOQPanel() {
   const getStampsByType             = useStore(s => s.getStampsByType)
   const getSumpCivilQty             = useStore(s => s.getSumpCivilQty)
   const getSepticCivilQty           = useStore(s => s.getSepticCivilQty)
-  const getTotalBricks              = useStore(s => s.getTotalBricks)
+  const getMaterialQuantities       = useStore(s => s.getMaterialQuantities)
 
-  const [rates, setRates] = useState({
-    bricks: '',
+  const [rates, setRates] = useState(() => ({
     plasterWalls: '',
     plasterCeiling: '',
     paintWalls: '',
@@ -159,14 +195,15 @@ export default function BOQPanel() {
     rcc: '',
     plasterInner: '',
     waterproofingInner: '',
-  })
+    ...buildMaterialRateKeys(),
+  }))
   const setRate = (key, val) => setRates(prev => ({ ...prev, [key]: val }))
 
   const wallCount     = Object.values(walls).filter(w => !w.isVirtual).length
   const totalLenFt    = Math.round(getAllWallsLength() * 100) / 100
   const totalWallArea = getTotalWallArea()
   const totalFloorArea = getTotalFloorArea()
-  const bricks        = getTotalBricks()
+  const matQty        = getMaterialQuantities()
 
   const flooringArea       = getTotalFlooringArea()
   const ceilingPlasterArea = getTotalCeilingPlasterArea()
@@ -198,21 +235,23 @@ export default function BOQPanel() {
   }
 
   const quantities = {
-    flooringArea, bricks, totalWallArea, ceilingPlasterArea,
+    flooringArea, totalWallArea, ceilingPlasterArea,
     paintWallsArea, paintCeilingArea, waterproofingArea, roofingArea,
   }
 
-  const mainLines   = getPriceableLines(rates, quantities)
-  const sumpLines   = getCivilLinesForStamp('Sump', sumpQty, rates)
-  const septicLines = getCivilLinesForStamp('Septic Tank', septicQty, rates)
+  const mainLines     = getPriceableLines(rates, quantities)
+  const materialLines = buildMaterialLines(matQty, rates)
+  const sumpLines     = getCivilLinesForStamp('Sump', sumpQty, rates)
+  const septicLines   = getCivilLinesForStamp('Septic Tank', septicQty, rates)
+  const hasMasonry    = Object.keys(matQty).length > 0
 
-  const allCosts  = [...mainLines, ...sumpLines, ...septicLines].map(l => l.cost)
+  const allCosts  = [...mainLines, ...materialLines, ...sumpLines, ...septicLines].map(l => l.cost)
   const totalCost = allCosts.some(c => c !== null)
     ? allCosts.reduce((sum, c) => sum + (c ?? 0), 0)
     : null
 
   function handleExportCSV() {
-    const allLines = [...mainLines, ...sumpLines, ...septicLines]
+    const allLines = [...mainLines.slice(0, 1), ...materialLines, ...mainLines.slice(1), ...sumpLines, ...septicLines]
     const rows = [['Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
     for (const line of allLines) {
       const rateVal = parseFloat(rates[line.rateKey]) || ''
@@ -259,25 +298,64 @@ export default function BOQPanel() {
         <span style={{ textAlign: 'right' }}>Cost</span>
       </div>
 
-      {/* Priceable main lines */}
-      {mainLines.map(line => {
-        const qtyDisplay = line.unit === 'nos'
-          ? line.qty.toLocaleString('en-IN')
-          : fmtArea(line.qty)
-        const unitLabel = line.isPer1000 ? '₹/1000' : `₹/${line.unit}`
-        return (
-          <PricedRow
-            key={line.rateKey}
-            label={line.label}
-            qtyDisplay={qtyDisplay}
-            unitLabel={unitLabel}
-            rateKey={line.rateKey}
-            rates={rates}
-            onRateChange={setRate}
-            cost={line.cost}
-          />
-        )
-      })}
+      {/* Flooring */}
+      {mainLines.slice(0, 1).map(line => (
+        <PricedRow key={line.rateKey} label={line.label}
+          qtyDisplay={fmtArea(line.qty)} unitLabel="₹/ft²"
+          rateKey={line.rateKey} rates={rates} onRateChange={setRate} cost={line.cost}
+        />
+      ))}
+
+      {/* Masonry — per material type, shown when at least one wall exists */}
+      {hasMasonry && <>
+        <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Masonry</div>
+        {Object.entries(matQty).map(([matKey, qty]) => {
+          const mat     = MATERIAL_LIBRARY[matKey]
+          const isBrick = mat.bricksPerFt3 !== undefined
+          const unitKey = `mat_${matKey}_unit`
+          const cKey    = `mat_${matKey}_cement`
+          const sKey    = `mat_${matKey}_sand`
+          const aKey    = `mat_${matKey}_adhesive`
+          return (
+            <div key={matKey} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 600, color: '#555', fontSize: 12, marginBottom: 4 }}>{mat.name}</div>
+              <PricedSubRow label={isBrick ? 'Bricks' : 'Blocks'}
+                qtyDisplay={qty.unitCount.toLocaleString('en-IN')} unitLabel={isBrick ? '₹/1000' : '₹/block'}
+                rateKey={unitKey} rates={rates} onRateChange={setRate}
+                cost={calcCost(qty.unitCount, rates[unitKey] ?? '', isBrick)}
+              />
+              {mat.bondingType === BONDING.CEMENT_SAND ? <>
+                <PricedSubRow label="Cement"
+                  qtyDisplay={`${qty.cementBags} bags`} unitLabel="₹/bag"
+                  rateKey={cKey} rates={rates} onRateChange={setRate}
+                  cost={calcCost(qty.cementBags, rates[cKey] ?? '')}
+                />
+                <PricedSubRow label="Sand"
+                  qtyDisplay={fmtVol(qty.sandFt3)} unitLabel="₹/ft³"
+                  rateKey={sKey} rates={rates} onRateChange={setRate}
+                  cost={calcCost(qty.sandFt3, rates[sKey] ?? '')}
+                />
+              </> :
+                <PricedSubRow label="Adhesive"
+                  qtyDisplay={`${qty.adhesiveBags} bags`} unitLabel="₹/bag"
+                  rateKey={aKey} rates={rates} onRateChange={setRate}
+                  cost={calcCost(qty.adhesiveBags, rates[aKey] ?? '')}
+                />
+              }
+            </div>
+          )
+        })}
+        <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
+      </>}
+
+      {/* Plaster, Paint, Waterproofing, Roofing */}
+      {mainLines.slice(1).map(line => (
+        <PricedRow key={line.rateKey} label={line.label}
+          qtyDisplay={fmtArea(line.qty)} unitLabel="₹/ft²"
+          rateKey={line.rateKey} rates={rates} onRateChange={setRate} cost={line.cost}
+        />
+      ))}
 
       {/* Civil works */}
       {hasCivil && <>

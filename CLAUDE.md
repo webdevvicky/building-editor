@@ -2,7 +2,7 @@
 
 ## Current Phase Status
 
-Phase 1a–1c-2 complete and on `main`. Phase 1d not started.
+Phase 1a–1c-3 complete and on `main`. Phase 1d not started.
 
 ---
 
@@ -97,6 +97,45 @@ Phase 1a–1c-2 complete and on `main`. Phase 1d not started.
 - Layout is now: left = editing context (mutually exclusive), right = BOQ, canvas in middle.
 - Canvas working area: ~694px at 1366px wide, ~1248px at 1920px wide.
 
+### Phase 1c-3: Per-wall material types with bonding-aware BOQ
+
+**Data model:**
+- `wall.materialKey` — string key into MATERIAL_LIBRARY, default `'IS_MODULAR_BRICK'`
+- Set on `addWall` creation; propagated through `splitWall` (both segments inherit parent's key)
+- `setWallMaterial(wallId, key)` — action to change a wall's material; validates key against MATERIAL_LIBRARY
+- `loadProject` migration: `{ materialKey: 'IS_MODULAR_BRICK', ...wall }` (default-first, saved value wins)
+
+**Material library (`src/materials.js`):**
+- `BONDING` enum: `CEMENT_SAND_MORTAR`, `THIN_BED_ADHESIVE`
+- 7 types: `IS_MODULAR_BRICK`, `RED_CLAY_BRICK`, `FLY_ASH_BRICK` (brick types, CEMENT_SAND);
+  `AAC_BLOCK`, `CLC_BLOCK` (thin-bed blocks); `CONCRETE_SOLID_BLOCK`, `CONCRETE_HOLLOW_BLOCK` (CEMENT_SAND blocks)
+- Brick types: `bricksPerFt3` field; block types: `blocksPerFt3` field
+  — consuming code: `mat.bricksPerFt3 ?? mat.blocksPerFt3`
+- CEMENT_SAND fields: `mortarVolPerFt3Wall`, `cementBagsPerFt3Mortar`, `sandFt3PerFt3Mortar`
+- THIN_BED fields: `adhesiveKgPerFt2`, `adhesiveBagKg` (40 kg bags)
+  — AAC: 0.28 kg/ft²; CLC: 0.23 kg/ft² (from manufacturer specs)
+- Intentional scaffolding: static constant until ERP product catalog fetch replaces it.
+  Consumers (getMaterialQuantities, OpeningPanel, BOQPanel) stay the same — only the import source changes.
+
+**Store selector:**
+- `getMaterialQuantities()` — aggregates walls by `materialKey`; returns `{ [matKey]: { volFt3, faceAreaFt2, unitCount, cementBags?, sandFt3?, adhesiveKg?, adhesiveBags? } }` (only keys with >0 volume present)
+- 5% wastage applied to unitCount
+- Replaces `getTotalBricks()` entirely
+
+**OpeningPanel:**
+- Material `<select>` dropdown below Thickness field, lists all MATERIAL_LIBRARY entries
+- Triggers `setWallMaterial` on change; shows current `wall.materialKey` as selected option
+
+**BOQPanel:**
+- Masonry section (between Flooring and Plaster rows): one sub-group per active material type
+  — CEMENT_SAND: Bricks/Blocks, Cement (bags), Sand (ft³)
+  — THIN_BED: Blocks, Adhesive (bags)
+- Rate keys: `mat_{matKey}_unit`, `mat_{matKey}_cement`, `mat_{matKey}_sand`, `mat_{matKey}_adhesive`
+- Bricks rate: ₹/1000 (isPer1000=true); blocks rate: ₹/block
+- `buildMaterialRateKeys()` — generates all material rate keys at init time
+- `buildMaterialLines(matQty, rates)` — flat line list for cost totals + CSV
+- CSV export: Flooring → material lines → Plaster/Paint/… → Civil
+
 ---
 
 ## Known issues / Phase 1.5 backlog
@@ -114,10 +153,6 @@ Phase 1a–1c-2 complete and on `main`. Phase 1d not started.
 
 - **Septic soak pit** — not modelled. Deferred.
 
-- **Brick formula unit mismatch** — `BRICK_FACE = 0.2 * 0.1` is intended as m² (200mm × 100mm modular
-  brick face) but `totalWallArea` is in ft². Division produces ~10.76× overcount. Current code lives in
-  `BOQPanel.jsx` (should move to store.js). Fix options under investigation — see Phase 1d discussion.
-
 ---
 
 ## Architectural reminders
@@ -125,5 +160,7 @@ Phase 1a–1c-2 complete and on `main`. Phase 1d not started.
 - `getValidRoomIds()` is the filter for ALL finish-gated and floor area totals. Never iterate `Object.keys(rooms)` directly for BOQ.
 - `getTotalWallArea()` iterates the walls map directly (not room.wallIds) to avoid double-counting shared walls. Do not change this.
 - `getTotalPaintWallsArea()` iterates per room (not the walls map) because both faces of a shared wall between two painted rooms should be counted.
+- `getMaterialQuantities()` iterates the walls map directly (same reason — each wall counted once for volume).
 - Storage unit is **inches** throughout. `GRID_IN = 12`. Display converts to feet or metres at render time.
+- `wall.materialKey` defaults to `'IS_MODULAR_BRICK'`. Always use `w.materialKey ?? 'IS_MODULAR_BRICK'` when reading it (migration guard for in-memory state that bypassed loadProject).
 - No new libraries without asking.

@@ -5,6 +5,7 @@ import {
   doRoomsOverlap,
 } from './geometry'
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
+import { MATERIAL_LIBRARY, BONDING } from './materials'
 
 let nextId = 1
 const uid = () => String(nextId++)
@@ -224,7 +225,7 @@ export const useStore = create((set, get) => ({
     const id = uid()
     const isVirtual = get().drawVirtual
     set(s => ({
-      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, isPlot: false, isVirtual, openings: [] } },
+      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [] } },
       drawStartId: null,
     }))
   },
@@ -286,8 +287,8 @@ export const useStore = create((set, get) => ({
     set(s => {
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
-      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [] }
-      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [] }
+      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [] }
+      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [] }
       const rooms = {}
       Object.values(s.rooms).forEach(r => {
         const idx = r.wallIds.indexOf(wallId)
@@ -361,6 +362,15 @@ export const useStore = create((set, get) => ({
       const wall = s.walls[wallId]
       if (!wall) return {}
       return { walls: { ...s.walls, [wallId]: { ...wall, thickness: t } } }
+    })
+  },
+
+  setWallMaterial(wallId, key) {
+    get()._save()
+    set(s => {
+      const wall = s.walls[wallId]
+      if (!wall || !MATERIAL_LIBRARY[key]) return {}
+      return { walls: { ...s.walls, [wallId]: { ...wall, materialKey: key } } }
     })
   },
 
@@ -583,6 +593,12 @@ export const useStore = create((set, get) => ({
       }
     }
 
+    // ── Migrate walls: inject materialKey default for saves without it ──
+    const migratedWalls = {}
+    for (const [id, wall] of Object.entries(data.walls || {})) {
+      migratedWalls[id] = { materialKey: 'IS_MODULAR_BRICK', ...wall }
+    }
+
     // ── Migrate stamps (v1/v2/v3 → v4): inject depth/name defaults for civil types ──
     const CIVIL_STAMP_DEFAULTS = {
       sump:          { depth: 72,  name: 'Sump' },
@@ -599,7 +615,7 @@ export const useStore = create((set, get) => ({
 
     set({
       nodes:  data.nodes  || {},
-      walls:  data.walls  || {},
+      walls:  migratedWalls,
       rooms:  migratedRooms,
       stamps: migratedStamps,
       history: [], future: [],
@@ -664,20 +680,50 @@ export const useStore = create((set, get) => ({
     return Math.round(Object.keys(walls).reduce((t, id) => t + get().getWallArea(id), 0) * 100) / 100
   },
 
-  // IS modular brick (200×100×100mm nominal with 10mm mortar joints): ~11.5 bricks per ft³ of
-  // brickwork volume (English bond). 5% wastage. Respects per-wall thickness (stored in inches).
-  // Uses getWallArea so door/window openings are already deducted from the volume.
-  // Phase 2+: multi-material support (red clay / fly ash / AAC blocks — different bricks/ft³).
-  getTotalBricks() {
-    const BRICKS_PER_FT3 = 11.5
-    const WASTAGE        = 1.05
-    const { walls }      = get()
-    const totalVolume = Object.values(walls).reduce((sum, w) => {
-      const areaFt2     = get().getWallArea(w.id)          // net of openings; 0 for virtual walls
+  // Returns quantities keyed by materialKey — only keys with at least one wall are present.
+  // Each entry shape:
+  //   { volFt3, faceAreaFt2, unitCount,
+  //     cementBags?, sandFt3?          — CEMENT_SAND types only
+  //     adhesiveKg?, adhesiveBags?     — THIN_BED types only }
+  // 5% wastage applied to unitCount (bricks/blocks).
+  getMaterialQuantities() {
+    const WASTAGE = 1.05
+    const { walls } = get()
+    const acc = {}
+
+    for (const w of Object.values(walls)) {
+      if (w.isVirtual) continue
+      const matKey = w.materialKey ?? 'IS_MODULAR_BRICK'
+      const mat = MATERIAL_LIBRARY[matKey]
+      if (!mat) continue
+      const faceAreaFt2 = get().getWallArea(w.id)
       const thicknessFt = (w.thickness ?? DEFAULT_WALL_THICK_IN) / GRID_IN
-      return sum + areaFt2 * thicknessFt
-    }, 0)
-    return Math.ceil(totalVolume * BRICKS_PER_FT3 * WASTAGE)
+      if (!acc[matKey]) acc[matKey] = { volFt3: 0, faceAreaFt2: 0 }
+      acc[matKey].volFt3     += faceAreaFt2 * thicknessFt
+      acc[matKey].faceAreaFt2 += faceAreaFt2
+    }
+
+    const result = {}
+    for (const [matKey, { volFt3, faceAreaFt2 }] of Object.entries(acc)) {
+      const mat = MATERIAL_LIBRARY[matKey]
+      const unitPer = mat.bricksPerFt3 ?? mat.blocksPerFt3
+      const entry = {
+        volFt3:     Math.round(volFt3 * 100) / 100,
+        faceAreaFt2: Math.round(faceAreaFt2 * 100) / 100,
+        unitCount:  Math.ceil(volFt3 * unitPer * WASTAGE),
+      }
+      if (mat.bondingType === BONDING.CEMENT_SAND) {
+        const mortarVol  = volFt3 * mat.mortarVolPerFt3Wall
+        entry.cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
+        entry.sandFt3    = Math.round(mortarVol * mat.sandFt3PerFt3Mortar * 100) / 100
+      } else {
+        const adhesiveKg      = faceAreaFt2 * mat.adhesiveKgPerFt2
+        entry.adhesiveKg      = Math.round(adhesiveKg * 100) / 100
+        entry.adhesiveBags    = Math.ceil(adhesiveKg / mat.adhesiveBagKg)
+      }
+      result[matKey] = entry
+    }
+    return result
   },
 
   // Pure topology: walls exist + form a closed loop. No overlap check.
