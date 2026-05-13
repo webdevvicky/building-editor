@@ -9,7 +9,11 @@ import {
   explainUnits, explainCement, explainSand, explainAdhesive,
   explainCivilExcavation, explainCivilBrickwork, explainCivilRCC,
   explainCivilPlaster, explainCivilWaterproofing,
+  explainColumnRCC, explainFootingRCC, explainFootingPCC, explainBeamRCC,
+  explainSlabMain, explainSlabSunken, explainSunshades, explainParapet,
+  explainStaircaseRCC, explainSteelByElement, explainConcreteGrade,
 } from '../formulas'
+import StructuralBOQSection from './StructuralBOQSection'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -124,6 +128,26 @@ function getFormulaData(id, state) {
     if (suffix === 'sand')     return explainSand(state, matKey)
     if (suffix === 'adhesive') return explainAdhesive(state, matKey)
   }
+  // Structural formulas
+  if (id.startsWith('col_')) {
+    const typeId = id.replace('col_', '').replace('_rcc', '')
+    return explainColumnRCC(state, typeId)
+  }
+  if (id.startsWith('fot_')) {
+    const withoutPrefix = id.replace('fot_', '')
+    const typeId = withoutPrefix.replace(/_rcc$/, '').replace(/_pcc$/, '')
+    const isPcc  = withoutPrefix.endsWith('_pcc')
+    return isPcc ? explainFootingPCC(state, typeId) : explainFootingRCC(state, typeId)
+  }
+  if (id.startsWith('beam_'))    return explainBeamRCC(state, id.replace('beam_', ''))
+  if (id === 'slab_main')        return explainSlabMain(state)
+  if (id === 'slab_sunken')      return explainSlabSunken(state)
+  if (id === 'sunshade_rcc')     return explainSunshades(state)
+  if (id === 'parapet_rcc')      return explainParapet(state)
+  if (id === 'stair_rcc')        return explainStaircaseRCC(state)
+  if (id.startsWith('steel_'))   return explainSteelByElement(state, id.replace('steel_', '').toUpperCase())
+  if (id === 'conc_M7_5')        return explainConcreteGrade(state, 'M7_5')
+  if (id === 'conc_M20')         return explainConcreteGrade(state, 'M20')
   return null
 }
 
@@ -300,6 +324,24 @@ export default function BOQPanel() {
   const getValidRoomIds = useStore(s => s.getValidRoomIds)
   const getRoomArea     = useStore(s => s.getRoomArea)
   const getRoomWallArea = useStore(s => s.getRoomWallArea)
+  // Structural subscriptions
+  const getMasonryWithBeamDeduction = useStore(s => s.getMasonryWithBeamDeduction)
+  const projectSettings             = useStore(s => s.projectSettings)
+  const columns                     = useStore(s => s.columns)
+  const beams                       = useStore(s => s.beams)
+  const slabs                       = useStore(s => s.slabs)
+  const staircases                  = useStore(s => s.staircases)
+  const getAllBeams                  = useStore(s => s.getAllBeams)
+  const getColumnQuantities         = useStore(s => s.getColumnQuantities)
+  const getFootingQuantities        = useStore(s => s.getFootingQuantities)
+  const getBeamQuantities           = useStore(s => s.getBeamQuantities)
+  const getSlabQuantities           = useStore(s => s.getSlabQuantities)
+  const getStaircaseQuantities      = useStore(s => s.getStaircaseQuantities)
+  const getSunshadeQuantities       = useStore(s => s.getSunshadeQuantities)
+  const getParapetQuantities        = useStore(s => s.getParapetQuantities)
+  const getSteelQuantities          = useStore(s => s.getSteelQuantities)
+  const getConcreteByGrade          = useStore(s => s.getConcreteByGrade)
+  const classifyWallBeamFlags       = useStore(s => s.classifyWallBeamFlags)
 
   const [rates, setRates] = useState(() => ({
     plasterWalls: '',
@@ -315,6 +357,18 @@ export default function BOQPanel() {
     plasterInner: '',
     waterproofingInner: '',
     ...buildMaterialRateKeys(),
+    // Structural rate keys
+    beam_plinth: '', beam_lintel: '', beam_roof: '',
+    slab_main: '', slab_sunken: '',
+    sunshade_rcc: '', parapet_rcc: '',
+    steel_footing: '', steel_column: '', steel_beam: '',
+    steel_slab: '', steel_staircase: '', steel_civil: '',
+    conc_M7_5_cement: '', conc_M7_5_sand: '', conc_M7_5_agg20: '',
+    conc_M20_cement: '', conc_M20_sand: '', conc_M20_agg10: '', conc_M20_agg20: '',
+    stair_rcc: '',
+    // Column and footing rates are added dynamically:
+    // col_{typeId}_rcc, fot_{typeId}_rcc, fot_{typeId}_pcc
+    // These are added via setRate on first render of StructuralBOQSection
   }))
   const setRate = (key, val) => setRates(prev => ({ ...prev, [key]: val }))
 
@@ -322,11 +376,14 @@ export default function BOQPanel() {
   const [popoverPos,    setPopoverPos]    = useState(null)
   const popoverRef = useRef(null)
 
+  // Structural lines sent up from StructuralBOQSection
+  const [structuralLines, setStructuralLines] = useState([])
+
   const wallCount     = Object.values(walls).filter(w => !w.isVirtual).length
   const totalLenFt    = Math.round(getAllWallsLength() * 100) / 100
   const totalWallArea = getTotalWallArea()
   const totalFloorArea = getTotalFloorArea()
-  const matQty        = getMaterialQuantities()
+  const matQty        = getMasonryWithBeamDeduction()
 
   const flooringArea       = getTotalFlooringArea()
   const ceilingPlasterArea = getTotalCeilingPlasterArea()
@@ -368,13 +425,21 @@ export default function BOQPanel() {
   const septicLines   = getCivilLinesForStamp('Septic Tank', septicQty, rates)
   const hasMasonry    = Object.keys(matQty).length > 0
 
-  const allCosts  = [...mainLines, ...materialLines, ...sumpLines, ...septicLines].map(l => l.cost)
+  const formulaState = {
+    walls, nodes, rooms, stamps, getWallArea, getValidRoomIds, getRoomArea, getRoomWallArea,
+    projectSettings, columns, beams, slabs, staircases,
+    getMasonryWithBeamDeduction,
+    getColumnQuantities, getFootingQuantities, getBeamQuantities, getSlabQuantities,
+    getStaircaseQuantities, getSunshadeQuantities, getParapetQuantities,
+    getSteelQuantities, getConcreteByGrade, getAllBeams,
+    classifyWallBeamFlags,
+  }
+  const formulaData  = openPopoverId ? getFormulaData(openPopoverId, formulaState) : null
+
+  const allCosts  = [...mainLines, ...materialLines, ...sumpLines, ...septicLines, ...structuralLines].map(l => l.cost)
   const totalCost = allCosts.some(c => c !== null)
     ? allCosts.reduce((sum, c) => sum + (c ?? 0), 0)
     : null
-
-  const formulaState = { walls, nodes, rooms, stamps, getWallArea, getValidRoomIds, getRoomArea, getRoomWallArea }
-  const formulaData  = openPopoverId ? getFormulaData(openPopoverId, formulaState) : null
 
   function handleInfoClick(id, e) {
     e.stopPropagation()
@@ -401,7 +466,7 @@ export default function BOQPanel() {
   }, [openPopoverId])
 
   function handleExportCSV() {
-    const allLines = [...mainLines.slice(0, 1), ...materialLines, ...mainLines.slice(1), ...sumpLines, ...septicLines]
+    const allLines = [...mainLines.slice(0, 1), ...materialLines, ...mainLines.slice(1), ...sumpLines, ...septicLines, ...structuralLines]
     const rows = [['Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
     for (const line of allLines) {
       const rateVal = parseFloat(rates[line.rateKey]) || ''
@@ -507,6 +572,16 @@ export default function BOQPanel() {
         })}
         <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
       </>}
+
+      {/* Structural BOQ */}
+      <StructuralBOQSection
+        rates={rates}
+        onRateChange={setRate}
+        openId={openPopoverId}
+        onInfoClick={handleInfoClick}
+        onLinesReady={setStructuralLines}
+        formulaState={formulaState}
+      />
 
       {/* Plaster, Paint, Waterproofing, Roofing */}
       {mainLines.slice(1).map(line => (

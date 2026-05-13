@@ -20,25 +20,29 @@ const ORIENT_TIPS   = [
 ]
 
 export default function OpeningPanel() {
-  const selectedWallId    = useStore(s => s.selectedWallId)
-  const walls             = useStore(s => s.walls)
-  const getWallLength     = useStore(s => s.getWallLength)
-  const addOpening        = useStore(s => s.addOpening)
-  const removeOpening     = useStore(s => s.removeOpening)
-  const setOpeningOrient  = useStore(s => s.setOpeningOrient)
-  const deleteWall        = useStore(s => s.deleteWall)
-  const setWallHeight     = useStore(s => s.setWallHeight)
-  const setWallThickness  = useStore(s => s.setWallThickness)
-  const setWallIsPlot     = useStore(s => s.setWallIsPlot)
-  const setWallIsVirtual  = useStore(s => s.setWallIsVirtual)
-  const setWallMaterial   = useStore(s => s.setWallMaterial)
-  const setDraftOpening   = useStore(s => s.setDraftOpening)
+  const selectedWallId      = useStore(s => s.selectedWallId)
+  const walls               = useStore(s => s.walls)
+  const getWallLength       = useStore(s => s.getWallLength)
+  const addOpening          = useStore(s => s.addOpening)
+  const removeOpening       = useStore(s => s.removeOpening)
+  const setOpeningOrient    = useStore(s => s.setOpeningOrient)
+  const deleteWall          = useStore(s => s.deleteWall)
+  const setWallHeight       = useStore(s => s.setWallHeight)
+  const setWallThickness    = useStore(s => s.setWallThickness)
+  const setWallIsPlot       = useStore(s => s.setWallIsPlot)
+  const setWallIsVirtual    = useStore(s => s.setWallIsVirtual)
+  const setWallMaterial     = useStore(s => s.setWallMaterial)
+  const setDraftOpening     = useStore(s => s.setDraftOpening)
+  const setWallBeamFlags    = useStore(s => s.setWallBeamFlags)
+  const classifyWallBeamFlags = useStore(s => s.classifyWallBeamFlags)
+  const setOpeningSunshade  = useStore(s => s.setOpeningSunshade)
 
   const [type,   setType]   = useState('door')
   const [width,  setWidth]  = useState(3)
   const [height, setHeight] = useState(7)
   const [offset, setOffset] = useState(0)
   const [orient, setOrient] = useState(0)
+  const [sunshadePreview, setSunshadePreview] = useState(false)
 
   // Push current form state to store so Canvas can show a live preview
   useEffect(() => {
@@ -48,6 +52,9 @@ export default function OpeningPanel() {
 
   // Clear preview when panel unmounts
   useEffect(() => () => setDraftOpening(null), [])
+
+  // Reset sunshade preview when switching away from window type
+  useEffect(() => { if (type !== 'window') setSunshadePreview(false) }, [type])
 
   if (!selectedWallId) return null
   const wall = walls[selectedWallId]
@@ -68,6 +75,12 @@ export default function OpeningPanel() {
   const errNeg     = o < 0 ? 'Offset cannot be negative' : null
   const error      = errNeg || errFit || errHeight || errOverlap
 
+  // Beam flags for selected wall
+  const beamFlags = selectedWallId ? classifyWallBeamFlags(selectedWallId) : null
+  const rawPlinth = wall?.hasPlinthBeam ?? null
+  const rawLintel = wall?.hasLintelBeam ?? null
+  const rawRoof   = wall?.hasRoofBeam   ?? null
+
   function selectType(t) {
     setType(t)
     setWidth(PRESETS[t].width)
@@ -82,7 +95,11 @@ export default function OpeningPanel() {
 
   function handleAdd() {
     if (error) return
-    addOpening(selectedWallId, { offset: o * GRID_IN, width: w * GRID_IN, height: h * GRID_IN, type, orient: type === 'door' ? orient : 0 })
+    addOpening(selectedWallId, {
+      offset: o * GRID_IN, width: w * GRID_IN, height: h * GRID_IN,
+      type, orient: type === 'door' ? orient : 0,
+      hasSunshade: type === 'window' ? sunshadePreview : false,
+    })
   }
 
   const btnBase = { padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, border: '1px solid #ccc' }
@@ -163,6 +180,37 @@ export default function OpeningPanel() {
         </label>
       </div>
 
+      {/* Wall beam flags */}
+      <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
+      <div style={{ fontWeight: 600, marginBottom: 6, color: '#555', fontSize: 12 }}>Beam flags</div>
+      {['plinth', 'lintel', 'roof'].map(level => {
+        const flagKey  = `has${level.charAt(0).toUpperCase()}${level.slice(1)}Beam`
+        const rawVal   = wall[flagKey] ?? null
+        const resolved = beamFlags ? beamFlags[flagKey] : false
+        const badge    = rawVal === null
+          ? (resolved ? 'auto (on)' : 'auto (off)')
+          : (rawVal ? 'forced on' : 'forced off')
+        const badgeColor = rawVal === null ? '#aaa' : rawVal ? '#27ae60' : '#e74c3c'
+        return (
+          <div key={level} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <input type="checkbox"
+              checked={resolved}
+              onChange={() => {
+                const cur  = wall[flagKey]
+                // Toggle cycle: null → true → false → null
+                const next = cur === null ? true : cur === true ? false : null
+                setWallBeamFlags(selectedWallId, { [flagKey]: next })
+              }}
+              style={{ cursor: 'pointer' }}
+            />
+            <span style={{ color: '#555', flex: 1, fontSize: 12, textTransform: 'capitalize' }}>{level} beam</span>
+            <span style={{ fontSize: 10, color: badgeColor, background: '#f5f5f5', padding: '1px 5px', borderRadius: 3 }}>
+              {badge}
+            </span>
+          </div>
+        )
+      })}
+
       <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
       <div style={{ fontWeight: 600, marginBottom: 8, color: '#555', fontSize: 12 }}>Add Opening</div>
 
@@ -177,6 +225,17 @@ export default function OpeningPanel() {
           Window
         </button>
       </div>
+
+      {/* Sunshade pre-add toggle — window only */}
+      {type === 'window' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <input type="checkbox" id="sunshadeChk" checked={sunshadePreview}
+            onChange={e => setSunshadePreview(e.target.checked)} style={{ cursor: 'pointer' }} />
+          <label htmlFor="sunshadeChk" style={{ fontSize: 12, color: '#555', cursor: 'pointer' }}>
+            Sunshade (chajja)
+          </label>
+        </div>
+      )}
 
       {/* W × H */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
@@ -262,6 +321,17 @@ export default function OpeningPanel() {
                     borderRadius: 3, cursor: 'pointer', padding: '1px 5px', color: '#555' }}>
                   {ORIENT_LABELS[op.orient ?? 0]}
                 </button>
+              )}
+              {/* Sunshade toggle for existing windows */}
+              {op.type === 'window' && (
+                <label style={{ fontSize: 10, color: '#888', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6 }}>
+                  <input type="checkbox"
+                    checked={op.hasSunshade ?? false}
+                    onChange={e => setOpeningSunshade(selectedWallId, op.id, e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  shade
+                </label>
               )}
             </div>
             <button onClick={() => removeOpening(selectedWallId, op.id)}
