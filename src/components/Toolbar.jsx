@@ -11,6 +11,10 @@ const TOOLS = [
   { id: 'sump',          label: '⬜ Sump' },
   { id: 'overhead_tank', label: '⬜ OHT' },
   { id: 'septic_tank',   label: '⬜ Septic' },
+  { id: 'column',        label: '⬛ Column' },
+  { id: 'beam',          label: '— Beam' },
+  { id: 'slabs',         label: '▦ Slabs' },
+  { id: 'settings',      label: '⚙ Settings' },
 ]
 
 const btn = (active, color) => ({
@@ -59,7 +63,13 @@ export default function Toolbar() {
   const fileInputRef = useRef(null)
 
   function handleSave() {
-    const data = JSON.stringify({ version: 4, unit: 'inch', nodes, walls, rooms, stamps }, null, 2)
+    const s = useStore.getState()
+    const data = JSON.stringify({
+      version: 5, unit: 'inch',
+      nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
+      columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
+      projectSettings: s.projectSettings,
+    }, null, 2)
     const blob = new Blob([data], { type: 'application/json' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')

@@ -85,6 +85,16 @@ const TOOL_CURSOR = {
   sump:          'crosshair',
   overhead_tank: 'crosshair',
   septic_tank:   'crosshair',
+  column:        'crosshair',
+  beam:          'crosshair',
+}
+
+function getColPos(col, nodes) {
+  if (col.attachedNodeId) {
+    const n = nodes[col.attachedNodeId]
+    return n ? { x: n.x, y: n.y } : { x: col.x, y: col.y }
+  }
+  return { x: col.x, y: col.y }
 }
 
 const STAMP_TOOLS = new Set(['stairs', 'lift', 'sump', 'overhead_tank', 'septic_tank'])
@@ -107,6 +117,15 @@ export default function Canvas() {
   const unit           = useStore(s => s.unit)
   const draftOpening   = useStore(s => s.draftOpening)
   const selectedRoomId = useStore(s => s.selectedRoomId)
+
+  const columns          = useStore(s => s.columns)
+  const selectedColumnId = useStore(s => s.selectedColumnId)
+  const projectSettings  = useStore(s => s.projectSettings)
+  const getAllBeams       = useStore(s => s.getAllBeams)
+  const addColumn    = useStore(s => s.addColumn)
+  const deleteColumn = useStore(s => s.deleteColumn)
+  const selectColumn = useStore(s => s.selectColumn)
+  const addBeam      = useStore(s => s.addBeam)
 
   const setTool = useStore(s => s.setTool)
   const {
@@ -133,6 +152,8 @@ export default function Canvas() {
   const [hoveredWallId, setHoveredWallId] = useState(null)
   const [lockedLength, setLockedLength] = useState('')
   const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY } in world inches
+  const [beamFromColId, setBeamFromColId] = useState(null)      // first column selected for beam
+  const [beamLevelPicker, setBeamLevelPicker] = useState(null)  // { fromColId, toColId, screenX, screenY }
 
   useEffect(() => { panRef.current  = pan  }, [pan])
   useEffect(() => { zoomRef.current = zoom }, [zoom])
@@ -195,10 +216,11 @@ export default function Canvas() {
     function onKeyDown(e) {
       if (e.code === 'Space' && !e.target.closest('input')) { e.preventDefault(); setSpaceDown(true) }
       if (e.key === 'Shift') setShiftDown(true)
-      if (e.key === 'Escape') { cancelAction(); return }
+      if (e.key === 'Escape') { cancelAction(); setBeamFromColId(null); setBeamLevelPicker(null); return }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return }
       if (e.key === 'Delete') {
+        if (selectedColumnId) { deleteColumn(selectedColumnId); selectColumn(null); return }
         if (selectedStampId) { deleteStamp(selectedStampId); return }
         if (selectedWallId)  { deleteWall(selectedWallId);  return }
       }
@@ -210,7 +232,7 @@ export default function Canvas() {
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup',   onKeyUp)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp) }
-  }, [selectedWallId, selectedStampId])
+  }, [selectedWallId, selectedStampId, selectedColumnId])
 
   useEffect(() => { if (!drawStartId) setLockedLength('') }, [drawStartId])
 
@@ -253,8 +275,47 @@ export default function Canvas() {
 
   function handleMouseLeave() { setCursor(null); setHoveredWallId(null); setDraggingStamp(null) }
 
+  function handleColumnClick(e, colId) {
+    e.stopPropagation()
+    if (activeTool === 'beam') {
+      if (!beamFromColId) {
+        setBeamFromColId(colId)
+        return
+      }
+      if (colId === beamFromColId) { setBeamFromColId(null); return }
+      // Second column selected — show level picker near click
+      setBeamLevelPicker({ fromColId: beamFromColId, toColId: colId, screenX: e.clientX, screenY: e.clientY })
+      setBeamFromColId(null)
+      return
+    }
+    if (activeTool === 'column' || activeTool === 'select') {
+      selectColumn(colId)
+      selectWall(null)
+      selectStamp(null)
+    }
+  }
+
   function handleSVGClick(e) {
     if (isPanningRef.current || spaceDown) return
+
+    if (activeTool === 'column') {
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      const nearNode = Object.values(nodes).find(n =>
+        Math.hypot(n.x - x, n.y - y) < 24
+      )
+      const ctId = projectSettings.columnTypes[0]?.id ?? 'C1'
+      if (nearNode) {
+        addColumn(nearNode.x, nearNode.y, ctId, nearNode.id)
+      } else {
+        addColumn(x, y, ctId, null)
+      }
+      return
+    }
+    if (activeTool === 'beam') {
+      // Clicking empty canvas in beam mode — cancel
+      setBeamFromColId(null)
+      return
+    }
 
     if (STAMP_TOOLS.has(activeTool)) {
       const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
@@ -263,7 +324,7 @@ export default function Canvas() {
       return
     }
 
-    if (activeTool === 'select') { selectWall(null); selectStamp(null); return }
+    if (activeTool === 'select') { selectWall(null); selectStamp(null); selectColumn(null); return }
     if (activeTool !== 'draw') return
 
     const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
@@ -315,6 +376,38 @@ export default function Canvas() {
 
   return (
     <>
+    {/* Beam level picker overlay */}
+    {beamLevelPicker && (
+      <div style={{
+        position: 'fixed',
+        top: beamLevelPicker.screenY - 60,
+        left: beamLevelPicker.screenX + 8,
+        background: '#fff', border: '1px solid #ccc', borderRadius: 6,
+        padding: '6px 8px', zIndex: 50,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        display: 'flex', flexDirection: 'column', gap: 4,
+      }}>
+        <div style={{ fontSize: 11, color: '#555', marginBottom: 2 }}>Add beam at level:</div>
+        {['plinth', 'lintel', 'roof'].map(level => (
+          <button key={level}
+            onClick={() => {
+              addBeam(beamLevelPicker.fromColId, beamLevelPicker.toColId, level)
+              setBeamLevelPicker(null)
+            }}
+            style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer',
+              background: level === 'plinth' ? '#fef9e7' : level === 'lintel' ? '#eaf4fb' : '#fdedec',
+              border: '1px solid #ddd', borderRadius: 4 }}>
+            {level.charAt(0).toUpperCase() + level.slice(1)}
+          </button>
+        ))}
+        <button onClick={() => { setBeamLevelPicker(null); setBeamFromColId(null) }}
+          style={{ padding: '2px 6px', fontSize: 10, cursor: 'pointer', background: '#f5f5f5',
+            border: '1px solid #ddd', borderRadius: 4, color: '#888' }}>
+          Cancel
+        </button>
+      </div>
+    )}
+
     {/* Length input panel */}
     {activeTool === 'draw' && drawStartId && (
       <div style={{
@@ -514,6 +607,27 @@ export default function Canvas() {
           )
         })}
 
+        {/* Beams */}
+        {getAllBeams().map(beam => {
+          const fromPos = beam.endpoints.from.type === 'COLUMN'
+            ? getColPos(columns[beam.endpoints.from.columnId], nodes)
+            : beam.endpoints.from
+          const toPos = beam.endpoints.to.type === 'COLUMN'
+            ? getColPos(columns[beam.endpoints.to.columnId], nodes)
+            : beam.endpoints.to
+          if (!fromPos || !toPos) return null
+          const color = beam.level === 'plinth' ? '#f39c12' : beam.level === 'lintel' ? '#3498db' : '#e74c3c'
+          const dash  = beam.source === 'WALL_DERIVED' ? '6 3' : undefined
+          return (
+            <line key={beam.id}
+              x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
+              stroke={color} strokeWidth={3} strokeOpacity={0.7}
+              strokeDasharray={dash}
+              style={{ pointerEvents: 'none' }}
+            />
+          )
+        })}
+
         {/* Walls */}
         {Object.values(walls).map(wall => {
           const a = nodes[wall.n1], b = nodes[wall.n2]
@@ -640,6 +754,54 @@ export default function Canvas() {
               stroke="#fff" strokeWidth={2} style={{ pointerEvents: 'none' }}/>
           )
         })}
+
+        {/* Columns */}
+        {Object.values(columns).map(col => {
+          const pos = getColPos(col, nodes)
+          const ct  = projectSettings.columnTypes.find(t => t.id === col.columnTypeId)
+          if (!ct) return null
+          const isSelected = col.id === selectedColumnId
+          const strokeColor = isSelected ? '#e74c3c' : col.attachedNodeId ? '#2471a3' : '#555'
+          const fillColor   = isSelected ? '#fde8e8' : col.attachedNodeId ? '#d6eaf8' : '#ecf0f1'
+          const strokeW     = isSelected ? 2 : 1.5
+
+          if (ct.shape === 'circle') {
+            const r = (ct.diamIn / 2) * PX_PER_INCH
+            return (
+              <circle key={col.id}
+                cx={sx(pos.x)} cy={sy(pos.y)} r={r}
+                fill={fillColor} stroke={strokeColor} strokeWidth={strokeW}
+                style={{ cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default' }}
+                onClick={e => handleColumnClick(e, col.id)}
+              />
+            )
+          }
+          // rect column — center it on col position
+          const w = ct.widthIn * PX_PER_INCH
+          const h = ct.depthIn * PX_PER_INCH
+          return (
+            <rect key={col.id}
+              x={sx(pos.x) - w/2} y={sy(pos.y) - h/2} width={w} height={h}
+              fill={fillColor} stroke={strokeColor} strokeWidth={strokeW}
+              style={{ cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default' }}
+              onClick={e => handleColumnClick(e, col.id)}
+            />
+          )
+        })}
+
+        {/* Beam tool: ghost line from selected first column to cursor */}
+        {activeTool === 'beam' && beamFromColId && cursor && (() => {
+          const fromCol = columns[beamFromColId]
+          if (!fromCol) return null
+          const pos = getColPos(fromCol, nodes)
+          return (
+            <line
+              x1={sx(pos.x)} y1={sy(pos.y)} x2={sx(cursor.x)} y2={sy(cursor.y)}
+              stroke="#9b59b6" strokeWidth={2} strokeDasharray="6 3" opacity={0.7}
+              style={{ pointerEvents: 'none' }}
+            />
+          )
+        })()}
 
         {/* Room-mode corner indicators */}
         {activeTool === 'room' && pendingWallIds.length > 0 && (() => {
