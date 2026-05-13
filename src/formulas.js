@@ -1,6 +1,8 @@
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from './geometry'
 
+export * from './formulas/structuralFormulas'
+
 // state = { walls, nodes, rooms, stamps, getWallArea, getValidRoomIds, getRoomArea, getRoomWallArea }
 // All functions return { title, steps: [{label, value, bold?}], note? }
 
@@ -155,21 +157,35 @@ export function explainRoofing(state) {
 export function explainUnits(state, matKey) {
   const mat = MATERIAL_LIBRARY[matKey]
   if (!mat) return { title: matKey, steps: [{ label: 'Unknown material', value: '—' }] }
-  const { count, faceAreaFt2, volFt3 } = matVolumes(state, matKey)
+  const { count, faceAreaFt2, volFt3: grossVol } = matVolumes(state, matKey)
   const isBrick = mat.bricksPerFt3 !== undefined
   const density = mat.bricksPerFt3 ?? mat.blocksPerFt3
   const unit = isBrick ? 'bricks' : 'blocks'
-  const total = Math.ceil(volFt3 * density * WASTAGE)
+
+  // Beam deduction: use net volume when getMasonryWithBeamDeduction is available
+  const netData = state.getMasonryWithBeamDeduction?.()
+  const netVol = netData?.[matKey]?.volFt3 ?? grossVol
+  const deductFt3 = r2(grossVol - netVol)
+  const hasDeduction = deductFt3 > 0
+
+  const total = Math.ceil(netVol * density * WASTAGE)
+
+  const steps = [
+    { label: 'Walls using this material',         value: String(count) },
+    { label: 'Total face area (net, Σ per wall)', value: `${r2(faceAreaFt2)} ft²` },
+    { label: 'Gross volume (Σ face × thickness)', value: `${r2(grossVol)} ft³` },
+  ]
+  if (hasDeduction) {
+    steps.push({ label: 'Beam deductions',        value: `−${deductFt3} ft³` })
+    steps.push({ label: 'Net volume',             value: `${r2(netVol)} ft³` })
+  }
+  steps.push({ label: `${isBrick ? 'Bricks' : 'Blocks'} per ft³`, value: String(density) })
+  steps.push({ label: 'Wastage',                  value: '5%' })
+  steps.push({ label: 'Total (ceil)',              value: `${total.toLocaleString('en-IN')} ${unit}`, bold: true })
+
   return {
     title: `${mat.name} – ${isBrick ? 'Bricks' : 'Blocks'}`,
-    steps: [
-      { label: 'Walls using this material',            value: String(count) },
-      { label: 'Total face area (net, Σ per wall)',    value: `${r2(faceAreaFt2)} ft²` },
-      { label: 'Total volume (Σ face × thickness)',    value: `${r2(volFt3)} ft³` },
-      { label: `${isBrick ? 'Bricks' : 'Blocks'} per ft³`, value: String(density) },
-      { label: 'Wastage',                             value: '5%' },
-      { label: `Total (ceil)`,                        value: `${total.toLocaleString('en-IN')} ${unit}`, bold: true },
-    ],
+    steps,
     note: isBrick
       ? 'Density includes mortar joints. Wastage 5% — currently fixed. Will become project-level setting in Phase 1.5 (varies by builder).'
       : `${mat.name} uses thin-bed adhesive — no mortar volume in unit count. Wastage 5% — currently fixed.`,
@@ -179,16 +195,29 @@ export function explainUnits(state, matKey) {
 export function explainCement(state, matKey) {
   const mat = MATERIAL_LIBRARY[matKey]
   if (!mat || mat.bondingType !== BONDING.CEMENT_SAND) return null
-  const { volFt3 } = matVolumes(state, matKey)
-  const mortarVol  = volFt3 * mat.mortarVolPerFt3Wall
+  const { volFt3: grossVol } = matVolumes(state, matKey)
+
+  const netData = state.getMasonryWithBeamDeduction?.()
+  const netVol = netData?.[matKey]?.volFt3 ?? grossVol
+  const deductFt3 = r2(grossVol - netVol)
+  const hasDeduction = deductFt3 > 0
+
+  const mortarVol  = netVol * mat.mortarVolPerFt3Wall
   const cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
+
+  const steps = [
+    { label: 'Gross wall volume',                                        value: `${r2(grossVol)} ft³` },
+  ]
+  if (hasDeduction) {
+    steps.push({ label: 'Beam deductions',                               value: `−${deductFt3} ft³` })
+    steps.push({ label: 'Net wall volume',                               value: `${r2(netVol)} ft³` })
+  }
+  steps.push({ label: `Mortar vol  (× ${mat.mortarVolPerFt3Wall} ft³/ft³ wall)`, value: `${r2(mortarVol)} ft³` })
+  steps.push({ label: `Cement  (× ${mat.cementBagsPerFt3Mortar} bags/ft³, ceil)`, value: `${cementBags} bags`, bold: true })
+
   return {
     title: `${mat.name} – Cement`,
-    steps: [
-      { label: 'Wall volume',                                              value: `${r2(volFt3)} ft³` },
-      { label: `Mortar vol  (× ${mat.mortarVolPerFt3Wall} ft³/ft³ wall)`, value: `${r2(mortarVol)} ft³` },
-      { label: `Cement  (× ${mat.cementBagsPerFt3Mortar} bags/ft³, ceil)`, value: `${cementBags} bags`, bold: true },
-    ],
+    steps,
     note: 'Mortar ratio 1:6 — currently fixed in material library. Will become project-level setting in Phase 1.5 (varies by builder/package).',
   }
 }
@@ -196,16 +225,29 @@ export function explainCement(state, matKey) {
 export function explainSand(state, matKey) {
   const mat = MATERIAL_LIBRARY[matKey]
   if (!mat || mat.bondingType !== BONDING.CEMENT_SAND) return null
-  const { volFt3 } = matVolumes(state, matKey)
-  const mortarVol = volFt3 * mat.mortarVolPerFt3Wall
+  const { volFt3: grossVol } = matVolumes(state, matKey)
+
+  const netData = state.getMasonryWithBeamDeduction?.()
+  const netVol = netData?.[matKey]?.volFt3 ?? grossVol
+  const deductFt3 = r2(grossVol - netVol)
+  const hasDeduction = deductFt3 > 0
+
+  const mortarVol = netVol * mat.mortarVolPerFt3Wall
   const sandFt3   = mortarVol * mat.sandFt3PerFt3Mortar
+
+  const steps = [
+    { label: 'Gross wall volume',                                        value: `${r2(grossVol)} ft³` },
+  ]
+  if (hasDeduction) {
+    steps.push({ label: 'Beam deductions',                               value: `−${deductFt3} ft³` })
+    steps.push({ label: 'Net wall volume',                               value: `${r2(netVol)} ft³` })
+  }
+  steps.push({ label: `Mortar vol  (× ${mat.mortarVolPerFt3Wall} ft³/ft³ wall)`, value: `${r2(mortarVol)} ft³` })
+  steps.push({ label: `Sand  (× ${mat.sandFt3PerFt3Mortar} loose ft³/ft³)`,     value: `${r2(sandFt3)} ft³`, bold: true })
+
   return {
     title: `${mat.name} – Sand`,
-    steps: [
-      { label: 'Wall volume',                                              value: `${r2(volFt3)} ft³` },
-      { label: `Mortar vol  (× ${mat.mortarVolPerFt3Wall} ft³/ft³ wall)`, value: `${r2(mortarVol)} ft³` },
-      { label: `Sand  (× ${mat.sandFt3PerFt3Mortar} loose ft³/ft³)`,     value: `${r2(sandFt3)} ft³`, bold: true },
-    ],
+    steps,
     note: 'Dry-to-wet expansion factor included in multiplier. Mortar ratio 1:6 — currently fixed in material library. Will become project-level setting in Phase 1.5.',
   }
 }
