@@ -6,6 +6,29 @@
 //   }))
 // `uid` is the store-level ID generator (same counter as nodes/walls/rooms/stamps).
 
+import { MATERIAL_LIBRARY, BONDING } from './materials'
+import {
+  CONCRETE_GRADE, CEMENT_BAGS_PER_M3, STEEL_KG_PER_M3, AGGREGATE_SPLIT,
+  SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY,
+} from './constants/structural'
+
+// Unit conversion: 1 ft³ = 0.0283168 m³
+const FT3_TO_M3 = 0.0283168
+
+// PCC layer thickness under each footing (standard 50mm bedding).
+// TODO Phase 2: Move to package template when ERP adds builder customization.
+const PCC_THICKNESS_FT = 2 / 12
+
+function r2(n) { return Math.round(n * 100) / 100 }
+
+// Module-level memoization caches (reference-equality keyed).
+// Safe for single-store apps — one store instance per app lifetime.
+let _wallAdjCache    = { rooms: null, result: null }
+let _derivedBeamsCache = { walls: null, nodes: null, columns: null, rooms: null, result: null }
+let _allBeamsCache   = { beams: null, derived: null, result: null }
+let _concreteCache   = { colQ: null, footQ: null, beamQ: null, slabQ: null, stairQ: null, sunQ: null, result: null }
+let _masonryDedCache = { walls: null, nodes: null, projectSettings: null, result: null }
+
 export const DEFAULT_COLUMN_TYPES = [
   { id: 'C1', label: 'Corner 9×9',    widthIn: 9,  depthIn: 9,  shape: 'rect',   footingTypeId: 'F1' },
   { id: 'C2', label: 'External 9×12', widthIn: 9,  depthIn: 12, shape: 'rect',   footingTypeId: 'F2' },
@@ -362,30 +385,446 @@ export const createStructuralSlice = (set, get, uid) => ({
     }))
   },
 
-  // ── Selectors (stubs — implemented in commit 3) ───────────────────────────
+  // ── Selectors ─────────────────────────────────────────────────────────────
 
-  // Returns in-memory WALL_DERIVED beam entities (not persisted).
-  // Stub: commit 3 fills this in.
-  getDerivedWallBeams: () => [],
-
-  // Merges EXPLICIT beams (from store) + WALL_DERIVED beams (in-memory).
-  // All BOQ, canvas render, and CSV export consume this — single code path.
-  // Stub: commit 3 fills this in.
-  getAllBeams: () => {
-    return Object.values(get().beams)
+  // Returns { [wallId]: count } — how many valid rooms reference each wall.
+  // Used to auto-classify external (count=1) vs partition (count=2) walls.
+  getWallAdjacencyCount: () => {
+    const { rooms } = get()
+    if (_wallAdjCache.rooms === rooms) return _wallAdjCache.result
+    const count = {}
+    for (const room of Object.values(rooms)) {
+      for (const wid of (room.wallIds || [])) {
+        count[wid] = (count[wid] || 0) + 1
+      }
+    }
+    _wallAdjCache = { rooms, result: count }
+    return count
   },
 
-  // Stub selectors — all return empty/zero until commit 3.
-  getColumnQuantities:         () => ({}),
-  getFootingQuantities:         () => ({}),
-  getBeamQuantities:           () => ({ plinth: null, lintel: null, roof: null }),
-  getSlabQuantities:           () => ({ mainAreaFt2: 0, mainVolFt3: 0, sunkenAreaFt2: 0, sunkenVolFt3: 0, sunkenRooms: [] }),
-  getStaircaseQuantities:      () => ([]),
-  getSunshadeQuantities:       () => ({ count: 0, totalVolFt3: 0 }),
-  getParapetQuantities:        () => ({ totalLenFt: 0, heightFt: 0, thicknessIn: 0, totalVolFt3: 0, materialKey: '' }),
-  getSteelQuantities:          () => ({ footing: 0, column: 0, beam: 0, slab: 0, staircase: 0, civilStamp: 0, total: 0 }),
-  getConcreteByGrade:          () => ({}),
-  getMasonryWithBeamDeduction: () => get().getMaterialQuantities?.() ?? {},
-  getWallAdjacencyCount:       () => ({}),
-  classifyWallBeamFlags:       (_wallId) => ({ hasPlinthBeam: false, hasLintelBeam: false, hasRoofBeam: false }),
+  // Resolves null beam flags to auto-derived booleans from room adjacency.
+  // External wall (count=1): plinth+lintel+roof; Partition (count=2): lintel only; Unclassified: none.
+  classifyWallBeamFlags: (wallId) => {
+    const wall = get().walls[wallId]
+    if (!wall) return { hasPlinthBeam: false, hasLintelBeam: false, hasRoofBeam: false }
+    const adjCount = get().getWallAdjacencyCount()
+    const cnt      = adjCount[wallId] ?? 0
+    const isExt    = cnt === 1
+    const isPart   = cnt === 2
+    return {
+      hasPlinthBeam: wall.hasPlinthBeam !== null ? wall.hasPlinthBeam : isExt,
+      hasLintelBeam: wall.hasLintelBeam !== null ? wall.hasLintelBeam : (isExt || isPart),
+      hasRoofBeam:   wall.hasRoofBeam   !== null ? wall.hasRoofBeam  : isExt,
+    }
+  },
+
+  // Returns in-memory WALL_DERIVED beam entities (NOT persisted in store).
+  // Memoized on {walls, nodes, columns, rooms}.
+  getDerivedWallBeams: () => {
+    const { walls, nodes, columns, rooms } = get()
+    const c = _derivedBeamsCache
+    if (c.walls === walls && c.nodes === nodes && c.columns === columns && c.rooms === rooms) return c.result
+
+    // Build nodeId → columnId map for attached columns
+    const nodeToColId = {}
+    for (const col of Object.values(columns)) {
+      if (col.attachedNodeId) nodeToColId[col.attachedNodeId] = col.id
+    }
+
+    const result = []
+    for (const wall of Object.values(walls)) {
+      if (wall.isVirtual || wall.isPlot) continue
+      const flags = get().classifyWallBeamFlags(wall.id)
+      const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
+      if (!n1 || !n2) continue
+
+      for (const [flag, level] of [['hasPlinthBeam', 'plinth'], ['hasLintelBeam', 'lintel'], ['hasRoofBeam', 'roof']]) {
+        if (!flags[flag]) continue
+        const fromRef = nodeToColId[wall.n1]
+          ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] }
+          : { type: 'POINT', x: n1.x, y: n1.y }
+        const toRef = nodeToColId[wall.n2]
+          ? { type: 'COLUMN', columnId: nodeToColId[wall.n2] }
+          : { type: 'POINT', x: n2.x, y: n2.y }
+        result.push({ id: `derived_${wall.id}_${level}`, endpoints: { from: fromRef, to: toRef }, level, source: 'WALL_DERIVED', sourceWallId: wall.id })
+      }
+    }
+
+    _derivedBeamsCache = { walls, nodes, columns, rooms, result }
+    return result
+  },
+
+  // Merges EXPLICIT (persisted) + WALL_DERIVED (in-memory) beams into one list.
+  // All BOQ, canvas render, and CSV export consume this — single code path.
+  // Memoized on {beams, derived}.
+  getAllBeams: () => {
+    const { beams } = get()
+    const derived   = get().getDerivedWallBeams()
+    const c = _allBeamsCache
+    if (c.beams === beams && c.derived === derived) return c.result
+    const result = [...Object.values(beams), ...derived]
+    _allBeamsCache = { beams, derived, result }
+    return result
+  },
+
+  // Returns { [columnTypeId]: { count, columnHeightFt, sectionFt2, volFt3, footingTypeId } }
+  getColumnQuantities: () => {
+    const { columns, projectSettings } = get()
+    const { columnTypes, heights, slabSettings } = projectSettings
+    const columnHeightFt = heights.plinthHeightFt + heights.floorHeightFt + slabSettings.mainThicknessIn / 12
+    const result = {}
+    for (const col of Object.values(columns)) {
+      const ct = columnTypes.find(t => t.id === col.columnTypeId)
+      if (!ct) continue
+      const sectionFt2 = ct.shape === 'circle'
+        ? Math.PI * Math.pow(ct.diamIn / 2, 2) / 144
+        : (ct.widthIn * ct.depthIn) / 144
+      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, footingTypeId: ct.footingTypeId }
+      result[ct.id].count  += 1
+      result[ct.id].volFt3 += sectionFt2 * columnHeightFt
+    }
+    for (const k of Object.keys(result)) result[k].volFt3 = r2(result[k].volFt3)
+    return result
+  },
+
+  // Returns { [footingTypeId]: { count, concreteVolFt3, pccVolFt3 } }
+  getFootingQuantities: () => {
+    const { projectSettings } = get()
+    const { columnTypes, footingTypes } = projectSettings
+    const colQtys = get().getColumnQuantities()
+    const result = {}
+    for (const [ctId, colData] of Object.entries(colQtys)) {
+      const ct = columnTypes.find(t => t.id === ctId)
+      if (!ct) continue
+      const ft = footingTypes.find(t => t.id === ct.footingTypeId)
+      if (!ft) continue
+      if (!result[ft.id]) result[ft.id] = { count: 0, concreteVolFt3: 0, pccVolFt3: 0 }
+      result[ft.id].count          += colData.count
+      result[ft.id].concreteVolFt3 += ft.lengthFt * ft.widthFt * ft.depthFt * colData.count
+      result[ft.id].pccVolFt3      += ft.lengthFt * ft.widthFt * PCC_THICKNESS_FT * colData.count
+    }
+    for (const k of Object.keys(result)) {
+      result[k].concreteVolFt3 = r2(result[k].concreteVolFt3)
+      result[k].pccVolFt3      = r2(result[k].pccVolFt3)
+    }
+    return result
+  },
+
+  // Returns { plinth: { totalLenFt, widthIn, depthIn, volFt3 }, lintel: {...}, roof: {...} }
+  // null entry for a level means no beams of that level exist.
+  getBeamQuantities: () => {
+    const { columns, nodes, projectSettings } = get()
+    const { beamDimensions } = projectSettings
+    const allBeams = get().getAllBeams()
+
+    function endpointPos(ref) {
+      if (ref.type === 'COLUMN') {
+        const col = columns[ref.columnId]
+        if (!col) return null
+        if (col.attachedNodeId) { const nd = nodes[col.attachedNodeId]; return nd ?? null }
+        return { x: col.x, y: col.y }
+      }
+      return { x: ref.x, y: ref.y }
+    }
+
+    const result = { plinth: null, lintel: null, roof: null }
+    for (const beam of allBeams) {
+      const dims = beamDimensions[beam.level]
+      if (!dims) continue
+      const from = endpointPos(beam.endpoints.from)
+      const to   = endpointPos(beam.endpoints.to)
+      if (!from || !to) continue
+      const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
+      if (!result[beam.level]) result[beam.level] = { totalLenFt: 0, widthIn: dims.widthIn, depthIn: dims.depthIn, volFt3: 0 }
+      result[beam.level].totalLenFt += lenFt
+      result[beam.level].volFt3     += lenFt * (dims.widthIn / 12) * (dims.depthIn / 12)
+    }
+    for (const lvl of ['plinth', 'lintel', 'roof']) {
+      if (result[lvl]) {
+        result[lvl].totalLenFt = r2(result[lvl].totalLenFt)
+        result[lvl].volFt3     = r2(result[lvl].volFt3)
+      }
+    }
+    return result
+  },
+
+  // Returns { mainAreaFt2, mainVolFt3, sunkenAreaFt2, sunkenVolFt3, sunkenRooms }
+  // Falls back to auto-deriving from room types when slabs entity is empty (pre-initialization).
+  getSlabQuantities: () => {
+    const state = get()
+    const { projectSettings, slabs, rooms } = state
+    const { mainThicknessIn, sunkenDepthIn, autoSunkenRoomTypes } = projectSettings.slabSettings
+    const validIds = state.getValidRoomIds()
+    const validSet = new Set(validIds)
+
+    let mainAreaFt2 = 0, sunkenAreaFt2 = 0
+    const sunkenRooms = []
+
+    if (Object.keys(slabs).length === 0) {
+      // Fallback: auto-derive until user or autoInitSlabs sets up slab entities
+      for (const rid of validIds) {
+        const room = rooms[rid]
+        if (!room) continue
+        const area = state.getRoomArea(rid)
+        if (autoSunkenRoomTypes.includes(room.type)) {
+          sunkenAreaFt2 += area
+          sunkenRooms.push({ roomId: rid, name: room.name, areaFt2: r2(area) })
+        } else {
+          mainAreaFt2 += area
+        }
+      }
+    } else {
+      for (const slab of Object.values(slabs)) {
+        for (const rid of slab.roomIds) {
+          if (!validSet.has(rid)) continue
+          const area = state.getRoomArea(rid)
+          if (slab.type === 'SUNKEN') {
+            sunkenAreaFt2 += area
+            sunkenRooms.push({ roomId: rid, name: rooms[rid]?.name ?? rid, areaFt2: r2(area) })
+          } else {
+            mainAreaFt2 += area
+          }
+        }
+      }
+    }
+
+    return {
+      mainAreaFt2:  r2(mainAreaFt2),
+      mainVolFt3:   r2(mainAreaFt2 * mainThicknessIn / 12),
+      sunkenAreaFt2: r2(sunkenAreaFt2),
+      sunkenVolFt3:  r2(sunkenAreaFt2 * (mainThicknessIn + sunkenDepthIn) / 12),
+      sunkenRooms,
+    }
+  },
+
+  // Returns [{ id, stepCount, waistSlabFt3, landingFt3, totalRccFt3, graniteFt2 }]
+  getStaircaseQuantities: () => {
+    return Object.values(get().staircases).map(sc => {
+      const stepCount  = sc.flightCount * sc.stepsPerFlight
+      const riserFt    = sc.riserIn / 12
+      const treadFt    = sc.treadIn / 12
+      // Waist slab spans hypotenuse of each flight (inclined slab under steps)
+      const flightLenFt   = Math.hypot(treadFt * sc.stepsPerFlight, riserFt * sc.stepsPerFlight)
+      const waistThickFt  = sc.waistSlabIn / 12
+      const waistSlabFt3  = flightLenFt * sc.flightWidthFt * waistThickFt * sc.flightCount
+      // Landings between flights (dog-legged: 1 landing per 2 flights, plus top landing)
+      const landingCount  = Math.max(1, sc.flightCount)
+      const landingFt3    = sc.landingFtWidth * sc.landingFtLength * waistThickFt * landingCount
+      const totalRccFt3   = r2(waistSlabFt3 + landingFt3)
+      // Granite: tread area × step count + landing areas
+      const graniteFt2    = r2(treadFt * sc.flightWidthFt * stepCount + sc.landingFtWidth * sc.landingFtLength * landingCount)
+      return { id: sc.id, stepCount, waistSlabFt3: r2(waistSlabFt3), landingFt3: r2(landingFt3), totalRccFt3, graniteFt2 }
+    })
+  },
+
+  // Returns { count, totalVolFt3 } — aggregates all window openings with hasSunshade=true
+  getSunshadeQuantities: () => {
+    const { walls, projectSettings } = get()
+    const { projectionFt, thicknessIn } = projectSettings.sunshadeSettings
+    let count = 0, totalVolFt3 = 0
+    for (const wall of Object.values(walls)) {
+      for (const op of (wall.openings || [])) {
+        if (op.type !== 'window' || !op.hasSunshade) continue
+        count++
+        totalVolFt3 += projectionFt * (op.width / 12) * (thicknessIn / 12)
+      }
+    }
+    return { count, totalVolFt3: r2(totalVolFt3) }
+  },
+
+  // Returns { totalLenFt, heightFt, thicknessIn, totalVolFt3, materialKey }
+  // External wall = adjacent to exactly 1 roofing room.
+  getParapetQuantities: () => {
+    const state = get()
+    const { walls, nodes, rooms, projectSettings } = state
+    const { enabled, heightFt, thicknessIn, materialKey } = projectSettings.parapetSettings
+    if (!enabled) return { totalLenFt: 0, heightFt, thicknessIn, totalVolFt3: 0, materialKey }
+
+    const adjCount     = state.getWallAdjacencyCount()
+    const validRoomIds = state.getValidRoomIds()
+
+    // Walls that border at least one roofing room
+    const wallBordersRoofing = new Set()
+    for (const rid of validRoomIds) {
+      const room = rooms[rid]
+      if (!room?.finishes?.roofing) continue
+      for (const wid of room.wallIds) wallBordersRoofing.add(wid)
+    }
+
+    let totalLenFt = 0
+    for (const wall of Object.values(walls)) {
+      if (wall.isVirtual || wall.isPlot) continue
+      if ((adjCount[wall.id] ?? 0) !== 1) continue  // only external
+      if (!wallBordersRoofing.has(wall.id)) continue
+      const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
+      if (!n1 || !n2) continue
+      totalLenFt += Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
+    }
+
+    return {
+      totalLenFt: r2(totalLenFt),
+      heightFt,
+      thicknessIn,
+      totalVolFt3: r2(totalLenFt * heightFt * (thicknessIn / 12)),
+      materialKey,
+    }
+  },
+
+  // Returns { footing, column, beam, slab, staircase, civilStamp, total } — all in kg
+  getSteelQuantities: () => {
+    const state = get()
+    const colQtys  = state.getColumnQuantities()
+    const footQtys = state.getFootingQuantities()
+    const beamQtys = state.getBeamQuantities()
+    const slabQtys = state.getSlabQuantities()
+    const stairQtys = state.getStaircaseQuantities()
+    const sumpQty   = state.getSumpCivilQty?.()   ?? { rccBottomFt3: 0, rccTopFt3: 0 }
+    const septicQty = state.getSepticCivilQty?.()  ?? { rccBottomFt3: 0, rccTopFt3: 0 }
+
+    const toM3 = ft3 => ft3 * FT3_TO_M3
+
+    const footM3  = toM3(Object.values(footQtys).reduce((s, q) => s + q.concreteVolFt3, 0))
+    const colM3   = toM3(Object.values(colQtys).reduce((s, q) => s + q.volFt3, 0))
+    const beamM3  = toM3(Object.values(beamQtys).filter(Boolean).reduce((s, q) => s + q.volFt3, 0))
+    const slabM3  = toM3(slabQtys.mainVolFt3 + slabQtys.sunkenVolFt3)
+    const stairM3 = toM3(stairQtys.reduce((s, q) => s + q.totalRccFt3, 0))
+    const civilM3 = toM3(sumpQty.rccBottomFt3 + sumpQty.rccTopFt3 + septicQty.rccBottomFt3 + septicQty.rccTopFt3)
+
+    const footing    = Math.round(footM3  * STEEL_KG_PER_M3.FOOTING)
+    const column     = Math.round(colM3   * STEEL_KG_PER_M3.COLUMN)
+    const beam       = Math.round(beamM3  * STEEL_KG_PER_M3.BEAM)
+    const slab       = Math.round(slabM3  * STEEL_KG_PER_M3.SLAB)
+    const staircase  = Math.round(stairM3 * STEEL_KG_PER_M3.STAIRCASE)
+    const civilStamp = Math.round(civilM3 * STEEL_KG_PER_M3.CIVIL_STAMP)
+    return { footing, column, beam, slab, staircase, civilStamp, total: footing + column + beam + slab + staircase + civilStamp }
+  },
+
+  // Returns { M20: { volM3, cementBags, sandM3DRY, agg10mmM3DRY, agg20mmM3DRY },
+  //           M7_5: { volM3, cementBags, sandM3DRY, agg20mmM3DRY } }
+  // Sand and aggregate are procurement DRY volumes (1.54 factor already embedded in constants).
+  // Memoized on selector results (reference equality via intermediate selector refs).
+  getConcreteByGrade: () => {
+    const state    = get()
+    const colQ     = state.getColumnQuantities()
+    const footQ    = state.getFootingQuantities()
+    const beamQ    = state.getBeamQuantities()
+    const slabQ    = state.getSlabQuantities()
+    const stairQ   = state.getStaircaseQuantities()
+    const sunQ     = state.getSunshadeQuantities()
+    const c = _concreteCache
+    if (c.colQ === colQ && c.footQ === footQ && c.beamQ === beamQ && c.slabQ === slabQ && c.stairQ === stairQ && c.sunQ === sunQ) return c.result
+
+    const m20Ft3 =
+      Object.values(colQ).reduce((s, q) => s + q.volFt3, 0) +
+      Object.values(footQ).reduce((s, q) => s + q.concreteVolFt3, 0) +
+      Object.values(beamQ).filter(Boolean).reduce((s, q) => s + q.volFt3, 0) +
+      slabQ.mainVolFt3 + slabQ.sunkenVolFt3 +
+      stairQ.reduce((s, q) => s + q.totalRccFt3, 0) +
+      sunQ.totalVolFt3
+
+    const pccFt3 = Object.values(footQ).reduce((s, q) => s + q.pccVolFt3, 0)
+    const m20M3  = m20Ft3 * FT3_TO_M3
+    const pccM3  = pccFt3 * FT3_TO_M3
+
+    const result = {}
+    if (m20M3 > 0) {
+      result['M20'] = {
+        volM3:        r2(m20M3),
+        cementBags:   Math.ceil(m20M3 * CEMENT_BAGS_PER_M3.M20),
+        sandM3DRY:    r2(m20M3 * SAND_M3_PER_M3_DRY.M20),
+        agg10mmM3DRY: r2(m20M3 * AGGREGATE_M3_PER_M3_DRY.M20 * AGGREGATE_SPLIT.M20.mm10Ratio),
+        agg20mmM3DRY: r2(m20M3 * AGGREGATE_M3_PER_M3_DRY.M20 * AGGREGATE_SPLIT.M20.mm20Ratio),
+      }
+    }
+    if (pccM3 > 0) {
+      result['M7_5'] = {
+        volM3:        r2(pccM3),
+        cementBags:   Math.ceil(pccM3 * CEMENT_BAGS_PER_M3.M7_5),
+        sandM3DRY:    r2(pccM3 * SAND_M3_PER_M3_DRY.M7_5),
+        agg20mmM3DRY: r2(pccM3 * AGGREGATE_M3_PER_M3_DRY.M7_5),  // 20mm only for M7.5 PCC
+      }
+    }
+
+    _concreteCache = { colQ, footQ, beamQ, slabQ, stairQ, sunQ, result }
+    return result
+  },
+
+  // Returns same shape as getMaterialQuantities() but with beam volumes deducted.
+  // Beam deduction per wall = Σ over active beam levels of:
+  //   wallLengthFt × min(wallThicknessFt, beamWidthFt) × beamDepthFt
+  //
+  // Beam deduction is per-wall approximation: wallLength × beam-width × beam-depth.
+  // May slightly over-deduct at beam junctions and corners. Acceptable for contractor
+  // BOQ estimation; absorbed by wastage allowance. Not exact structural netting.
+  //
+  // Memoized on {walls, nodes, projectSettings}.
+  getMasonryWithBeamDeduction: () => {
+    const { walls, nodes, projectSettings } = get()
+    const c = _masonryDedCache
+    if (c.walls === walls && c.nodes === nodes && c.projectSettings === projectSettings) return c.result
+
+    const base = get().getMaterialQuantities?.()
+    if (!base || Object.keys(base).length === 0) {
+      _masonryDedCache = { walls, nodes, projectSettings, result: base ?? {} }
+      return base ?? {}
+    }
+
+    const { beamDimensions, wastagePercent } = projectSettings
+    const WASTAGE = 1 + wastagePercent / 100
+
+    // Accumulate deductions per material key
+    const deductions = {}
+    for (const wall of Object.values(walls)) {
+      if (wall.isVirtual || wall.isPlot) continue
+      const matKey = wall.materialKey ?? 'IS_MODULAR_BRICK'
+      const flags  = get().classifyWallBeamFlags(wall.id)
+      const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
+      if (!n1 || !n2) continue
+      const wallLenFt  = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
+      const wallThickFt = (wall.thickness ?? 9) / 12
+      let deductFt3 = 0
+      for (const [flag, level] of [['hasPlinthBeam', 'plinth'], ['hasLintelBeam', 'lintel'], ['hasRoofBeam', 'roof']]) {
+        if (!flags[flag]) continue
+        const dims = beamDimensions[level]
+        if (!dims) continue
+        deductFt3 += wallLenFt * Math.min(wallThickFt, dims.widthIn / 12) * (dims.depthIn / 12)
+      }
+      if (deductFt3 > 0) deductions[matKey] = (deductions[matKey] ?? 0) + deductFt3
+    }
+
+    if (Object.keys(deductions).length === 0) {
+      _masonryDedCache = { walls, nodes, projectSettings, result: base }
+      return base
+    }
+
+    const result = {}
+    for (const [matKey, qty] of Object.entries(base)) {
+      const deduct = deductions[matKey] ?? 0
+      if (deduct === 0) { result[matKey] = qty; continue }
+
+      const adjustedVol = Math.max(0, qty.volFt3 - deduct)
+      const ratio = qty.volFt3 > 0 ? adjustedVol / qty.volFt3 : 0
+      const mat = MATERIAL_LIBRARY[matKey]
+
+      if (!mat) { result[matKey] = { ...qty, volFt3: r2(adjustedVol) }; continue }
+
+      const unitsPer   = mat.bricksPerFt3 ?? mat.blocksPerFt3 ?? 0
+      const unitCount  = Math.ceil(adjustedVol * unitsPer * WASTAGE)
+      const adjusted   = { ...qty, volFt3: r2(adjustedVol), unitCount }
+
+      if (mat.bondingType === BONDING.CEMENT_SAND_MORTAR) {
+        const mortarVol = adjustedVol * mat.mortarVolPerFt3Wall
+        adjusted.cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
+        adjusted.sandFt3    = r2(mortarVol * mat.sandFt3PerFt3Mortar)
+      } else {
+        // THIN_BED: adhesive scales proportionally with volume ratio
+        adjusted.adhesiveKg   = r2((qty.adhesiveKg ?? 0) * ratio)
+        adjusted.adhesiveBags = Math.ceil(adjusted.adhesiveKg / (mat.adhesiveBagKg ?? 40))
+      }
+      result[matKey] = adjusted
+    }
+
+    _masonryDedCache = { walls, nodes, projectSettings, result }
+    return result
+  },
 })
