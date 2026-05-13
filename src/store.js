@@ -6,6 +6,7 @@ import {
 } from './geometry'
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
+import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS } from './structuralSlice'
 
 let nextId = 1
 const uid = () => String(nextId++)
@@ -108,9 +109,9 @@ export const useStore = create((set, get) => ({
   // ── History ───────────────────────────────────────────────────────────
 
   _save() {
-    const { nodes, walls, rooms, stamps } = get()
+    const { nodes, walls, rooms, stamps, columns, beams, slabs, staircases } = get()
     set(s => ({
-      history: [...s.history.slice(-49), { nodes, walls, rooms, stamps }],
+      history: [...s.history.slice(-49), { nodes, walls, rooms, stamps, columns, beams, slabs, staircases }],
       future:  [],
     }))
   },
@@ -121,11 +122,15 @@ export const useStore = create((set, get) => ({
     const prev = history[history.length - 1]
     set(s => ({
       history: s.history.slice(0, -1),
-      future:  [{ nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps }, ...s.future.slice(0, 49)],
+      future:  [{ nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases }, ...s.future.slice(0, 49)],
       nodes:   prev.nodes,
       walls:   prev.walls,
       rooms:   prev.rooms,
       stamps:  prev.stamps,
+      columns: prev.columns    ?? s.columns,
+      beams:   prev.beams      ?? s.beams,
+      slabs:   prev.slabs      ?? s.slabs,
+      staircases: prev.staircases ?? s.staircases,
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
     }))
   },
@@ -136,11 +141,15 @@ export const useStore = create((set, get) => ({
     const next = future[0]
     set(s => ({
       future:  s.future.slice(1),
-      history: [...s.history.slice(-49), { nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps }],
+      history: [...s.history.slice(-49), { nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases }],
       nodes:   next.nodes,
       walls:   next.walls,
       rooms:   next.rooms,
       stamps:  next.stamps,
+      columns: next.columns    ?? s.columns,
+      beams:   next.beams      ?? s.beams,
+      slabs:   next.slabs      ?? s.slabs,
+      staircases: next.staircases ?? s.staircases,
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
     }))
   },
@@ -148,7 +157,7 @@ export const useStore = create((set, get) => ({
   // ── Tools ─────────────────────────────────────────────────────────────
 
   setTool(tool) {
-    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, pendingWallIds: [], draftOpening: null })
+    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, pendingWallIds: [], draftOpening: null })
   },
 
   toggleDrawVirtual()    { set(s => ({ drawVirtual: !s.drawVirtual })) },
@@ -176,8 +185,8 @@ export const useStore = create((set, get) => ({
       set(s => {
         const newWalls = { ...s.walls }
         delete newWalls[wall.id]
-        newWalls[w1Id] = { ...wall, id: w1Id, n1: wall.n1, n2: newNodeId, openings: [] }
-        newWalls[w2Id] = { ...wall, id: w2Id, n1: newNodeId, n2: wall.n2, openings: [] }
+        newWalls[w1Id] = { ...wall, id: w1Id, n1: wall.n1, n2: newNodeId, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
+        newWalls[w2Id] = { ...wall, id: w2Id, n1: newNodeId, n2: wall.n2, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
         const rooms = {}
         Object.values(s.rooms).forEach(r => {
           const idx = r.wallIds.indexOf(wall.id)
@@ -225,7 +234,7 @@ export const useStore = create((set, get) => ({
     const id = uid()
     const isVirtual = get().drawVirtual
     set(s => ({
-      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [] } },
+      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null } },
       drawStartId: null,
     }))
   },
@@ -287,8 +296,8 @@ export const useStore = create((set, get) => ({
     set(s => {
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
-      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [] }
-      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [] }
+      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
+      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
       const rooms = {}
       Object.values(s.rooms).forEach(r => {
         const idx = r.wallIds.indexOf(wallId)
@@ -317,7 +326,9 @@ export const useStore = create((set, get) => ({
     set(s => {
       const wall = s.walls[wallId]
       if (!wall) return {}
-      return { walls: { ...s.walls, [wallId]: { ...wall, openings: [...(wall.openings || []), { id, offset, width, height, type, orient }] } } }
+      const sunshadeOn = s.projectSettings?.sunshadeSettings?.enabled ?? true
+      const hasSunshade = type === 'window' ? sunshadeOn : false
+      return { walls: { ...s.walls, [wallId]: { ...wall, openings: [...(wall.openings || []), { id, offset, width, height, type, orient, hasSunshade }] } } }
     })
   },
 
@@ -406,17 +417,34 @@ export const useStore = create((set, get) => ({
       overhead_tank: { w: 60, h: 60, depth: 48,  name: 'OHT' },
       septic_tank:   { w: 96, h: 72, depth: 60,  name: 'Septic Tank' },
     }[type] || { w: 48, h: 48 }
-    set(s => ({
-      stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults } },
-    }))
+    set(s => {
+      const nextState = {
+        stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults } },
+      }
+      if (type === 'stairs') {
+        const sd = s.projectSettings?.staircaseDefaults ?? DEFAULT_PROJECT_SETTINGS.staircaseDefaults
+        nextState.staircases = {
+          ...s.staircases,
+          [id]: { id, type: sd.type, flightCount: 2, stepsPerFlight: 7, treadIn: sd.treadIn, riserIn: sd.riserIn, waistSlabIn: sd.waistSlabIn, landingFtWidth: sd.landingFtWidth, landingFtLength: sd.landingFtLength, flightWidthFt: sd.flightWidthFt, grade: 'M20' },
+        }
+      }
+      return nextState
+    })
   },
 
   deleteStamp(stampId) {
     get()._save()
     set(s => {
       const stamps = { ...s.stamps }
+      const stampType = stamps[stampId]?.type
       delete stamps[stampId]
-      return { stamps, selectedStampId: null }
+      const nextState = { stamps, selectedStampId: null }
+      if (stampType === 'stairs') {
+        const staircases = { ...s.staircases }
+        delete staircases[stampId]
+        nextState.staircases = staircases
+      }
+      return nextState
     })
   },
 
@@ -618,8 +646,14 @@ export const useStore = create((set, get) => ({
       walls:  migratedWalls,
       rooms:  migratedRooms,
       stamps: migratedStamps,
+      // Structural state — init from saved data or fall back to defaults (greenfield; no migration).
+      projectSettings: data.projectSettings ?? DEFAULT_PROJECT_SETTINGS,
+      columns:    data.columns    ?? {},
+      beams:      data.beams      ?? {},
+      slabs:      data.slabs      ?? {},
+      staircases: data.staircases ?? {},
       history: [], future: [],
-      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
+      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, pendingWallIds: [],
     })
   },
 
@@ -899,4 +933,7 @@ export const useStore = create((set, get) => ({
   getStampsByType(type) {
     return Object.values(get().stamps).filter(s => s.type === type)
   },
+
+  // ── Structural slice (columns, beams, slabs, staircases, projectSettings) ──
+  ...createStructuralSlice(set, get, uid),
 }))
