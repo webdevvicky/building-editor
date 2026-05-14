@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import {
   explainColumnRCC, explainFootingRCC, explainFootingPCC, explainBeamRCC,
@@ -70,6 +70,8 @@ const STEEL_DEFS = [
 const BEAM_LEVELS = ['plinth', 'lintel', 'roof']
 
 export default function StructuralBOQSection({ rates, onRateChange, openId, onInfoClick, onLinesReady, formulaState }) {
+  const prevLinesJsonRef = useRef(null)
+
   const getColumnQuantities    = useStore(s => s.getColumnQuantities)
   const getFootingQuantities   = useStore(s => s.getFootingQuantities)
   const getBeamQuantities      = useStore(s => s.getBeamQuantities)
@@ -141,7 +143,11 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
 
     if (hasStaircase) add('Staircase RCC', r2(totalStairRcc), 'ft³', 'stair_rcc')
 
-    onLinesReady(lines)
+    const json = JSON.stringify(lines)
+    if (json !== prevLinesJsonRef.current) {
+      prevLinesJsonRef.current = json
+      onLinesReady(lines)
+    }
   })
 
   const sh = { rates, onRateChange, openId, onInfoClick }

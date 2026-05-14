@@ -70,7 +70,7 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 ### Phase 1c-2: Rate inputs + BOQ CSV export + layout fix
 
 **Rate inputs (ephemeral — React `useState` only, intentional):**
-- 13 priceable lines each get a `<input type="number" step="0.01">` rate field
+- Each priceable line gets a `<input type="number" step="0.01">` rate field. Line count is dynamic: 7 base finish lines + per-material masonry lines (varies with active material types) + structural RCC/steel/concrete lines + civil lines.
 - Rates live in BOQPanel component state (`useState`) — reset on refresh, not persisted, not in store.
   This is intentional scaffolding; will be replaced by ERP product-catalog dropdown in a future phase.
 - Bricks: rate is ₹/1000 bricks; cost = `(qty / 1000) × rate` (special case)
@@ -96,6 +96,14 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 - Fix: moved all four context panels from `right: 16` → `left: 16`.
 - Layout is now: left = editing context (mutually exclusive), right = BOQ, canvas in middle.
 - Canvas working area: ~694px at 1366px wide, ~1248px at 1920px wide.
+
+**Context panels (left side, mutually exclusive):**
+- `RoomPanel.jsx` — shown when `selectedRoomId` is set (select tool). Room name, type, finish flag toggles.
+- `RoomDetailPanel.jsx` — shown when a room is selected; displays type selector, all six finish flags, rename/delete. (Acts as the detailed edit surface; RoomPanel may be simpler summary.)
+- `OpeningPanel.jsx` — shown when `selectedWallId` is set. Wall thickness, material, openings list, beam flags, sunshade toggle.
+- `StampPanel.jsx` — shown when `selectedStampId` is set. Resize (w/h in ft), depth for civil types, name field.
+- `BulkWallPanel.jsx` — shown when `selectedWallIds` (plural) has items. Batch-edit height, thickness, material, and plot/virtual flags across all selected walls simultaneously.
+- `ColumnPanel.jsx`, `StaircasePanel.jsx` — Phase 1.5; see below.
 
 ### Phase 1c-4: Formula transparency for BOQ
 
@@ -127,7 +135,7 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 - `loadProject` migration: `{ materialKey: 'IS_MODULAR_BRICK', ...wall }` (default-first, saved value wins)
 
 **Material library (`src/materials.js`):**
-- `BONDING` enum: `CEMENT_SAND_MORTAR`, `THIN_BED_ADHESIVE`
+- `BONDING` enum — keys: `CEMENT_SAND`, `THIN_BED`; values: `'CEMENT_SAND_MORTAR'`, `'THIN_BED_ADHESIVE'`. Always compare with keys: `mat.bondingType === BONDING.CEMENT_SAND`.
 - 7 types: `IS_MODULAR_BRICK`, `RED_CLAY_BRICK`, `FLY_ASH_BRICK` (brick types, CEMENT_SAND);
   `AAC_BLOCK`, `CLC_BLOCK` (thin-bed blocks); `CONCRETE_SOLID_BLOCK`, `CONCRETE_HOLLOW_BLOCK` (CEMENT_SAND blocks)
 - Brick types: `bricksPerFt3` field; block types: `blocksPerFt3` field
@@ -146,6 +154,7 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 **OpeningPanel:**
 - Material `<select>` dropdown below Thickness field, lists all MATERIAL_LIBRARY entries
 - Triggers `setWallMaterial` on change; shows current `wall.materialKey` as selected option
+- *(Phase 1.5 additions)* Three beam flag checkboxes (Plinth/Lintel/Roof) with null→true→false→null cycling and "auto (external/partition)" badge when null. `hasSunshade` checkbox on window-type openings.
 
 **BOQPanel:**
 - Masonry section (between Flooring and Plaster rows): one sub-group per active material type
