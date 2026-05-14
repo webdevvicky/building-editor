@@ -7,6 +7,7 @@ import {
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS } from './structuralSlice'
+import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
 
 let nextId = 1
 const uid = () => String(nextId++)
@@ -105,6 +106,7 @@ export const useStore = create((set, get) => ({
 
   unit:           'ft',
   showDimensions: false,
+  layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
 
   // ── History ───────────────────────────────────────────────────────────
 
@@ -164,6 +166,7 @@ export const useStore = create((set, get) => ({
   setUnit(unit)          { set({ unit }) },
   toggleShowDimensions() { set(s => ({ showDimensions: !s.showDimensions })) },
   setDraftOpening(data)  { set({ draftOpening: data }) },
+  setLayerVisibility(partial) { set(s => ({ layerVisibility: { ...s.layerVisibility, ...partial } })) },
 
   // ── Nodes ─────────────────────────────────────────────────────────────
 

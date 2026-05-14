@@ -125,7 +125,8 @@ export default function Canvas() {
   const addColumn    = useStore(s => s.addColumn)
   const deleteColumn = useStore(s => s.deleteColumn)
   const selectColumn = useStore(s => s.selectColumn)
-  const addBeam      = useStore(s => s.addBeam)
+  const addBeam          = useStore(s => s.addBeam)
+  const layerVisibility  = useStore(s => s.layerVisibility)
 
   const setTool = useStore(s => s.setTool)
   const {
@@ -487,6 +488,7 @@ export default function Canvas() {
         {/* Grid */}
         <rect x="-10000" y="-10000" width="30000" height="30000" fill="url(#grid)"/>
 
+        {layerVisibility.roomFills && (<>
         {/* Room fills */}
         {Object.values(rooms).map((room, idx) => {
           if (!isRoomValid(room.id)) {
@@ -519,7 +521,9 @@ export default function Canvas() {
             />
           )
         })}
+        </>)}
 
+        {layerVisibility.stamps && (<>
         {/* Stamps — x/y is bottom-left corner in world inches */}
         {Object.values(stamps).map(stamp => {
           const isSelected = stamp.id === selectedStampId
@@ -608,7 +612,9 @@ export default function Canvas() {
             </g>
           )
         })}
+        </>)}
 
+        {layerVisibility.walls && (<>
         {/* Walls */}
         {Object.values(walls).map(wall => {
           const a = nodes[wall.n1], b = nodes[wall.n2]
@@ -705,7 +711,9 @@ export default function Canvas() {
             </g>
           )
         })}
+        </>)}
 
+        {layerVisibility.beams && (<>
         {/* Beams */}
         {getAllBeams().map(beam => {
           const fromPos = beam.endpoints.from.type === 'COLUMN'
@@ -726,6 +734,7 @@ export default function Canvas() {
             />
           )
         })}
+        </>)}
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {
@@ -747,6 +756,7 @@ export default function Canvas() {
           )
         })()}
 
+        {layerVisibility.nodes && (<>
         {/* Nodes */}
         {Object.values(nodes).map(node => {
           const isStart = node.id === drawStartId
@@ -756,7 +766,9 @@ export default function Canvas() {
               stroke="#fff" strokeWidth={2} style={{ pointerEvents: 'none' }}/>
           )
         })}
+        </>)}
 
+        {layerVisibility.columns && (<>
         {/* Columns */}
         {Object.values(columns).map(col => {
           const pos = getColPos(col, nodes)
@@ -790,6 +802,7 @@ export default function Canvas() {
             />
           )
         })}
+        </>)}
 
         {/* Beam tool: ghost line from selected first column to cursor */}
         {activeTool === 'beam' && beamFromColId && cursor && (() => {
@@ -891,6 +904,7 @@ export default function Canvas() {
             fill="#4a90e2" opacity={0.5} style={{ pointerEvents: 'none' }}/>
         )}
 
+        {layerVisibility.roomLabels && (<>
         {/* Room labels */}
         {Object.values(rooms).map(room => {
           const midpoints = room.wallIds.map(wid => {
@@ -919,6 +933,7 @@ export default function Canvas() {
             </text>
           )
         })}
+        </>)}
 
       </g>
     </svg>

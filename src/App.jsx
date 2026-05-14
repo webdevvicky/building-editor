@@ -10,6 +10,7 @@ import ColumnPanel from './components/ColumnPanel'
 import StaircasePanel from './components/StaircasePanel'
 import SlabPanel from './components/SlabPanel'
 import ProjectSettingsPanel from './components/ProjectSettingsPanel'
+import LayersPanel from './components/LayersPanel'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
       <StaircasePanel />
       <SlabPanel />
       <ProjectSettingsPanel />
+      <LayersPanel />
       <BOQPanel />
       <Canvas />
     </div>
