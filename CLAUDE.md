@@ -2,7 +2,7 @@
 
 ## Current Phase Status
 
-Phase 1a–1c-4 complete and on `main`. Phase 1d not started.
+Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 
 ---
 
@@ -159,20 +159,74 @@ Phase 1a–1c-4 complete and on `main`. Phase 1d not started.
 
 ---
 
-## Known issues / Phase 1.5 backlog
+## Known issues / Phase 2 backlog
 
 - **Undo/redo can restore room-overlap state** that bypassed save-time prevention.
   Repro: Create Room 1 → Delete Room 1 → Create Room A in same space → Undo the delete.
   Room 1 + Room A now coexist. Mitigated: both are excluded from all BOQ totals by the
-  pairwise overlap filter in `getValidRoomIds()`. Fix in Phase 1.5 with revision/lifecycle work.
+  pairwise overlap filter in `getValidRoomIds()`. Fix in Phase 2 with revision/lifecycle work.
 
-- **Civil stamp outer-dim approximation** — brickwork/plaster computed on outer footprint, not inner clear dims. Negligible for schematic BOQ. Revisit Phase 1.5+ with material spec inputs.
+- **Civil stamp outer-dim approximation** — brickwork/plaster computed on outer footprint, not inner clear dims. Negligible for schematic BOQ. Revisit Phase 2+ with material spec inputs.
 
-- **Waterproofing on civil stamps** — approximated as full inner plastered surface. Real spec varies per system. Needs material spec input in Phase 1.5+.
+- **Waterproofing on civil stamps** — approximated as full inner plastered surface. Real spec varies per system. Needs material spec input in Phase 2+.
 
-- **OHT material formulas** — deferred to Phase 1.5+ (sits on roof slab, needs structural context).
+- **OHT material formulas** — deferred to Phase 2+ (sits on roof slab, needs structural context).
 
 - **Septic soak pit** — not modelled. Deferred.
+
+- **NaN normalization** — `r2(undefined)` returns NaN silently. Consider adding a `safeR2(n)` guard for robustness. Deferred Phase 2.
+
+- **BONDING enum drift** — `materials.js` BONDING keys are `CEMENT_SAND`/`THIN_BED`; values are strings. Consuming code must use keys, not values. CLAUDE.md previously documented this incorrectly. The truth: `BONDING.CEMENT_SAND === 'CEMENT_SAND_MORTAR'` (value), but check in code must be `mat.bondingType === BONDING.CEMENT_SAND`. Phase 2: add a lint rule or runtime assertion.
+
+- **Canvas.jsx SVG render stack** — layer order (bottom to top): grid → room fills → stamps → walls → beams → ghost line → nodes → columns → UI overlays → room labels. Changing this order has visual consequences. Document in source.
+
+- **Multi-floor structural** — all structural selectors assume single floor. Phase 2: multiply column/beam/slab quantities per floor count.
+
+- **Combined/raft footings, L/T columns, two-way slab steel, BBS** — deferred Phase 2.
+
+---
+
+## Phase 1.5 — Structural BOQ system
+
+### Entities (all in `structuralSlice.js`, spread into main store)
+- `projectSettings` — heights, column/footing types, beam dims, slab/sunshade/parapet/staircase defaults
+- `columns` — `{ id, x, y, attachedNodeId, columnTypeId }`. Attached columns mirror node position; standalone are draggable.
+- `beams` — persisted EXPLICIT beams only. `getAllBeams()` merges with in-memory WALL_DERIVED beams from `getDerivedWallBeams()`.
+- `slabs` — persisted slab regions. Auto-initialized on first room; TOILET/BALCONY rooms get SUNKEN slab.
+- `staircases` — companion entity to stamps of type `'stairs'`; same id.
+
+### Wall beam flags
+- `hasPlinthBeam / hasLintelBeam / hasRoofBeam` — `null` = auto-derive from room adjacency; `true/false` = override.
+- `classifyWallBeamFlags(wallId)` resolves null → boolean using `getWallAdjacencyCount()`.
+
+### Key selectors
+- `getMasonryWithBeamDeduction()` — same shape as `getMaterialQuantities()` but volumes reduced by beam cross-sections. BONDING check: `mat.bondingType === BONDING.CEMENT_SAND` (not `BONDING.CEMENT_SAND_MORTAR`).
+- `getConcreteByGrade()` — returns `sandM3DRY`, `agg10mmM3DRY`, `agg20mmM3DRY` (DRY suffix; procurement volumes).
+- `getColumnQuantities()` / `getFootingQuantities()` — both include `label` field from column/footing type definition.
+
+### Formula files
+- `src/formulas/columnFootingBeamFormulas.js` — column, footing, PCC, beam RCC explainers
+- `src/formulas/slabStaircaseFormulas.js` — slab, sunshade, parapet, staircase explainers
+- `src/formulas/steelConcreteFormulas.js` — steel by element, concrete grade explainers
+- `src/formulas/masonryDeductionFormulas.js` — beam deduction breakdown per material
+- `src/formulas/structuralFormulas.js` — barrel re-export of all above
+- `src/formulas.js` re-exports all via `export * from './formulas/structuralFormulas'`
+
+### New panels
+- `StructuralBOQSection.jsx` — 4 BOQ sections: Structural RCC, Structural Steel, Concrete Materials, Staircase
+- `ColumnPanel.jsx` — type dropdown, attach/detach, delete
+- `StaircasePanel.jsx` — staircase structural fields
+- `SlabPanel.jsx` — slab region management (modal, activeTool='slabs')
+- `ProjectSettingsPanel.jsx` — all projectSettings (modal, activeTool='settings')
+- `LayersPanel.jsx` — floating layer visibility toggles (bottom: 56, left: 16)
+
+### Layer visibility
+- `DEFAULT_LAYER_VISIBILITY` in `src/constants/layers.js`: walls, columns, beams, stamps, roomFills, roomLabels, nodes (all true).
+- Store: `layerVisibility` state + `setLayerVisibility(partial)` action. Ephemeral (resets on reload).
+- Canvas SVG render order (bottom to top): room fills → stamps → walls → beams → ghost → nodes → columns → UI overlays → room labels.
+
+### Constants
+- `src/constants/structural.js` — `STEEL_KG_PER_M3`, `CEMENT_BAGS_PER_M3`, `SAND_M3_PER_M3_DRY`, `AGGREGATE_M3_PER_M3_DRY`, `AGGREGATE_SPLIT`, `DRY_WET_FACTOR`
 
 ---
 
@@ -184,4 +238,8 @@ Phase 1a–1c-4 complete and on `main`. Phase 1d not started.
 - `getMaterialQuantities()` iterates the walls map directly (same reason — each wall counted once for volume).
 - Storage unit is **inches** throughout. `GRID_IN = 12`. Display converts to feet or metres at render time.
 - `wall.materialKey` defaults to `'IS_MODULAR_BRICK'`. Always use `w.materialKey ?? 'IS_MODULAR_BRICK'` when reading it (migration guard for in-memory state that bypassed loadProject).
+- `BONDING` enum keys are `CEMENT_SAND` and `THIN_BED`; the values are the longer strings. Check bondingType with `=== BONDING.CEMENT_SAND`, never with the value string directly.
+- `getConcreteByGrade()` field names end in `DRY`: `sandM3DRY`, `agg10mmM3DRY`, `agg20mmM3DRY`. No bare `.sandM3` field exists.
+- `getAllBeams()` is the single consumer for beam rendering + BOQ. Never call `getDerivedWallBeams()` or iterate `state.beams` directly for quantity work.
+- Canvas SVG layer order (bottom→top): room fills → stamps → walls → beams → ghost → nodes → columns → UI overlays → room labels. `layerVisibility` guards each section.
 - No new libraries without asking.
