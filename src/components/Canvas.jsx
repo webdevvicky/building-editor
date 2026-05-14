@@ -276,6 +276,8 @@ export default function Canvas() {
   function handleMouseLeave() { setCursor(null); setHoveredWallId(null); setDraggingStamp(null) }
 
   function handleColumnClick(e, colId) {
+    const shouldCapture = activeTool === 'column' || activeTool === 'select' || activeTool === 'beam'
+    if (!shouldCapture) return
     e.stopPropagation()
     if (activeTool === 'beam') {
       if (!beamFromColId) {
@@ -607,27 +609,6 @@ export default function Canvas() {
           )
         })}
 
-        {/* Beams */}
-        {getAllBeams().map(beam => {
-          const fromPos = beam.endpoints.from.type === 'COLUMN'
-            ? getColPos(columns[beam.endpoints.from.columnId], nodes)
-            : beam.endpoints.from
-          const toPos = beam.endpoints.to.type === 'COLUMN'
-            ? getColPos(columns[beam.endpoints.to.columnId], nodes)
-            : beam.endpoints.to
-          if (!fromPos || !toPos) return null
-          const color = beam.level === 'plinth' ? '#f39c12' : beam.level === 'lintel' ? '#3498db' : '#e74c3c'
-          const dash  = beam.source === 'WALL_DERIVED' ? '6 3' : undefined
-          return (
-            <line key={beam.id}
-              x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
-              stroke={color} strokeWidth={3} strokeOpacity={0.7}
-              strokeDasharray={dash}
-              style={{ pointerEvents: 'none' }}
-            />
-          )
-        })}
-
         {/* Walls */}
         {Object.values(walls).map(wall => {
           const a = nodes[wall.n1], b = nodes[wall.n2]
@@ -722,6 +703,27 @@ export default function Canvas() {
                 </text>
               )}
             </g>
+          )
+        })}
+
+        {/* Beams */}
+        {getAllBeams().map(beam => {
+          const fromPos = beam.endpoints.from.type === 'COLUMN'
+            ? getColPos(columns[beam.endpoints.from.columnId], nodes)
+            : beam.endpoints.from
+          const toPos = beam.endpoints.to.type === 'COLUMN'
+            ? getColPos(columns[beam.endpoints.to.columnId], nodes)
+            : beam.endpoints.to
+          if (!fromPos || !toPos) return null
+          const color = beam.level === 'plinth' ? '#f39c12' : beam.level === 'lintel' ? '#3498db' : '#e74c3c'
+          const dash  = beam.source === 'WALL_DERIVED' ? '6 3' : undefined
+          return (
+            <line key={beam.id}
+              x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
+              stroke={color} strokeWidth={3} strokeOpacity={0.7}
+              strokeDasharray={dash}
+              style={{ pointerEvents: 'none' }}
+            />
           )
         })}
 

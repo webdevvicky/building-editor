@@ -128,13 +128,13 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
     if (conc.M7_5?.volM3 > 0) {
       const g = conc.M7_5
       add('M7.5 – Cement', r2(g.cementBags), 'bags', 'conc_M7_5_cement')
-      add('M7.5 – Sand', r2(g.sandM3), 'm³', 'conc_M7_5_sand')
+      add('M7.5 – Sand', r2(g.sandM3DRY), 'm³', 'conc_M7_5_sand')
       add('M7.5 – Agg 20mm', r2(g.agg20mmM3DRY), 'm³', 'conc_M7_5_agg20')
     }
     if (conc.M20?.volM3 > 0) {
       const g = conc.M20
       add('M20 – Cement', r2(g.cementBags), 'bags', 'conc_M20_cement')
-      add('M20 – Sand', r2(g.sandM3), 'm³', 'conc_M20_sand')
+      add('M20 – Sand', r2(g.sandM3DRY), 'm³', 'conc_M20_sand')
       add('M20 – Agg 10mm', r2(g.agg10mmM3DRY), 'm³', 'conc_M20_agg10')
       add('M20 – Agg 20mm', r2(g.agg20mmM3DRY), 'm³', 'conc_M20_agg20')
     }
@@ -193,12 +193,12 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
           <SectionHeader title="Concrete Materials" />
           {conc.M7_5?.volM3 > 0 && (<>
             {row('M7.5 – Cement',       r2(conc.M7_5.cementBags),   'bags', 'conc_M7_5_cement', 'conc_M7_5')}
-            {row('M7.5 – Sand (dry)',    r2(conc.M7_5.sandM3),       'm³',   'conc_M7_5_sand',   'conc_M7_5')}
+            {row('M7.5 – Sand (dry)',    r2(conc.M7_5.sandM3DRY),    'm³',   'conc_M7_5_sand',   'conc_M7_5')}
             {row('M7.5 – Agg 20mm (dry)', r2(conc.M7_5.agg20mmM3DRY), 'm³', 'conc_M7_5_agg20', 'conc_M7_5')}
           </>)}
           {conc.M20?.volM3 > 0 && (<>
             {row('M20 – Cement',        r2(conc.M20.cementBags),    'bags', 'conc_M20_cement', 'conc_M20')}
-            {row('M20 – Sand (dry)',     r2(conc.M20.sandM3),        'm³',   'conc_M20_sand',   'conc_M20')}
+            {row('M20 – Sand (dry)',     r2(conc.M20.sandM3DRY),     'm³',   'conc_M20_sand',   'conc_M20')}
             {row('M20 – Agg 10mm (dry)', r2(conc.M20.agg10mmM3DRY), 'm³',  'conc_M20_agg10',  'conc_M20')}
             {row('M20 – Agg 20mm (dry)', r2(conc.M20.agg20mmM3DRY), 'm³',  'conc_M20_agg20',  'conc_M20')}
           </>)}

@@ -479,7 +479,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       const sectionFt2 = ct.shape === 'circle'
         ? Math.PI * Math.pow(ct.diamIn / 2, 2) / 144
         : (ct.widthIn * ct.depthIn) / 144
-      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, footingTypeId: ct.footingTypeId }
+      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, footingTypeId: ct.footingTypeId, label: ct.label }
       result[ct.id].count  += 1
       result[ct.id].volFt3 += sectionFt2 * columnHeightFt
     }
@@ -498,7 +498,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       if (!ct) continue
       const ft = footingTypes.find(t => t.id === ct.footingTypeId)
       if (!ft) continue
-      if (!result[ft.id]) result[ft.id] = { count: 0, concreteVolFt3: 0, pccVolFt3: 0 }
+      if (!result[ft.id]) result[ft.id] = { count: 0, concreteVolFt3: 0, pccVolFt3: 0, label: ft.label }
       result[ft.id].count          += colData.count
       result[ft.id].concreteVolFt3 += ft.lengthFt * ft.widthFt * ft.depthFt * colData.count
       result[ft.id].pccVolFt3      += ft.lengthFt * ft.widthFt * PCC_THICKNESS_FT * colData.count
@@ -812,7 +812,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       const unitCount  = Math.ceil(adjustedVol * unitsPer * WASTAGE)
       const adjusted   = { ...qty, volFt3: r2(adjustedVol), unitCount }
 
-      if (mat.bondingType === BONDING.CEMENT_SAND_MORTAR) {
+      if (mat.bondingType === BONDING.CEMENT_SAND) {
         const mortarVol = adjustedVol * mat.mortarVolPerFt3Wall
         adjusted.cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
         adjusted.sandFt3    = r2(mortarVol * mat.sandFt3PerFt3Mortar)
