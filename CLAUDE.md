@@ -211,7 +211,9 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 ### Key selectors
 - `getMasonryWithBeamDeduction()` — same shape as `getMaterialQuantities()` but volumes reduced by beam cross-sections. BONDING check: `mat.bondingType === BONDING.CEMENT_SAND` (not `BONDING.CEMENT_SAND_MORTAR`).
 - `getConcreteByGrade()` — returns `sandM3DRY`, `agg10mmM3DRY`, `agg20mmM3DRY` (DRY suffix; procurement volumes).
-- `getColumnQuantities()` / `getFootingQuantities()` — both include `label` field from column/footing type definition.
+- `getColumnQuantities()` — keyed by column type id; fields: `{ count, columnHeightFt, sectionFt2, volFt3, label }`.
+- `getFootingQuantities()` — keyed by column type id (not footing type id); fields: `{ count, concreteVolFt3, pccVolFt3, label, lengthFt, widthFt, depthFt }`. Footing dims come from inline fields on the column type.
+- `getSteelQuantities()` — reads steel ratios from `projectSettings.rccSpecs.steelKgPerM3`; falls back to `STEEL_KG_PER_M3` constants.
 
 ### Formula files
 - `src/formulas/columnFootingBeamFormulas.js` — column, footing, PCC, beam RCC explainers
@@ -234,8 +236,64 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 - Store: `layerVisibility` state + `setLayerVisibility(partial)` action. Ephemeral (resets on reload).
 - Canvas SVG render order (bottom to top): room fills → stamps → walls → beams → ghost → nodes → columns → UI overlays → room labels.
 
-### Constants
-- `src/constants/structural.js` — `STEEL_KG_PER_M3`, `CEMENT_BAGS_PER_M3`, `SAND_M3_PER_M3_DRY`, `AGGREGATE_M3_PER_M3_DRY`, `AGGREGATE_SPLIT`, `DRY_WET_FACTOR`
+### Constants (`src/constants/structural.js`)
+- `BEAM_LEVEL_REGISTRY` — single source of truth for all beam levels. Every consumer iterates this array; nothing hardcodes `['plinth','lintel','roof']` directly. Fields: `id`, `label`, `flagName`, `color`, `autoExternal`, `autoPartition`, `defaultWidthIn`, `defaultDepthIn`. Adding a new beam level = one entry here only.
+- `PCC_BEDDING_THICKNESS_FT` — 50mm (2/12 ft) bedding under every footing. Only declared here; never re-declared locally.
+- `STEEL_KG_PER_M3`, `CEMENT_BAGS_PER_M3`, `SAND_M3_PER_M3_DRY`, `AGGREGATE_M3_PER_M3_DRY`, `AGGREGATE_SPLIT`, `DRY_WET_FACTOR` — mix design constants (still present as fallback defaults).
+
+### Column shape strategy (`src/lib/columnShapes.js`)
+- `COLUMN_SHAPES` registry maps shape key (`rect`, `circle`) → `{ areaFt2, dimLabel, formulaLabel, svgDims }`.
+- Exported helpers: `getColumnAreaFt2(ct)`, `getColumnDimLabel(ct)`, `getColumnFormulaLabel(ct)`, `getColumnSvgDims(ct, pxPerInch)`.
+- **Never branch on `ct.shape` directly** — always call the helpers. Adding a new shape = one entry in the registry.
+
+### Column types — updated data model
+- Column types now carry **inline footing dims**: `footingLengthFt`, `footingWidthFt`, `footingDepthFt`.
+- `footingTypeId` and the separate `DEFAULT_FOOTING_TYPES` / `projectSettings.footingTypes` table are **removed**.
+- `getFootingQuantities()` is keyed by **column type id** (e.g., `C1`), not footing type id. Result shape: `{ [columnTypeId]: { count, concreteVolFt3, pccVolFt3, label, lengthFt, widthFt, depthFt } }`.
+- `getColumnQuantities()` result no longer includes `footingTypeId`.
+- `loadProject` migration (Layer 4): if saved column types still have `footingTypeId`, dims are resolved from the saved `footingTypes` array and inlined automatically.
+
+### `projectSettings` — full shape
+```
+{
+  heights:           { plinthHeightFt, floorHeightFt }
+  columnTypes:       [{ id, label, shape, widthIn?, depthIn?, diamIn?,
+                        footingLengthFt, footingWidthFt, footingDepthFt }]
+  beamDimensions:    { [levelId]: { widthIn, depthIn } }  ← keyed by BEAM_LEVEL_REGISTRY id
+  slabSettings:      { mainThicknessIn, sunkenDepthIn, autoSunkenRoomTypes }
+  sunshadeSettings:  { enabled, projectionFt, thicknessIn }
+  parapetSettings:   { enabled, heightFt, thicknessIn, materialKey }
+  staircaseDefaults: { type, treadIn, riserIn, waistSlabIn, landingFtWidth, landingFtLength, flightWidthFt }
+  rccSpecs:          { concreteGrade: { FOOTING,COLUMN,BEAM,SLAB,STAIRCASE,PCC },
+                       steelKgPerM3:  { FOOTING,COLUMN,BEAM,SLAB,STAIRCASE,CIVIL_STAMP } }
+}
+```
+- `footingTypes` key **does not exist** in the current model. `loadProject` strips it during migration.
+
+### `projectSettings` actions
+- `setColumnTypeEntry(id, fields)` — partial update on one column type
+- `addColumnType(fields)` — creates new column type with uid, merges in fields
+- `removeColumnType(id)` — removes column type by id
+- `setRccSpecs({ steelKgPerM3: { ELEMENT: value } })` — partial update to steel ratios
+- `setBeamDimension(levelId, { widthIn?, depthIn? })` — update one beam level's dims
+
+### `getSteelQuantities()` — reads from `rccSpecs`
+- Reads `projectSettings.rccSpecs.steelKgPerM3` per element; falls back to `STEEL_KG_PER_M3` constants for any missing key.
+- BOQ numbers are identical at default ratios; only change when user edits ratios in ProjectSettingsPanel.
+
+### Formula dispatcher (`BOQPanel.jsx`)
+- `EXACT_HANDLERS` — plain object mapping exact id string → formula function. No if-else needed for new exact-match IDs.
+- `PREFIX_HANDLERS` — array of `{ prefix, handle(id, state) }`. Parametric IDs (`col_`, `fot_`, `beam_`, `steel_`, `mat_`) extract their argument inside `handle`.
+- `getFormulaData(id, state)` — checks exact table first, then iterates prefix table. Adding a new formula = one table entry.
+
+### SlabPanel — active slab types
+- Only `MAIN` and `SUNKEN` slab types are active. `BALCONY` and `TERRACE` were removed (no quantity calculation pipeline; would produce silent zero output).
+
+### `loadProject` migrations (cumulative)
+- **Wall**: inject `materialKey: 'IS_MODULAR_BRICK'` default.
+- **Stamp (v1–v3→v4)**: inject `depth`/`name` defaults for civil stamp types.
+- **Column type (Layer 4)**: if `footingTypeId` present and no inline dims, resolve from saved `footingTypes` array and inline.
+- **rccSpecs (Layer 5)**: if `rccSpecs` absent, inject `DEFAULT_PROJECT_SETTINGS.rccSpecs`.
 
 ---
 
@@ -250,5 +308,8 @@ Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
 - `BONDING` enum keys are `CEMENT_SAND` and `THIN_BED`; the values are the longer strings. Check bondingType with `=== BONDING.CEMENT_SAND`, never with the value string directly.
 - `getConcreteByGrade()` field names end in `DRY`: `sandM3DRY`, `agg10mmM3DRY`, `agg20mmM3DRY`. No bare `.sandM3` field exists.
 - `getAllBeams()` is the single consumer for beam rendering + BOQ. Never call `getDerivedWallBeams()` or iterate `state.beams` directly for quantity work.
+- `BEAM_LEVEL_REGISTRY` is the single source for beam levels. Never hardcode `['plinth','lintel','roof']` anywhere.
+- Column shape logic lives in `src/lib/columnShapes.js`. Never branch on `ct.shape` outside that file.
+- `getFootingQuantities()` is keyed by column type id, not footing type id. `footingTypeId` does not exist on column types in the current model.
 - Canvas SVG layer order (bottom→top): room fills → stamps → walls → beams → ghost → nodes → columns → UI overlays → room labels. `layerVisibility` guards each section.
 - No new libraries without asking.
