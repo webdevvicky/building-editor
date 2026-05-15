@@ -98,57 +98,84 @@ function getCivilLinesForStamp(stampType, stampQty, rates) {
 }
 
 // ── formula dispatcher ───────────────────────────────────────────────────────
+// Registry maps exact id → handler, or prefix → handler with id extraction.
+// Adding a new formula: one entry here, no branching logic needed.
+
+const EXACT_HANDLERS = {
+  wallArea:       s => explainWallArea(s),
+  flooring:       s => explainFlooring(s),
+  plasterWalls:   s => explainPlasterWalls(s),
+  plasterCeiling: s => explainPlasterCeiling(s),
+  paintWalls:     s => explainPaintWalls(s),
+  paintCeiling:   s => explainPaintCeiling(s),
+  waterproofing:  s => explainWaterproofing(s),
+  roofing:        s => explainRoofing(s),
+  slab_main:      s => explainSlabMain(s),
+  slab_sunken:    s => explainSlabSunken(s),
+  sunshade_rcc:   s => explainSunshades(s),
+  parapet_rcc:    s => explainParapet(s),
+  stair_rcc:      s => explainStaircaseRCC(s),
+  conc_M7_5:      s => explainConcreteGrade(s, 'M7_5'),
+  conc_M20:       s => explainConcreteGrade(s, 'M20'),
+  // Civil — sump
+  sump_excavation:         s => explainCivilExcavation(s, 'sump'),
+  sump_brickwork:          s => explainCivilBrickwork(s, 'sump'),
+  sump_rcc:                s => explainCivilRCC(s, 'sump'),
+  sump_plasterInner:       s => explainCivilPlaster(s, 'sump'),
+  sump_waterproofingInner: s => explainCivilWaterproofing(s, 'sump'),
+  // Civil — septic
+  septic_excavation:         s => explainCivilExcavation(s, 'septic_tank'),
+  septic_brickwork:          s => explainCivilBrickwork(s, 'septic_tank'),
+  septic_rcc:                s => explainCivilRCC(s, 'septic_tank'),
+  septic_plasterInner:       s => explainCivilPlaster(s, 'septic_tank'),
+  septic_waterproofingInner: s => explainCivilWaterproofing(s, 'septic_tank'),
+}
+
+const PREFIX_HANDLERS = [
+  {
+    prefix: 'col_',
+    handle: (id, s) => {
+      const typeId = id.slice(4).replace(/_rcc$/, '')
+      return explainColumnRCC(s, typeId)
+    },
+  },
+  {
+    prefix: 'fot_',
+    handle: (id, s) => {
+      const body   = id.slice(4)
+      const typeId = body.replace(/_rcc$/, '').replace(/_pcc$/, '')
+      return body.endsWith('_pcc') ? explainFootingPCC(s, typeId) : explainFootingRCC(s, typeId)
+    },
+  },
+  {
+    prefix: 'beam_',
+    handle: (id, s) => explainBeamRCC(s, id.slice(5)),
+  },
+  {
+    prefix: 'steel_',
+    handle: (id, s) => explainSteelByElement(s, id.slice(6).toUpperCase()),
+  },
+  {
+    // id = 'mat_{MATERIAL_KEY}_{suffix}' — matKey may contain underscores
+    prefix: 'mat_',
+    handle: (id, s) => {
+      const body           = id.slice(4)
+      const lastUnderscore = body.lastIndexOf('_')
+      const matKey = body.slice(0, lastUnderscore)
+      const suffix = body.slice(lastUnderscore + 1)
+      const MAT_SUFFIX_MAP = {
+        unit: explainUnits, cement: explainCement, sand: explainSand, adhesive: explainAdhesive,
+      }
+      return MAT_SUFFIX_MAP[suffix]?.(s, matKey) ?? null
+    },
+  },
+]
 
 function getFormulaData(id, state) {
-  if (id === 'wallArea')        return explainWallArea(state)
-  if (id === 'flooring')        return explainFlooring(state)
-  if (id === 'plasterWalls')    return explainPlasterWalls(state)
-  if (id === 'plasterCeiling')  return explainPlasterCeiling(state)
-  if (id === 'paintWalls')      return explainPaintWalls(state)
-  if (id === 'paintCeiling')    return explainPaintCeiling(state)
-  if (id === 'waterproofing')   return explainWaterproofing(state)
-  if (id === 'roofing')         return explainRoofing(state)
-  if (id === 'sump_excavation')         return explainCivilExcavation(state, 'sump')
-  if (id === 'sump_brickwork')          return explainCivilBrickwork(state, 'sump')
-  if (id === 'sump_rcc')                return explainCivilRCC(state, 'sump')
-  if (id === 'sump_plasterInner')       return explainCivilPlaster(state, 'sump')
-  if (id === 'sump_waterproofingInner') return explainCivilWaterproofing(state, 'sump')
-  if (id === 'septic_excavation')         return explainCivilExcavation(state, 'septic_tank')
-  if (id === 'septic_brickwork')          return explainCivilBrickwork(state, 'septic_tank')
-  if (id === 'septic_rcc')                return explainCivilRCC(state, 'septic_tank')
-  if (id === 'septic_plasterInner')       return explainCivilPlaster(state, 'septic_tank')
-  if (id === 'septic_waterproofingInner') return explainCivilWaterproofing(state, 'septic_tank')
-  if (id.startsWith('mat_')) {
-    // id = 'mat_{MATERIAL_KEY}_{suffix}' — matKey may contain underscores
-    const withoutPrefix   = id.slice(4)
-    const lastUnderscore  = withoutPrefix.lastIndexOf('_')
-    const matKey = withoutPrefix.slice(0, lastUnderscore)
-    const suffix = withoutPrefix.slice(lastUnderscore + 1)
-    if (suffix === 'unit')     return explainUnits(state, matKey)
-    if (suffix === 'cement')   return explainCement(state, matKey)
-    if (suffix === 'sand')     return explainSand(state, matKey)
-    if (suffix === 'adhesive') return explainAdhesive(state, matKey)
+  if (EXACT_HANDLERS[id]) return EXACT_HANDLERS[id](state)
+  for (const { prefix, handle } of PREFIX_HANDLERS) {
+    if (id.startsWith(prefix)) return handle(id, state)
   }
-  // Structural formulas
-  if (id.startsWith('col_')) {
-    const typeId = id.replace('col_', '').replace('_rcc', '')
-    return explainColumnRCC(state, typeId)
-  }
-  if (id.startsWith('fot_')) {
-    const withoutPrefix = id.replace('fot_', '')
-    const typeId = withoutPrefix.replace(/_rcc$/, '').replace(/_pcc$/, '')
-    const isPcc  = withoutPrefix.endsWith('_pcc')
-    return isPcc ? explainFootingPCC(state, typeId) : explainFootingRCC(state, typeId)
-  }
-  if (id.startsWith('beam_'))    return explainBeamRCC(state, id.replace('beam_', ''))
-  if (id === 'slab_main')        return explainSlabMain(state)
-  if (id === 'slab_sunken')      return explainSlabSunken(state)
-  if (id === 'sunshade_rcc')     return explainSunshades(state)
-  if (id === 'parapet_rcc')      return explainParapet(state)
-  if (id === 'stair_rcc')        return explainStaircaseRCC(state)
-  if (id.startsWith('steel_'))   return explainSteelByElement(state, id.replace('steel_', '').toUpperCase())
-  if (id === 'conc_M7_5')        return explainConcreteGrade(state, 'M7_5')
-  if (id === 'conc_M20')         return explainConcreteGrade(state, 'M20')
   return null
 }
 
