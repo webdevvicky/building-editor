@@ -1,4 +1,4 @@
-import { CONCRETE_GRADE, PCC_BEDDING_THICKNESS_FT } from '../constants/structural'
+import { CONCRETE_GRADE, PCC_BEDDING_THICKNESS_FT, BEAM_LEVEL_REGISTRY } from '../constants/structural'
 
 // state = full Zustand store state (passed in — never imported from store.js)
 // All functions return { title, steps: [{ label, value, bold? }], note? }
@@ -140,12 +140,10 @@ export function explainFootingPCC(state, footingTypeId) {
 
 // ── explainBeamRCC ────────────────────────────────────────────────────────────
 
-const LEVEL_LABEL = { plinth: 'Plinth Beam', lintel: 'Lintel Beam', roof: 'Roof Beam' }
-
 export function explainBeamRCC(state, level) {
   const { projectSettings } = state
   const { beamDimensions } = projectSettings
-  const levelLabel = LEVEL_LABEL[level] ?? level
+  const levelLabel = BEAM_LEVEL_REGISTRY.find(l => l.id === level)?.label ?? level
 
   const beamQtys = state.getBeamQuantities()
   const qty = beamQtys[level]

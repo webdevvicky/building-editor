@@ -49,3 +49,50 @@ export const AGGREGATE_M3_PER_M3_DRY = { M7_5: 0.88, M20: 0.84 }
 // PCC bedding layer under every isolated footing — 50 mm standard Indian practice.
 // Consumed by structuralSlice.js (getFootingQuantities) and columnFootingBeamFormulas.js.
 export const PCC_BEDDING_THICKNESS_FT = 2 / 12
+
+// ── Beam Level Registry ───────────────────────────────────────────────────────
+// Single source of truth for all beam levels in the system.
+// Every consumer (structuralSlice, Canvas, BOQPanel, formula explainers, etc.)
+// iterates this array — adding a new beam level requires only one entry here.
+//
+// Fields:
+//   id           — storage key used in beam.level, beamDimensions map, rate keys
+//   label        — display label for UI and formula popovers
+//   flagName     — property name on wall entity (hasPlinthBeam, etc.)
+//   color        — hex color for canvas SVG rendering
+//   autoExternal — auto-assign to external walls (adjacency count = 1)
+//   autoPartition— auto-assign to partition walls (adjacency count = 2)
+//   defaultWidthIn  — default cross-section width for new projects
+//   defaultDepthIn  — default cross-section depth for new projects
+export const BEAM_LEVEL_REGISTRY = [
+  {
+    id: 'plinth',
+    label: 'Plinth Beam',
+    flagName: 'hasPlinthBeam',
+    color: '#f39c12',
+    autoExternal:   true,
+    autoPartition:  false,
+    defaultWidthIn: 9,
+    defaultDepthIn: 12,
+  },
+  {
+    id: 'lintel',
+    label: 'Lintel Beam',
+    flagName: 'hasLintelBeam',
+    color: '#3498db',
+    autoExternal:   true,
+    autoPartition:  true,
+    defaultWidthIn: 9,
+    defaultDepthIn: 6,
+  },
+  {
+    id: 'roof',
+    label: 'Roof Beam',
+    flagName: 'hasRoofBeam',
+    color: '#e74c3c',
+    autoExternal:   true,
+    autoPartition:  false,
+    defaultWidthIn: 9,
+    defaultDepthIn: 15,
+  },
+]

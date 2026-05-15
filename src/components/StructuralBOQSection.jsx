@@ -5,6 +5,7 @@ import {
   explainSlabMain, explainSlabSunken, explainSunshades, explainParapet,
   explainStaircaseRCC, explainSteelByElement, explainConcreteGrade,
 } from '../formulas'
+import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 
 const COL = '1fr 68px 88px 70px'
 const GAP = 3
@@ -67,8 +68,6 @@ const STEEL_DEFS = [
   { key: 'civilStamp', label: 'Civil',      rk: 'steel_civil',     et: 'CIVIL_STAMP' },
 ]
 
-const BEAM_LEVELS = ['plinth', 'lintel', 'roof']
-
 export default function StructuralBOQSection({ rates, onRateChange, openId, onInfoClick, onLinesReady, formulaState }) {
   const prevLinesJsonRef = useRef(null)
 
@@ -95,7 +94,7 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
   const totalStairRcc = staircases.reduce((s, sc) => s + sc.totalRccFt3, 0)
 
   const hasRCC = Object.keys(colQtys).length > 0 || Object.keys(fotQtys).length > 0 ||
-    BEAM_LEVELS.some(l => beamQtys[l]) || slabQ.mainVolFt3 > 0 ||
+    BEAM_LEVEL_REGISTRY.some(l => beamQtys[l.id]) || slabQ.mainVolFt3 > 0 ||
     (sunshadeQ?.count > 0) || (parapetQ?.totalLenFt > 0)
   const hasSteel = (steelQtys?.total ?? 0) > 0
   const hasConcrete = (conc.M7_5?.volM3 > 0) || (conc.M20?.volM3 > 0)
@@ -114,8 +113,8 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
       add(`PCC under ${q.label}`, r2(q.pccVolFt3), 'ft³', `fot_${typeId}_pcc`)
     }
 
-    for (const l of BEAM_LEVELS)
-      if (beamQtys[l]) add(`${l.charAt(0).toUpperCase() + l.slice(1)} beams`, r2(beamQtys[l].volFt3), 'ft³', `beam_${l}`)
+    for (const lvl of BEAM_LEVEL_REGISTRY)
+      if (beamQtys[lvl.id]) add(`${lvl.label} beams`, r2(beamQtys[lvl.id].volFt3), 'ft³', `beam_${lvl.id}`)
 
     if (slabQ.mainVolFt3 > 0)    add('Main slab (M20)', r2(slabQ.mainVolFt3), 'ft³', 'slab_main')
     if (slabQ.sunkenVolFt3 > 0)  add('Sunken slab', r2(slabQ.sunkenVolFt3), 'ft³', 'slab_sunken')
@@ -168,8 +167,8 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
               {row(`PCC under ${q.label}`, r2(q.pccVolFt3), 'ft³', `fot_${id}_pcc`)}
             </div>
           ))}
-          {BEAM_LEVELS.map(l => beamQtys[l]
-            ? row(`${l.charAt(0).toUpperCase() + l.slice(1)} beams`, r2(beamQtys[l].volFt3), 'ft³', `beam_${l}`)
+          {BEAM_LEVEL_REGISTRY.map(lvl => beamQtys[lvl.id]
+            ? row(`${lvl.label} beams`, r2(beamQtys[lvl.id].volFt3), 'ft³', `beam_${lvl.id}`)
             : null
           )}
           {slabQ.mainVolFt3 > 0   && row('Main slab (M20)', r2(slabQ.mainVolFt3), 'ft³', 'slab_main')}

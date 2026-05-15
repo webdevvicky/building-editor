@@ -10,6 +10,7 @@ import { MATERIAL_LIBRARY, BONDING } from './materials'
 import {
   CONCRETE_GRADE, CEMENT_BAGS_PER_M3, STEEL_KG_PER_M3, AGGREGATE_SPLIT,
   SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY, PCC_BEDDING_THICKNESS_FT,
+  BEAM_LEVEL_REGISTRY,
 } from './constants/structural'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
@@ -402,16 +403,21 @@ export const createStructuralSlice = (set, get, uid) => ({
   // External wall (count=1): plinth+lintel+roof; Partition (count=2): lintel only; Unclassified: none.
   classifyWallBeamFlags: (wallId) => {
     const wall = get().walls[wallId]
-    if (!wall) return { hasPlinthBeam: false, hasLintelBeam: false, hasRoofBeam: false }
-    const adjCount = get().getWallAdjacencyCount()
-    const cnt      = adjCount[wallId] ?? 0
-    const isExt    = cnt === 1
-    const isPart   = cnt === 2
-    return {
-      hasPlinthBeam: wall.hasPlinthBeam !== null ? wall.hasPlinthBeam : isExt,
-      hasLintelBeam: wall.hasLintelBeam !== null ? wall.hasLintelBeam : (isExt || isPart),
-      hasRoofBeam:   wall.hasRoofBeam   !== null ? wall.hasRoofBeam  : isExt,
+    if (!wall) {
+      return Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.flagName, false]))
     }
+    const adjCount = get().getWallAdjacencyCount()
+    const cnt  = adjCount[wallId] ?? 0
+    const isExt  = cnt === 1
+    const isPart = cnt === 2
+    const result = {}
+    for (const lvl of BEAM_LEVEL_REGISTRY) {
+      const override = wall[lvl.flagName]
+      result[lvl.flagName] = override !== null
+        ? override
+        : (lvl.autoExternal && isExt) || (lvl.autoPartition && isPart)
+    }
+    return result
   },
 
   // Returns in-memory WALL_DERIVED beam entities (NOT persisted in store).
@@ -434,15 +440,15 @@ export const createStructuralSlice = (set, get, uid) => ({
       const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
       if (!n1 || !n2) continue
 
-      for (const [flag, level] of [['hasPlinthBeam', 'plinth'], ['hasLintelBeam', 'lintel'], ['hasRoofBeam', 'roof']]) {
-        if (!flags[flag]) continue
+      for (const lvl of BEAM_LEVEL_REGISTRY) {
+        if (!flags[lvl.flagName]) continue
         const fromRef = nodeToColId[wall.n1]
           ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] }
           : { type: 'POINT', x: n1.x, y: n1.y }
         const toRef = nodeToColId[wall.n2]
           ? { type: 'COLUMN', columnId: nodeToColId[wall.n2] }
           : { type: 'POINT', x: n2.x, y: n2.y }
-        result.push({ id: `derived_${wall.id}_${level}`, endpoints: { from: fromRef, to: toRef }, level, source: 'WALL_DERIVED', sourceWallId: wall.id })
+        result.push({ id: `derived_${wall.id}_${lvl.id}`, endpoints: { from: fromRef, to: toRef }, level: lvl.id, source: 'WALL_DERIVED', sourceWallId: wall.id })
       }
     }
 
@@ -523,7 +529,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       return { x: ref.x, y: ref.y }
     }
 
-    const result = { plinth: null, lintel: null, roof: null }
+    const result = Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.id, null]))
     for (const beam of allBeams) {
       const dims = beamDimensions[beam.level]
       if (!dims) continue
@@ -535,10 +541,10 @@ export const createStructuralSlice = (set, get, uid) => ({
       result[beam.level].totalLenFt += lenFt
       result[beam.level].volFt3     += lenFt * (dims.widthIn / 12) * (dims.depthIn / 12)
     }
-    for (const lvl of ['plinth', 'lintel', 'roof']) {
-      if (result[lvl]) {
-        result[lvl].totalLenFt = r2(result[lvl].totalLenFt)
-        result[lvl].volFt3     = r2(result[lvl].volFt3)
+    for (const lvl of BEAM_LEVEL_REGISTRY) {
+      if (result[lvl.id]) {
+        result[lvl.id].totalLenFt = r2(result[lvl.id].totalLenFt)
+        result[lvl.id].volFt3     = r2(result[lvl.id].volFt3)
       }
     }
     return result
@@ -779,9 +785,9 @@ export const createStructuralSlice = (set, get, uid) => ({
       const wallLenFt  = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
       const wallThickFt = (wall.thickness ?? 9) / 12
       let deductFt3 = 0
-      for (const [flag, level] of [['hasPlinthBeam', 'plinth'], ['hasLintelBeam', 'lintel'], ['hasRoofBeam', 'roof']]) {
-        if (!flags[flag]) continue
-        const dims = beamDimensions[level]
+      for (const lvl of BEAM_LEVEL_REGISTRY) {
+        if (!flags[lvl.flagName]) continue
+        const dims = beamDimensions[lvl.id]
         if (!dims) continue
         deductFt3 += wallLenFt * Math.min(wallThickFt, dims.widthIn / 12) * (dims.depthIn / 12)
       }

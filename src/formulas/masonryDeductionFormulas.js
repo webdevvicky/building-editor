@@ -2,11 +2,7 @@
 // Contract: (state, matKey?) => { title, steps: [{ label, value, bold? }], note? }
 // state must expose: walls, nodes, projectSettings, classifyWallBeamFlags(wallId)
 
-const BEAM_LEVELS = [
-  { flag: 'hasPlinthBeam', key: 'plinth', label: 'Plinth' },
-  { flag: 'hasLintelBeam', key: 'lintel', label: 'Lintel' },
-  { flag: 'hasRoofBeam',   key: 'roof',   label: 'Roof'   },
-]
+import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
@@ -42,26 +38,26 @@ export function explainMasonryBeamDeduction(state, matKey) {
     if (!n1 || !n2) continue
 
     const flags = classifyWallBeamFlags(wall.id)
-    const activeBeams = BEAM_LEVELS.filter(b => flags[b.flag])
+    const activeBeams = BEAM_LEVEL_REGISTRY.filter(lvl => flags[lvl.flagName])
     if (activeBeams.length === 0) continue
 
     wallIndex++
     const wallLenFt   = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
     const wallThickFt = (wall.thickness ?? 9) / 12
-    const activeLabelStr = activeBeams.map(b => levelLabel(b, wall)).join(', ')
+    const activeLabelStr = activeBeams.map(lvl => levelLabel({ flag: lvl.flagName, label: lvl.label }, wall)).join(', ')
 
     let wallDeduct = 0
     const perLevelParts = []
 
-    for (const b of activeBeams) {
-      const dim = beamDims[b.key]
+    for (const lvl of activeBeams) {
+      const dim = beamDims[lvl.id]
       if (!dim) continue
       const effWidthFt = Math.min(wallThickFt, dim.widthIn / 12)
       const depthFt    = dim.depthIn / 12
       const deductFt3  = wallLenFt * effWidthFt * depthFt
       wallDeduct += deductFt3
       perLevelParts.push(
-        `${b.label}: ${r2(wallLenFt)}×${r2(effWidthFt)}×${r2(depthFt)} = ${r2(deductFt3)} ft³`
+        `${lvl.label}: ${r2(wallLenFt)}×${r2(effWidthFt)}×${r2(depthFt)} = ${r2(deductFt3)} ft³`
       )
     }
 

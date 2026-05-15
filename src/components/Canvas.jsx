@@ -5,6 +5,7 @@ import {
   PX_PER_INCH, GRID_IN, DEFAULT_WALL_THICK_IN,
   closestPointOnSegment,
 } from '../geometry'
+import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -391,16 +392,16 @@ export default function Canvas() {
         display: 'flex', flexDirection: 'column', gap: 4,
       }}>
         <div style={{ fontSize: 11, color: '#555', marginBottom: 2 }}>Add beam at level:</div>
-        {['plinth', 'lintel', 'roof'].map(level => (
-          <button key={level}
+        {BEAM_LEVEL_REGISTRY.map(lvl => (
+          <button key={lvl.id}
             onClick={() => {
-              addBeam(beamLevelPicker.fromColId, beamLevelPicker.toColId, level)
+              addBeam(beamLevelPicker.fromColId, beamLevelPicker.toColId, lvl.id)
               setBeamLevelPicker(null)
             }}
             style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer',
-              background: level === 'plinth' ? '#fef9e7' : level === 'lintel' ? '#eaf4fb' : '#fdedec',
+              background: lvl.color + '22',
               border: '1px solid #ddd', borderRadius: 4 }}>
-            {level.charAt(0).toUpperCase() + level.slice(1)}
+            {lvl.label}
           </button>
         ))}
         <button onClick={() => { setBeamLevelPicker(null); setBeamFromColId(null) }}
@@ -723,7 +724,7 @@ export default function Canvas() {
             ? getColPos(columns[beam.endpoints.to.columnId], nodes)
             : beam.endpoints.to
           if (!fromPos || !toPos) return null
-          const color = beam.level === 'plinth' ? '#f39c12' : beam.level === 'lintel' ? '#3498db' : '#e74c3c'
+          const color = BEAM_LEVEL_REGISTRY.find(l => l.id === beam.level)?.color ?? '#888'
           const dash  = beam.source === 'WALL_DERIVED' ? '6 3' : undefined
           return (
             <line key={beam.id}

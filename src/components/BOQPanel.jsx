@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { MATERIAL_LIBRARY, BONDING } from '../materials'
+import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import {
   explainWallArea, explainFlooring,
   explainPlasterWalls, explainPlasterCeiling,
@@ -358,7 +359,7 @@ export default function BOQPanel() {
     waterproofingInner: '',
     ...buildMaterialRateKeys(),
     // Structural rate keys
-    beam_plinth: '', beam_lintel: '', beam_roof: '',
+    ...Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [`beam_${lvl.id}`, ''])),
     slab_main: '', slab_sunken: '',
     sunshade_rcc: '', parapet_rcc: '',
     steel_footing: '', steel_column: '', steel_beam: '',

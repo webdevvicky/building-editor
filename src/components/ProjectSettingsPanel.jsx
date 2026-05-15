@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -110,18 +111,18 @@ export default function ProjectSettingsPanel() {
 
       {/* 2. Beam Dimensions */}
       <div style={sectionHead}>Beam Dimensions</div>
-      {['plinth', 'lintel', 'roof'].map(level => {
-        const dims = beamDimensions[level] ?? { widthIn: 9, depthIn: 12 }
+      {BEAM_LEVEL_REGISTRY.map(lvl => {
+        const dims = beamDimensions[lvl.id] ?? { widthIn: lvl.defaultWidthIn, depthIn: lvl.defaultDepthIn }
         return (
-          <div key={level}>
-            <div style={{ fontSize: 11, color: '#999', marginBottom: 4, textTransform: 'capitalize' }}>{level}</div>
+          <div key={lvl.id}>
+            <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{lvl.label}</div>
             <div style={fieldRow}>
               <span style={{ ...lbl, minWidth: 160 }}>Width (in)</span>
               <input
                 type="number" min={1} step={1} style={numInput}
                 value={dims.widthIn}
                 onKeyDown={e => e.stopPropagation()}
-                onChange={e => setBeamDimension(level, { widthIn: parseFloat(e.target.value) })}
+                onChange={e => setBeamDimension(lvl.id, { widthIn: parseFloat(e.target.value) })}
               />
             </div>
             <div style={fieldRow}>
@@ -130,7 +131,7 @@ export default function ProjectSettingsPanel() {
                 type="number" min={1} step={1} style={numInput}
                 value={dims.depthIn}
                 onKeyDown={e => e.stopPropagation()}
-                onChange={e => setBeamDimension(level, { depthIn: parseFloat(e.target.value) })}
+                onChange={e => setBeamDimension(lvl.id, { depthIn: parseFloat(e.target.value) })}
               />
             </div>
           </div>
