@@ -45,3 +45,7 @@ export const DRY_WET_FACTOR = 1.54
 // to get wet volume if needed, but all BOQ output is in dry procurement quantities).
 export const SAND_M3_PER_M3_DRY      = { M7_5: 0.44, M20: 0.42 }
 export const AGGREGATE_M3_PER_M3_DRY = { M7_5: 0.88, M20: 0.84 }
+
+// PCC bedding layer under every isolated footing — 50 mm standard Indian practice.
+// Consumed by structuralSlice.js (getFootingQuantities) and columnFootingBeamFormulas.js.
+export const PCC_BEDDING_THICKNESS_FT = 2 / 12

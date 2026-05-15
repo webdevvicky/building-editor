@@ -1,4 +1,4 @@
-import { CONCRETE_GRADE } from '../constants/structural'
+import { CONCRETE_GRADE, PCC_BEDDING_THICKNESS_FT } from '../constants/structural'
 
 // state = full Zustand store state (passed in — never imported from store.js)
 // All functions return { title, steps: [{ label, value, bold? }], note? }
@@ -102,8 +102,6 @@ export function explainFootingRCC(state, footingTypeId) {
 
 // ── explainFootingPCC ─────────────────────────────────────────────────────────
 
-const PCC_THICKNESS_FT = 2 / 12  // 50 mm standard bedding
-
 export function explainFootingPCC(state, footingTypeId) {
   const { projectSettings } = state
   const { footingTypes } = projectSettings
@@ -121,14 +119,14 @@ export function explainFootingPCC(state, footingTypeId) {
   }
 
   const footprintFt2  = r2(ft.lengthFt * ft.widthFt)
-  const pccPerFooting = r2(footprintFt2 * PCC_THICKNESS_FT)
+  const pccPerFooting = r2(footprintFt2 * PCC_BEDDING_THICKNESS_FT)
   const totalPcc      = r2(pccPerFooting * qty.count)
 
   const steps = [
     { label: 'Footing type',                                             value: ft.label },
     { label: `Footprint  (${ft.lengthFt} ft × ${ft.widthFt} ft)`,       value: `${footprintFt2} ft²` },
     { label: 'PCC thickness',                                            value: '2 in (0.167 ft)' },
-    { label: `PCC per footing  (${footprintFt2} × ${r2(PCC_THICKNESS_FT)})`, value: `${pccPerFooting} ft³` },
+    { label: `PCC per footing  (${footprintFt2} × ${r2(PCC_BEDDING_THICKNESS_FT)})`, value: `${pccPerFooting} ft³` },
     { label: 'Footing count',                                            value: String(qty.count) },
     { label: `Total PCC volume  (${pccPerFooting} × ${qty.count})`,     value: `${totalPcc} ft³`, bold: true },
   ]

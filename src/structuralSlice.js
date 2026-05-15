@@ -9,15 +9,11 @@
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import {
   CONCRETE_GRADE, CEMENT_BAGS_PER_M3, STEEL_KG_PER_M3, AGGREGATE_SPLIT,
-  SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY,
+  SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY, PCC_BEDDING_THICKNESS_FT,
 } from './constants/structural'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
-
-// PCC layer thickness under each footing (standard 50mm bedding).
-// TODO Phase 2: Move to package template when ERP adds builder customization.
-const PCC_THICKNESS_FT = 2 / 12
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
@@ -501,7 +497,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       if (!result[ft.id]) result[ft.id] = { count: 0, concreteVolFt3: 0, pccVolFt3: 0, label: ft.label }
       result[ft.id].count          += colData.count
       result[ft.id].concreteVolFt3 += ft.lengthFt * ft.widthFt * ft.depthFt * colData.count
-      result[ft.id].pccVolFt3      += ft.lengthFt * ft.widthFt * PCC_THICKNESS_FT * colData.count
+      result[ft.id].pccVolFt3      += ft.lengthFt * ft.widthFt * PCC_BEDDING_THICKNESS_FT * colData.count
     }
     for (const k of Object.keys(result)) {
       result[k].concreteVolFt3 = r2(result[k].concreteVolFt3)

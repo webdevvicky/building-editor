@@ -38,11 +38,12 @@ const chip = {
   marginRight: 4, marginBottom: 4,
 }
 
+// Supported slab types with BOQ calculations. BALCONY and TERRACE removed — they had
+// no quantity calculation path and produced silent zero output. Add back when a proper
+// calculation pipeline exists for them.
 const TYPE_COLORS = {
-  MAIN:    { background: '#e8f5e9', color: '#2e7d32' },
-  SUNKEN:  { background: '#e3f2fd', color: '#1565c0' },
-  BALCONY: { background: '#fff3e0', color: '#e65100' },
-  TERRACE: { background: '#f3e5f5', color: '#6a1b9a' },
+  MAIN:   { background: '#e8f5e9', color: '#2e7d32' },
+  SUNKEN: { background: '#e3f2fd', color: '#1565c0' },
 }
 
 const numInput = { width: 60, fontSize: 13 }
@@ -60,8 +61,6 @@ const delBtn = {
   borderRadius: 4, color: '#e74c3c', cursor: 'pointer',
   fontSize: 11, padding: '2px 7px', marginLeft: 'auto',
 }
-
-const SLAB_TYPES = ['MAIN', 'SUNKEN', 'BALCONY', 'TERRACE']
 
 export default function SlabPanel() {
   const slabs           = useStore(s => s.slabs)
@@ -179,9 +178,14 @@ export default function SlabPanel() {
       )}
 
       {slabList.length > 0 && (
-        <button style={addBtn} onClick={() => addSlab('MAIN', [], 5, 0)}>
-          + Add Slab
-        </button>
+        <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+          <button style={addBtn} onClick={() => addSlab('MAIN', [], 5, 0)}>
+            + Main slab
+          </button>
+          <button style={addBtn} onClick={() => addSlab('SUNKEN', [], 5, 4)}>
+            + Sunken slab
+          </button>
+        </div>
       )}
 
       {unassigned.length > 0 && (
