@@ -664,7 +664,9 @@ export const useStore = create((set, get) => ({
           return { ...rest, footingLengthFt: ft.lengthFt, footingWidthFt: ft.widthFt, footingDepthFt: ft.depthFt }
         })
         const { footingTypes: _drop, ...psRest } = ps
-        return { ...psRest, columnTypes: migratedColumnTypes }
+        // Layer 5 migration: inject rccSpecs default for saves without it.
+        const rccSpecs = psRest.rccSpecs ?? DEFAULT_PROJECT_SETTINGS.rccSpecs
+        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs }
       })(),
       columns:    data.columns    ?? {},
       beams:      data.beams      ?? {},

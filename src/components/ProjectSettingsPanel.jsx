@@ -74,6 +74,7 @@ export default function ProjectSettingsPanel() {
   const setSunshadeSettings  = useStore(s => s.setSunshadeSettings)
   const setParapetSettings   = useStore(s => s.setParapetSettings)
   const setStaircaseDefaults = useStore(s => s.setStaircaseDefaults)
+  const setRccSpecs          = useStore(s => s.setRccSpecs)
 
   if (activeTool !== 'settings') return null
 
@@ -85,7 +86,19 @@ export default function ProjectSettingsPanel() {
     parapetSettings,
     staircaseDefaults,
     columnTypes,
+    rccSpecs,
   } = projectSettings
+
+  const steelRatios = rccSpecs?.steelKgPerM3 ?? {}
+
+  const STEEL_ELEMENTS = [
+    { key: 'FOOTING',     label: 'Footings' },
+    { key: 'COLUMN',      label: 'Columns' },
+    { key: 'BEAM',        label: 'Beams' },
+    { key: 'SLAB',        label: 'Slabs' },
+    { key: 'STAIRCASE',   label: 'Staircases' },
+    { key: 'CIVIL_STAMP', label: 'Civil (sump/septic)' },
+  ]
 
   return (
     <div style={overlay}>
@@ -195,7 +208,22 @@ export default function ProjectSettingsPanel() {
 
       <div style={divider} />
 
-      {/* 6. Column Types — read-only (footing dims are inline on each column type) */}
+      {/* 6. RCC Specifications — steel ratios per element */}
+      <div style={sectionHead}>RCC Specifications</div>
+      <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>Steel reinforcement (kg/m³ of RCC)</div>
+      {STEEL_ELEMENTS.map(({ key, label }) => (
+        <NumField
+          key={key}
+          label={label}
+          step={1}
+          value={steelRatios[key] ?? 0}
+          onChange={v => setRccSpecs({ steelKgPerM3: { [key]: v } })}
+        />
+      ))}
+
+      <div style={divider} />
+
+      {/* 7. Column Types — read-only (footing dims are inline on each column type) */}
       <div style={sectionHead}>Column &amp; Footing Types</div>
       <table style={tableStyle}>
         <thead>

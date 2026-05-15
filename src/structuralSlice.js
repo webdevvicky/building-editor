@@ -73,6 +73,17 @@ export const DEFAULT_PROJECT_SETTINGS = {
     landingFtLength: 4,
     flightWidthFt: 3.5,
   },
+
+  // Per-element steel ratios (kg/m³ of RCC). Grade assignment is stored here as data
+  // but has no UI selector in this iteration — concrete grade UI deferred to Phase 2.
+  rccSpecs: {
+    concreteGrade: {
+      FOOTING: 'M20', COLUMN: 'M20', BEAM: 'M20', SLAB: 'M20', STAIRCASE: 'M20', PCC: 'M7_5',
+    },
+    steelKgPerM3: {
+      FOOTING: 70, COLUMN: 130, BEAM: 110, SLAB: 90, STAIRCASE: 100, CIVIL_STAMP: 80,
+    },
+  },
 }
 
 // Beam endpoint — discriminated union:
@@ -162,6 +173,19 @@ export const createStructuralSlice = (set, get, uid) => ({
     projectSettings: {
       ...state.projectSettings,
       heights: { ...state.projectSettings.heights, ...partial },
+    },
+  })),
+
+  // partial: { steelKgPerM3?: { FOOTING?: number, ... } }
+  setRccSpecs: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      rccSpecs: {
+        ...state.projectSettings.rccSpecs,
+        ...(partial.steelKgPerM3 ? {
+          steelKgPerM3: { ...state.projectSettings.rccSpecs.steelKgPerM3, ...partial.steelKgPerM3 },
+        } : {}),
+      },
     },
   })),
 
@@ -660,6 +684,7 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Returns { footing, column, beam, slab, staircase, civilStamp, total } — all in kg
   getSteelQuantities: () => {
     const state = get()
+    const steelRatios = state.projectSettings.rccSpecs?.steelKgPerM3 ?? STEEL_KG_PER_M3
     const colQtys  = state.getColumnQuantities()
     const footQtys = state.getFootingQuantities()
     const beamQtys = state.getBeamQuantities()
@@ -677,12 +702,12 @@ export const createStructuralSlice = (set, get, uid) => ({
     const stairM3 = toM3(stairQtys.reduce((s, q) => s + q.totalRccFt3, 0))
     const civilM3 = toM3(sumpQty.rccBottomFt3 + sumpQty.rccTopFt3 + septicQty.rccBottomFt3 + septicQty.rccTopFt3)
 
-    const footing    = Math.round(footM3  * STEEL_KG_PER_M3.FOOTING)
-    const column     = Math.round(colM3   * STEEL_KG_PER_M3.COLUMN)
-    const beam       = Math.round(beamM3  * STEEL_KG_PER_M3.BEAM)
-    const slab       = Math.round(slabM3  * STEEL_KG_PER_M3.SLAB)
-    const staircase  = Math.round(stairM3 * STEEL_KG_PER_M3.STAIRCASE)
-    const civilStamp = Math.round(civilM3 * STEEL_KG_PER_M3.CIVIL_STAMP)
+    const footing    = Math.round(footM3  * (steelRatios.FOOTING    ?? STEEL_KG_PER_M3.FOOTING))
+    const column     = Math.round(colM3   * (steelRatios.COLUMN     ?? STEEL_KG_PER_M3.COLUMN))
+    const beam       = Math.round(beamM3  * (steelRatios.BEAM       ?? STEEL_KG_PER_M3.BEAM))
+    const slab       = Math.round(slabM3  * (steelRatios.SLAB       ?? STEEL_KG_PER_M3.SLAB))
+    const staircase  = Math.round(stairM3 * (steelRatios.STAIRCASE  ?? STEEL_KG_PER_M3.STAIRCASE))
+    const civilStamp = Math.round(civilM3 * (steelRatios.CIVIL_STAMP ?? STEEL_KG_PER_M3.CIVIL_STAMP))
     return { footing, column, beam, slab, staircase, civilStamp, total: footing + column + beam + slab + staircase + civilStamp }
   },
 
