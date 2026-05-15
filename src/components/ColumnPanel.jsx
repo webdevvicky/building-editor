@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { getColumnDimLabel } from '../lib/columnShapes'
 
 const panelStyle = {
   position: 'absolute', top: 56, left: 16,
@@ -51,12 +52,7 @@ export default function ColumnPanel() {
   const xFt = (column.x / 12).toFixed(2)
   const yFt = (column.y / 12).toFixed(2)
 
-  let dimLabel = '—'
-  if (colType) {
-    dimLabel = colType.shape === 'circle'
-      ? `Ø ${colType.diamIn} in`
-      : `${colType.widthIn} × ${colType.depthIn} in`
-  }
+  const dimLabel = colType ? getColumnDimLabel(colType) : '—'
 
   function handleDelete() {
     deleteColumn(selectedColumnId)

@@ -6,6 +6,7 @@ import {
   closestPointOnSegment,
 } from '../geometry'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import { getColumnSvgDims } from '../lib/columnShapes'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -780,23 +781,20 @@ export default function Canvas() {
           const fillColor   = isSelected ? '#fde8e8' : col.attachedNodeId ? '#d6eaf8' : '#ecf0f1'
           const strokeW     = isSelected ? 2 : 1.5
 
-          if (ct.shape === 'circle') {
-            const r = (ct.diamIn / 2) * PX_PER_INCH
+          const dims = getColumnSvgDims(ct, PX_PER_INCH)
+          if (dims.r !== undefined) {
             return (
               <circle key={col.id}
-                cx={sx(pos.x)} cy={sy(pos.y)} r={r}
+                cx={sx(pos.x)} cy={sy(pos.y)} r={dims.r}
                 fill={fillColor} stroke={strokeColor} strokeWidth={strokeW}
                 style={{ cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default' }}
                 onClick={e => handleColumnClick(e, col.id)}
               />
             )
           }
-          // rect column — center it on col position
-          const w = ct.widthIn * PX_PER_INCH
-          const h = ct.depthIn * PX_PER_INCH
           return (
             <rect key={col.id}
-              x={sx(pos.x) - w/2} y={sy(pos.y) - h/2} width={w} height={h}
+              x={sx(pos.x) - dims.w/2} y={sy(pos.y) - dims.h/2} width={dims.w} height={dims.h}
               fill={fillColor} stroke={strokeColor} strokeWidth={strokeW}
               style={{ cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default' }}
               onClick={e => handleColumnClick(e, col.id)}

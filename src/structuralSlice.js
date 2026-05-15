@@ -12,6 +12,7 @@ import {
   SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY, PCC_BEDDING_THICKNESS_FT,
   BEAM_LEVEL_REGISTRY,
 } from './constants/structural'
+import { getColumnAreaFt2 } from './lib/columnShapes'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
@@ -478,9 +479,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     for (const col of Object.values(columns)) {
       const ct = columnTypes.find(t => t.id === col.columnTypeId)
       if (!ct) continue
-      const sectionFt2 = ct.shape === 'circle'
-        ? Math.PI * Math.pow(ct.diamIn / 2, 2) / 144
-        : (ct.widthIn * ct.depthIn) / 144
+      const sectionFt2 = getColumnAreaFt2(ct)
       if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, footingTypeId: ct.footingTypeId, label: ct.label }
       result[ct.id].count  += 1
       result[ct.id].volFt3 += sectionFt2 * columnHeightFt

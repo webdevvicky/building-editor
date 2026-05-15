@@ -1,4 +1,5 @@
 import { CONCRETE_GRADE, PCC_BEDDING_THICKNESS_FT, BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import { getColumnAreaFt2, getColumnFormulaLabel } from '../lib/columnShapes'
 
 // state = full Zustand store state (passed in — never imported from store.js)
 // All functions return { title, steps: [{ label, value, bold? }], note? }
@@ -23,10 +24,7 @@ export function explainColumnRCC(state, columnTypeId) {
     }
   }
 
-  const isCircle   = ct.shape === 'circle'
-  const sectionFt2 = isCircle
-    ? Math.PI * Math.pow(ct.diamIn / 2, 2) / 144
-    : (ct.widthIn * ct.depthIn) / 144
+  const sectionFt2 = getColumnAreaFt2(ct)
 
   const plinthHFt  = heights.plinthHeightFt
   const floorHFt   = heights.floorHeightFt
@@ -41,9 +39,7 @@ export function explainColumnRCC(state, columnTypeId) {
   const attached   = allCols.filter(c => c.attachedNodeId).length
   const standalone = allCols.length - attached
 
-  const sectionLabel = isCircle
-    ? `π × (${ct.diamIn / 2}″ radius)² ÷ 144`
-    : `${ct.widthIn}″ × ${ct.depthIn}″ ÷ 144`
+  const sectionLabel = getColumnFormulaLabel(ct)
 
   const steps = [
     { label: 'Column type',                                    value: ct.label },

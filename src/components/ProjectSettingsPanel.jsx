@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import { getColumnDimLabel } from '../lib/columnShapes'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -209,9 +210,7 @@ export default function ProjectSettingsPanel() {
           {(columnTypes ?? []).map(ct => (
             <tr key={ct.id}>
               <td style={tdStyle}>{ct.label}</td>
-              <td style={tdStyle}>
-                {ct.shape === 'circle' ? `Ø${ct.diamIn} in` : `${ct.widthIn}×${ct.depthIn} in`}
-              </td>
+              <td style={tdStyle}>{getColumnDimLabel(ct)}</td>
               <td style={tdStyle}>{ct.footingTypeId}</td>
             </tr>
           ))}
