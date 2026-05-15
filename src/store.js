@@ -515,15 +515,25 @@ export const useStore = create((set, get) => ({
         [id]: {
           id,
           name,
-          wallIds:    [...s.pendingWallIds],
-          type:       safeType,
-          customType: null,
-          finishes:   getPresetFinishes(safeType),
+          wallIds:          [...s.pendingWallIds],
+          type:             safeType,
+          customType:       null,
+          finishes:         getPresetFinishes(safeType),
+          plasterSystemId:  null,   // null = use projectSettings.defaultPlasterSystemId
         },
       },
       pendingWallIds: [],
     }))
     return null
+  },
+
+  setRoomPlasterSystem(roomId, plasterSystemId) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, plasterSystemId: plasterSystemId || null } } }
+    })
   },
 
   setRoomType(roomId, type) {
@@ -582,11 +592,12 @@ export const useStore = create((set, get) => ({
     for (const [id, room] of Object.entries(data.rooms || {})) {
       const safeType = ROOM_PRESETS[room.type] ? room.type : 'OTHER'
       migratedRooms[id] = {
-        type:       safeType,
-        customType: null,
+        type:             safeType,
+        customType:       null,
+        plasterSystemId:  null,   // null = inherit projectSettings.defaultPlasterSystemId
         ...room,
-        type:       safeType,    // re-assert after spread in case room.type was invalid
-        finishes:   room.finishes
+        type:             safeType,    // re-assert after spread in case room.type was invalid
+        finishes:         room.finishes
           ? { ...ALL_FINISHES, ...room.finishes }   // fill any missing flag keys
           : getPresetFinishes(safeType),             // v1/v2 rooms: use type preset (OTHER=ALL_FINISHES)
       }
@@ -667,7 +678,9 @@ export const useStore = create((set, get) => ({
         const { footingTypes: _drop, ...psRest } = ps
         // Layer 5 migration: inject rccSpecs default for saves without it.
         const rccSpecs = psRest.rccSpecs ?? DEFAULT_PROJECT_SETTINGS.rccSpecs
-        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs }
+        // Stage 0 T2 migration: inject defaultPlasterSystemId for saves without it.
+        const defaultPlasterSystemId = psRest.defaultPlasterSystemId ?? DEFAULT_PROJECT_SETTINGS.defaultPlasterSystemId
+        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs, defaultPlasterSystemId }
       })(),
       // Columns: ensure foundationId field exists on legacy saves.
       columns: Object.fromEntries(

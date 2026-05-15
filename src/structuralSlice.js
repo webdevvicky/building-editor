@@ -12,6 +12,7 @@ import {
   SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY, PCC_BEDDING_THICKNESS_FT,
   BEAM_LEVEL_REGISTRY,
 } from './constants/structural'
+import { DEFAULT_PLASTER_SYSTEM_ID } from './specs/plasterSystems'
 import { getColumnAreaFt2 } from './lib/columnShapes'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
@@ -38,7 +39,8 @@ export const DEFAULT_COLUMN_TYPES = [
 export const DEFAULT_PROJECT_SETTINGS = {
   mortarRatio: '1:6',
   wastagePercent: 5,
-  plasterThicknessMm: { internal: 12, ceiling: 10, external: 15 },
+  plasterThicknessMm: { internal: 12, ceiling: 10, external: 15 },  // legacy; superseded by defaultPlasterSystemId
+  defaultPlasterSystemId: DEFAULT_PLASTER_SYSTEM_ID,
 
   // Explicit floor heights — column height = plinthHeightFt + floorHeightFt + slabThicknessIn/12
   // TODO Phase 2: Multi-floor support will multiply this per floor count.
