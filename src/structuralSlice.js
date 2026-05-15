@@ -28,16 +28,10 @@ let _concreteCache   = { colQ: null, footQ: null, beamQ: null, slabQ: null, stai
 let _masonryDedCache = { walls: null, nodes: null, projectSettings: null, result: null }
 
 export const DEFAULT_COLUMN_TYPES = [
-  { id: 'C1', label: 'Corner 9×9',    widthIn: 9,  depthIn: 9,  shape: 'rect',   footingTypeId: 'F1' },
-  { id: 'C2', label: 'External 9×12', widthIn: 9,  depthIn: 12, shape: 'rect',   footingTypeId: 'F2' },
-  { id: 'C3', label: 'Heavy 12×12',   widthIn: 12, depthIn: 12, shape: 'rect',   footingTypeId: 'F3' },
-  { id: 'C4', label: 'Circular Φ12',  diamIn: 12,              shape: 'circle', footingTypeId: 'F2' },
-]
-
-export const DEFAULT_FOOTING_TYPES = [
-  { id: 'F1', label: 'Light 3×3×1',    lengthFt: 3, widthFt: 3, depthFt: 1    },
-  { id: 'F2', label: 'Standard 4×4×1', lengthFt: 4, widthFt: 4, depthFt: 1    },
-  { id: 'F3', label: 'Heavy 5×5×1.25', lengthFt: 5, widthFt: 5, depthFt: 1.25 },
+  { id: 'C1', label: 'Corner 9×9',    widthIn: 9,  depthIn: 9,  shape: 'rect',   footingLengthFt: 3, footingWidthFt: 3, footingDepthFt: 1    },
+  { id: 'C2', label: 'External 9×12', widthIn: 9,  depthIn: 12, shape: 'rect',   footingLengthFt: 4, footingWidthFt: 4, footingDepthFt: 1    },
+  { id: 'C3', label: 'Heavy 12×12',   widthIn: 12, depthIn: 12, shape: 'rect',   footingLengthFt: 5, footingWidthFt: 5, footingDepthFt: 1.25 },
+  { id: 'C4', label: 'Circular Φ12',  diamIn: 12,              shape: 'circle', footingLengthFt: 4, footingWidthFt: 4, footingDepthFt: 1    },
 ]
 
 export const DEFAULT_PROJECT_SETTINGS = {
@@ -53,7 +47,6 @@ export const DEFAULT_PROJECT_SETTINGS = {
   },
 
   columnTypes: DEFAULT_COLUMN_TYPES,
-  footingTypes: DEFAULT_FOOTING_TYPES,
 
   beamDimensions: {
     plinth: { widthIn: 9,  depthIn: 12 },
@@ -123,15 +116,6 @@ export const createStructuralSlice = (set, get, uid) => ({
       ...state.projectSettings,
       columnTypes: state.projectSettings.columnTypes.map(ct =>
         ct.id === id ? { ...ct, ...fields } : ct
-      ),
-    },
-  })),
-
-  setFootingTypeEntry: (id, fields) => set(state => ({
-    projectSettings: {
-      ...state.projectSettings,
-      footingTypes: state.projectSettings.footingTypes.map(ft =>
-        ft.id === id ? { ...ft, ...fields } : ft
       ),
     },
   })),
@@ -470,7 +454,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     return result
   },
 
-  // Returns { [columnTypeId]: { count, columnHeightFt, sectionFt2, volFt3, footingTypeId } }
+  // Returns { [columnTypeId]: { count, columnHeightFt, sectionFt2, volFt3, label } }
   getColumnQuantities: () => {
     const { columns, projectSettings } = get()
     const { columnTypes, heights, slabSettings } = projectSettings
@@ -480,7 +464,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       const ct = columnTypes.find(t => t.id === col.columnTypeId)
       if (!ct) continue
       const sectionFt2 = getColumnAreaFt2(ct)
-      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, footingTypeId: ct.footingTypeId, label: ct.label }
+      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, label: ct.label }
       result[ct.id].count  += 1
       result[ct.id].volFt3 += sectionFt2 * columnHeightFt
     }
@@ -488,25 +472,27 @@ export const createStructuralSlice = (set, get, uid) => ({
     return result
   },
 
-  // Returns { [footingTypeId]: { count, concreteVolFt3, pccVolFt3 } }
+  // Returns { [columnTypeId]: { count, concreteVolFt3, pccVolFt3, label, lengthFt, widthFt, depthFt } }
+  // Footing dims are stored inline on the column type (footingLengthFt, footingWidthFt, footingDepthFt).
   getFootingQuantities: () => {
     const { projectSettings } = get()
-    const { columnTypes, footingTypes } = projectSettings
+    const { columnTypes } = projectSettings
     const colQtys = get().getColumnQuantities()
     const result = {}
     for (const [ctId, colData] of Object.entries(colQtys)) {
       const ct = columnTypes.find(t => t.id === ctId)
       if (!ct) continue
-      const ft = footingTypes.find(t => t.id === ct.footingTypeId)
-      if (!ft) continue
-      if (!result[ft.id]) result[ft.id] = { count: 0, concreteVolFt3: 0, pccVolFt3: 0, label: ft.label }
-      result[ft.id].count          += colData.count
-      result[ft.id].concreteVolFt3 += ft.lengthFt * ft.widthFt * ft.depthFt * colData.count
-      result[ft.id].pccVolFt3      += ft.lengthFt * ft.widthFt * PCC_BEDDING_THICKNESS_FT * colData.count
-    }
-    for (const k of Object.keys(result)) {
-      result[k].concreteVolFt3 = r2(result[k].concreteVolFt3)
-      result[k].pccVolFt3      = r2(result[k].pccVolFt3)
+      const { footingLengthFt: lFt, footingWidthFt: wFt, footingDepthFt: dFt } = ct
+      if (!lFt || !wFt || !dFt) continue
+      result[ctId] = {
+        count:           colData.count,
+        concreteVolFt3:  r2(lFt * wFt * dFt * colData.count),
+        pccVolFt3:       r2(lFt * wFt * PCC_BEDDING_THICKNESS_FT * colData.count),
+        label:           ct.label,
+        lengthFt:        lFt,
+        widthFt:         wFt,
+        depthFt:         dFt,
+      }
     }
     return result
   },

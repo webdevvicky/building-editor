@@ -649,8 +649,23 @@ export const useStore = create((set, get) => ({
       walls:  migratedWalls,
       rooms:  migratedRooms,
       stamps: migratedStamps,
-      // Structural state — init from saved data or fall back to defaults (greenfield; no migration).
-      projectSettings: data.projectSettings ?? DEFAULT_PROJECT_SETTINGS,
+      // Structural state — migrate then load.
+      projectSettings: (() => {
+        const ps = data.projectSettings ?? DEFAULT_PROJECT_SETTINGS
+        // Layer 4 migration: resolve footingTypeId → inline footing dims on column types.
+        // Old format: ct.footingTypeId = 'F1' with separate ps.footingTypes array.
+        // New format: ct.footingLengthFt / footingWidthFt / footingDepthFt inline.
+        const savedFootingTypes = ps.footingTypes ?? []
+        const migratedColumnTypes = (ps.columnTypes ?? []).map(ct => {
+          if (ct.footingLengthFt !== undefined) return ct  // already migrated
+          const ft = savedFootingTypes.find(f => f.id === ct.footingTypeId)
+          if (!ft) return ct
+          const { footingTypeId: _drop, ...rest } = ct
+          return { ...rest, footingLengthFt: ft.lengthFt, footingWidthFt: ft.widthFt, footingDepthFt: ft.depthFt }
+        })
+        const { footingTypes: _drop, ...psRest } = ps
+        return { ...psRest, columnTypes: migratedColumnTypes }
+      })(),
       columns:    data.columns    ?? {},
       beams:      data.beams      ?? {},
       slabs:      data.slabs      ?? {},

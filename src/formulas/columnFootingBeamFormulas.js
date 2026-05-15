@@ -62,35 +62,31 @@ export function explainColumnRCC(state, columnTypeId) {
 
 // ── explainFootingRCC ─────────────────────────────────────────────────────────
 
-export function explainFootingRCC(state, footingTypeId) {
-  const { projectSettings } = state
-  const { footingTypes } = projectSettings
-
-  const ft = footingTypes.find(t => t.id === footingTypeId)
-  if (!ft) return { title: 'Footing RCC', steps: [{ label: 'Footing type not found', value: '—' }] }
-
+export function explainFootingRCC(state, columnTypeId) {
   const footQtys = state.getFootingQuantities()
-  const qty = footQtys[footingTypeId]
-  if (!qty || qty.count === 0) {
+  const qty = footQtys[columnTypeId]
+  if (!qty) return { title: 'Footing RCC', steps: [{ label: 'Footing type not found', value: '—' }] }
+  if (qty.count === 0) {
     return {
-      title: `Footing RCC – ${ft.label}`,
+      title: `Footing RCC – ${qty.label}`,
       steps: [{ label: 'No footings of this type', value: '—' }],
     }
   }
 
-  const volPerFooting = r2(ft.lengthFt * ft.widthFt * ft.depthFt)
+  const { lengthFt, widthFt, depthFt } = qty
+  const volPerFooting = r2(lengthFt * widthFt * depthFt)
   const totalVol      = r2(volPerFooting * qty.count)
 
   const steps = [
-    { label: 'Footing type',                                          value: ft.label },
-    { label: `Dimensions`,                                            value: `${ft.lengthFt} ft × ${ft.widthFt} ft × ${ft.depthFt} ft` },
-    { label: `Volume per footing  (${ft.lengthFt} × ${ft.widthFt} × ${ft.depthFt})`, value: `${volPerFooting} ft³` },
-    { label: 'Footing count',                                         value: String(qty.count) },
-    { label: `Total RCC volume  (${volPerFooting} × ${qty.count})`,  value: `${totalVol} ft³`, bold: true },
+    { label: 'Column / footing type',                                           value: qty.label },
+    { label: 'Dimensions',                                                       value: `${lengthFt} ft × ${widthFt} ft × ${depthFt} ft` },
+    { label: `Volume per footing  (${lengthFt} × ${widthFt} × ${depthFt})`,    value: `${volPerFooting} ft³` },
+    { label: 'Footing count',                                                    value: String(qty.count) },
+    { label: `Total RCC volume  (${volPerFooting} × ${qty.count})`,             value: `${totalVol} ft³`, bold: true },
   ]
 
   return {
-    title: `Footing RCC – ${ft.label} (${CONCRETE_GRADE.FOOTING})`,
+    title: `Footing RCC – ${qty.label} (${CONCRETE_GRADE.FOOTING})`,
     steps,
     note: 'Isolated footing only. Combined and raft footings deferred to Phase 2.',
   }
@@ -98,37 +94,33 @@ export function explainFootingRCC(state, footingTypeId) {
 
 // ── explainFootingPCC ─────────────────────────────────────────────────────────
 
-export function explainFootingPCC(state, footingTypeId) {
-  const { projectSettings } = state
-  const { footingTypes } = projectSettings
-
-  const ft = footingTypes.find(t => t.id === footingTypeId)
-  if (!ft) return { title: 'Footing PCC', steps: [{ label: 'Footing type not found', value: '—' }] }
-
+export function explainFootingPCC(state, columnTypeId) {
   const footQtys = state.getFootingQuantities()
-  const qty = footQtys[footingTypeId]
-  if (!qty || qty.count === 0) {
+  const qty = footQtys[columnTypeId]
+  if (!qty) return { title: 'Footing PCC', steps: [{ label: 'Footing type not found', value: '—' }] }
+  if (qty.count === 0) {
     return {
-      title: `Footing PCC – ${ft.label}`,
+      title: `Footing PCC – ${qty.label}`,
       steps: [{ label: 'No footings of this type', value: '—' }],
     }
   }
 
-  const footprintFt2  = r2(ft.lengthFt * ft.widthFt)
+  const { lengthFt, widthFt } = qty
+  const footprintFt2  = r2(lengthFt * widthFt)
   const pccPerFooting = r2(footprintFt2 * PCC_BEDDING_THICKNESS_FT)
   const totalPcc      = r2(pccPerFooting * qty.count)
 
   const steps = [
-    { label: 'Footing type',                                             value: ft.label },
-    { label: `Footprint  (${ft.lengthFt} ft × ${ft.widthFt} ft)`,       value: `${footprintFt2} ft²` },
-    { label: 'PCC thickness',                                            value: '2 in (0.167 ft)' },
+    { label: 'Column / footing type',                                                 value: qty.label },
+    { label: `Footprint  (${lengthFt} ft × ${widthFt} ft)`,                          value: `${footprintFt2} ft²` },
+    { label: 'PCC thickness',                                                          value: '2 in (0.167 ft)' },
     { label: `PCC per footing  (${footprintFt2} × ${r2(PCC_BEDDING_THICKNESS_FT)})`, value: `${pccPerFooting} ft³` },
-    { label: 'Footing count',                                            value: String(qty.count) },
-    { label: `Total PCC volume  (${pccPerFooting} × ${qty.count})`,     value: `${totalPcc} ft³`, bold: true },
+    { label: 'Footing count',                                                          value: String(qty.count) },
+    { label: `Total PCC volume  (${pccPerFooting} × ${qty.count})`,                  value: `${totalPcc} ft³`, bold: true },
   ]
 
   return {
-    title: `Footing PCC – ${ft.label} (M7.5)`,
+    title: `Footing PCC – ${qty.label} (M7.5)`,
     steps,
     note: 'PCC bedding layer 50mm (2 inches) under each footing. Grade M7.5.',
   }

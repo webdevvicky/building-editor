@@ -85,7 +85,6 @@ export default function ProjectSettingsPanel() {
     parapetSettings,
     staircaseDefaults,
     columnTypes,
-    footingTypes,
   } = projectSettings
 
   return (
@@ -196,14 +195,14 @@ export default function ProjectSettingsPanel() {
 
       <div style={divider} />
 
-      {/* 6. Column Types — read-only */}
-      <div style={sectionHead}>Column Types</div>
+      {/* 6. Column Types — read-only (footing dims are inline on each column type) */}
+      <div style={sectionHead}>Column &amp; Footing Types</div>
       <table style={tableStyle}>
         <thead>
           <tr>
             <th style={thStyle}>Label</th>
             <th style={thStyle}>Section</th>
-            <th style={thStyle}>Footing</th>
+            <th style={thStyle}>Footing (ft)</th>
           </tr>
         </thead>
         <tbody>
@@ -211,30 +210,7 @@ export default function ProjectSettingsPanel() {
             <tr key={ct.id}>
               <td style={tdStyle}>{ct.label}</td>
               <td style={tdStyle}>{getColumnDimLabel(ct)}</td>
-              <td style={tdStyle}>{ct.footingTypeId}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={divider} />
-
-      {/* 7. Footing Types — read-only */}
-      <div style={sectionHead}>Footing Types</div>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th style={thStyle}>Label</th>
-            <th style={thStyle}>Size (ft)</th>
-            <th style={thStyle}>Depth (ft)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(footingTypes ?? []).map(ft => (
-            <tr key={ft.id}>
-              <td style={tdStyle}>{ft.label}</td>
-              <td style={tdStyle}>{ft.lengthFt} × {ft.widthFt}</td>
-              <td style={tdStyle}>{ft.depthFt}</td>
+              <td style={tdStyle}>{ct.footingLengthFt} × {ct.footingWidthFt} × {ct.footingDepthFt}</td>
             </tr>
           ))}
         </tbody>
