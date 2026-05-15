@@ -9,8 +9,7 @@ import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS } from './structuralSlice'
 import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
 
-let nextId = 1
-const uid = () => String(nextId++)
+const uid = () => crypto.randomUUID()
 
 function getStampDimensionsFt(stamp) {
   const wFt = (stamp.w || 0) / 12
