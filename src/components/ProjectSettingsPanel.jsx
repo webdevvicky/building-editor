@@ -75,6 +75,9 @@ export default function ProjectSettingsPanel() {
   const setParapetSettings   = useStore(s => s.setParapetSettings)
   const setStaircaseDefaults = useStore(s => s.setStaircaseDefaults)
   const setRccSpecs          = useStore(s => s.setRccSpecs)
+  const setColumnTypeEntry   = useStore(s => s.setColumnTypeEntry)
+  const addColumnType        = useStore(s => s.addColumnType)
+  const removeColumnType     = useStore(s => s.removeColumnType)
 
   if (activeTool !== 'settings') return null
 
@@ -223,26 +226,47 @@ export default function ProjectSettingsPanel() {
 
       <div style={divider} />
 
-      {/* 7. Column Types — read-only (footing dims are inline on each column type) */}
+      {/* 7. Column & Footing Types — editable */}
       <div style={sectionHead}>Column &amp; Footing Types</div>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th style={thStyle}>Label</th>
-            <th style={thStyle}>Section</th>
-            <th style={thStyle}>Footing (ft)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(columnTypes ?? []).map(ct => (
-            <tr key={ct.id}>
-              <td style={tdStyle}>{ct.label}</td>
-              <td style={tdStyle}>{getColumnDimLabel(ct)}</td>
-              <td style={tdStyle}>{ct.footingLengthFt} × {ct.footingWidthFt} × {ct.footingDepthFt}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {(columnTypes ?? []).map(ct => (
+        <div key={ct.id} style={{ border: '1px solid #eee', borderRadius: 4, padding: '8px 10px', marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <input
+              style={{ fontSize: 12, fontWeight: 600, border: '1px solid #ddd', borderRadius: 3, padding: '2px 6px', flex: 1, marginRight: 8 }}
+              value={ct.label}
+              onKeyDown={e => e.stopPropagation()}
+              onChange={e => setColumnTypeEntry(ct.id, { label: e.target.value })}
+            />
+            <button
+              style={{ background: '#fff0f0', border: '1px solid #e74c3c', borderRadius: 3, color: '#e74c3c', cursor: 'pointer', fontSize: 10, padding: '2px 6px' }}
+              onClick={() => removeColumnType(ct.id)}
+            >✕</button>
+          </div>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Section</div>
+          {ct.shape === 'circle' ? (
+            <NumField label="Diameter (in)" step={1} value={ct.diamIn ?? 12}
+              onChange={v => setColumnTypeEntry(ct.id, { diamIn: v })} />
+          ) : (
+            <>
+              <NumField label="Width (in)" step={1} value={ct.widthIn ?? 9}
+                onChange={v => setColumnTypeEntry(ct.id, { widthIn: v })} />
+              <NumField label="Depth (in)" step={1} value={ct.depthIn ?? 9}
+                onChange={v => setColumnTypeEntry(ct.id, { depthIn: v })} />
+            </>
+          )}
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4, marginTop: 4 }}>Footing</div>
+          <NumField label="Length (ft)" step={0.5} value={ct.footingLengthFt ?? 4}
+            onChange={v => setColumnTypeEntry(ct.id, { footingLengthFt: v })} />
+          <NumField label="Width (ft)" step={0.5} value={ct.footingWidthFt ?? 4}
+            onChange={v => setColumnTypeEntry(ct.id, { footingWidthFt: v })} />
+          <NumField label="Depth (ft)" step={0.25} value={ct.footingDepthFt ?? 1}
+            onChange={v => setColumnTypeEntry(ct.id, { footingDepthFt: v })} />
+        </div>
+      ))}
+      <button
+        style={{ fontSize: 11, background: '#f0f7ff', border: '1px solid #3498db', borderRadius: 4, color: '#2471a3', cursor: 'pointer', padding: '4px 10px', marginBottom: 8 }}
+        onClick={() => addColumnType({})}
+      >+ Add Column Type</button>
 
       <div style={divider} />
 

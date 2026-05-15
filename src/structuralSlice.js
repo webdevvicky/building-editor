@@ -131,6 +131,34 @@ export const createStructuralSlice = (set, get, uid) => ({
     },
   })),
 
+  addColumnType: (fields) => {
+    const id = uid()
+    set(state => ({
+      projectSettings: {
+        ...state.projectSettings,
+        columnTypes: [
+          ...state.projectSettings.columnTypes,
+          {
+            id,
+            label: 'New Type',
+            widthIn: 9, depthIn: 9,
+            shape: 'rect',
+            footingLengthFt: 4, footingWidthFt: 4, footingDepthFt: 1,
+            ...fields,
+          },
+        ],
+      },
+    }))
+    return id
+  },
+
+  removeColumnType: (id) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      columnTypes: state.projectSettings.columnTypes.filter(ct => ct.id !== id),
+    },
+  })),
+
   setBeamDimension: (level, fields) => set(state => ({
     projectSettings: {
       ...state.projectSettings,
