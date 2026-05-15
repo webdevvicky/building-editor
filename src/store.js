@@ -110,9 +110,9 @@ export const useStore = create((set, get) => ({
   // ── History ───────────────────────────────────────────────────────────
 
   _save() {
-    const { nodes, walls, rooms, stamps, columns, beams, slabs, staircases } = get()
+    const { nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations } = get()
     set(s => ({
-      history: [...s.history.slice(-49), { nodes, walls, rooms, stamps, columns, beams, slabs, staircases }],
+      history: [...s.history.slice(-49), { nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations }],
       future:  [],
     }))
   },
@@ -123,7 +123,7 @@ export const useStore = create((set, get) => ({
     const prev = history[history.length - 1]
     set(s => ({
       history: s.history.slice(0, -1),
-      future:  [{ nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases }, ...s.future.slice(0, 49)],
+      future:  [{ nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations }, ...s.future.slice(0, 49)],
       nodes:   prev.nodes,
       walls:   prev.walls,
       rooms:   prev.rooms,
@@ -131,7 +131,8 @@ export const useStore = create((set, get) => ({
       columns: prev.columns    ?? s.columns,
       beams:   prev.beams      ?? s.beams,
       slabs:   prev.slabs      ?? s.slabs,
-      staircases: prev.staircases ?? s.staircases,
+      staircases:  prev.staircases  ?? s.staircases,
+      foundations: prev.foundations ?? s.foundations,
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
     }))
   },
@@ -142,7 +143,7 @@ export const useStore = create((set, get) => ({
     const next = future[0]
     set(s => ({
       future:  s.future.slice(1),
-      history: [...s.history.slice(-49), { nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases }],
+      history: [...s.history.slice(-49), { nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations }],
       nodes:   next.nodes,
       walls:   next.walls,
       rooms:   next.rooms,
@@ -150,7 +151,8 @@ export const useStore = create((set, get) => ({
       columns: next.columns    ?? s.columns,
       beams:   next.beams      ?? s.beams,
       slabs:   next.slabs      ?? s.slabs,
-      staircases: next.staircases ?? s.staircases,
+      staircases:  next.staircases  ?? s.staircases,
+      foundations: next.foundations ?? s.foundations,
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
     }))
   },
@@ -158,7 +160,7 @@ export const useStore = create((set, get) => ({
   // ── Tools ─────────────────────────────────────────────────────────────
 
   setTool(tool) {
-    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, pendingWallIds: [], draftOpening: null })
+    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, selectedFoundationId: null, pendingWallIds: [], draftOpening: null })
   },
 
   toggleDrawVirtual()    { set(s => ({ drawVirtual: !s.drawVirtual })) },
@@ -667,12 +669,16 @@ export const useStore = create((set, get) => ({
         const rccSpecs = psRest.rccSpecs ?? DEFAULT_PROJECT_SETTINGS.rccSpecs
         return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs }
       })(),
-      columns:    data.columns    ?? {},
-      beams:      data.beams      ?? {},
-      slabs:      data.slabs      ?? {},
-      staircases: data.staircases ?? {},
+      // Columns: ensure foundationId field exists on legacy saves.
+      columns: Object.fromEntries(
+        Object.entries(data.columns ?? {}).map(([id, col]) => [id, { foundationId: null, ...col }])
+      ),
+      beams:       data.beams       ?? {},
+      slabs:       data.slabs       ?? {},
+      staircases:  data.staircases  ?? {},
+      foundations: data.foundations ?? {},
       history: [], future: [],
-      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, pendingWallIds: [],
+      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, pendingWallIds: [],
     })
   },
 

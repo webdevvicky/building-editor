@@ -1,0 +1,13 @@
+{
+
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  }
+,
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+   
+    "context7"
+   
+  ]
+}

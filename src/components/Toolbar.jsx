@@ -65,9 +65,10 @@ export default function Toolbar() {
   function handleSave() {
     const s = useStore.getState()
     const data = JSON.stringify({
-      version: 5, unit: 'inch',
+      version: 6, unit: 'inch',
       nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
       columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
+      foundations: s.foundations,
       projectSettings: s.projectSettings,
     }, null, 2)
     const blob = new Blob([data], { type: 'application/json' })

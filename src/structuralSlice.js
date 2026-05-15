@@ -24,8 +24,9 @@ function r2(n) { return Math.round(n * 100) / 100 }
 let _wallAdjCache    = { rooms: null, result: null }
 let _derivedBeamsCache = { walls: null, nodes: null, columns: null, rooms: null, result: null }
 let _allBeamsCache   = { beams: null, derived: null, result: null }
-let _concreteCache   = { colQ: null, footQ: null, beamQ: null, slabQ: null, stairQ: null, sunQ: null, result: null }
+let _concreteCache   = { colQ: null, fdnQ: null, beamQ: null, slabQ: null, stairQ: null, sunQ: null, result: null }
 let _masonryDedCache = { walls: null, nodes: null, projectSettings: null, result: null }
+let _foundationCache = { columns: null, foundations: null, projectSettings: null, colQ: null, result: null }
 
 export const DEFAULT_COLUMN_TYPES = [
   { id: 'C1', label: 'Corner 9×9',    widthIn: 9,  depthIn: 9,  shape: 'rect',   footingLengthFt: 3, footingWidthFt: 3, footingDepthFt: 1    },
@@ -114,7 +115,15 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Same id as the companion stairs stamp.
   staircases: {},
 
+  // Foundation entities — first-class for combined / raft / strip / pile (Phase 1.8).
+  // Each entry: { id, type, columnIds, wallIds, geometry, grade, pccDepthFt,
+  //               plumDepthFt, floorId, label, meta }
+  // Empty by default; columns with foundationId=null fall back to inline
+  // column-type footing dims (auto-isolated). Behavior identical to pre-T3.
+  foundations: {},
+
   selectedColumnId: null,
+  selectedFoundationId: null,
 
   // ── projectSettings actions ────────────────────────────────────────────────
 
@@ -223,7 +232,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     const id = uid()
     get()._save()
     set(state => ({
-      columns: { ...state.columns, [id]: { id, x, y, columnTypeId, attachedNodeId } },
+      columns: { ...state.columns, [id]: { id, x, y, columnTypeId, attachedNodeId, foundationId: null } },
     }))
     return id
   },
@@ -231,6 +240,7 @@ export const createStructuralSlice = (set, get, uid) => ({
   deleteColumn: (id) => {
     get()._save()
     set(state => {
+      const col = state.columns[id]
       const nextColumns = { ...state.columns }
       delete nextColumns[id]
       // Delete all EXPLICIT beams that reference this column
@@ -242,7 +252,16 @@ export const createStructuralSlice = (set, get, uid) => ({
         const toHit   = toRef.type   === 'COLUMN' && toRef.columnId   === id
         if (!fromHit && !toHit) nextBeams[bid] = beam
       }
-      return { columns: nextColumns, beams: nextBeams }
+      // Detach from foundation if attached
+      const nextFoundations = { ...state.foundations }
+      if (col?.foundationId && nextFoundations[col.foundationId]) {
+        const f = nextFoundations[col.foundationId]
+        nextFoundations[col.foundationId] = {
+          ...f,
+          columnIds: (f.columnIds || []).filter(cid => cid !== id),
+        }
+      }
+      return { columns: nextColumns, beams: nextBeams, foundations: nextFoundations }
     })
   },
 
@@ -277,6 +296,101 @@ export const createStructuralSlice = (set, get, uid) => ({
   },
 
   selectColumn: (id) => set({ selectedColumnId: id }),
+
+  // ── Foundation actions ─────────────────────────────────────────────────────
+  // Foundation type values: 'ISOLATED' | 'COMBINED' | 'RAFT' | 'STRIP' | 'PILE'.
+  // Stage 0 T3 only adds the schema slot + selector fallback; UI lives in Phase 1.8.
+
+  addFoundation: (type, fields = {}) => {
+    const id = uid()
+    get()._save()
+    set(state => ({
+      foundations: {
+        ...state.foundations,
+        [id]: {
+          id,
+          type,
+          columnIds: [],
+          wallIds: [],
+          geometry: {},
+          grade: 'M20',
+          pccDepthFt: PCC_BEDDING_THICKNESS_FT,
+          plumDepthFt: 0,
+          floorId: 'F1',
+          label: null,
+          meta: null,
+          ...fields,
+        },
+      },
+    }))
+    return id
+  },
+
+  updateFoundation: (id, partial) => {
+    get()._save()
+    set(state => ({
+      foundations: { ...state.foundations, [id]: { ...state.foundations[id], ...partial } },
+    }))
+  },
+
+  deleteFoundation: (id) => {
+    get()._save()
+    set(state => {
+      const nextFoundations = { ...state.foundations }
+      delete nextFoundations[id]
+      const nextColumns = {}
+      for (const [cid, col] of Object.entries(state.columns)) {
+        nextColumns[cid] = col.foundationId === id ? { ...col, foundationId: null } : col
+      }
+      return { foundations: nextFoundations, columns: nextColumns, selectedFoundationId: null }
+    })
+  },
+
+  attachColumnToFoundation: (columnId, foundationId) => {
+    get()._save()
+    set(state => {
+      const f = state.foundations[foundationId]
+      const col = state.columns[columnId]
+      if (!f || !col) return {}
+      const columnIds = [...new Set([...(f.columnIds || []), columnId])]
+      const prevFid = col.foundationId
+      const next = {
+        foundations: { ...state.foundations, [foundationId]: { ...f, columnIds } },
+        columns: { ...state.columns, [columnId]: { ...col, foundationId } },
+      }
+      // Remove from previous foundation if any
+      if (prevFid && prevFid !== foundationId && state.foundations[prevFid]) {
+        const prev = state.foundations[prevFid]
+        next.foundations[prevFid] = {
+          ...prev,
+          columnIds: (prev.columnIds || []).filter(cid => cid !== columnId),
+        }
+      }
+      return next
+    })
+  },
+
+  detachColumnFromFoundation: (columnId) => {
+    get()._save()
+    set(state => {
+      const col = state.columns[columnId]
+      if (!col || !col.foundationId) return {}
+      const fid = col.foundationId
+      const f = state.foundations[fid]
+      const next = {
+        columns: { ...state.columns, [columnId]: { ...col, foundationId: null } },
+      }
+      if (f) {
+        next.foundations = {
+          ...state.foundations,
+          [fid]: { ...f, columnIds: (f.columnIds || []).filter(cid => cid !== columnId) },
+        }
+      }
+      return next
+    })
+  },
+
+  selectFoundation: (id) => set({ selectedFoundationId: id }),
 
   // ── Beam actions ───────────────────────────────────────────────────────────
 
@@ -524,29 +638,97 @@ export const createStructuralSlice = (set, get, uid) => ({
     return result
   },
 
-  // Returns { [columnTypeId]: { count, concreteVolFt3, pccVolFt3, label, lengthFt, widthFt, depthFt } }
-  // Footing dims are stored inline on the column type (footingLengthFt, footingWidthFt, footingDepthFt).
-  getFootingQuantities: () => {
-    const { projectSettings } = get()
+  // Returns { byFoundation, byColumnTypeInline } — combined foundation view.
+  //
+  // byFoundation:        entries from state.foundations (combined/raft/strip/pile in
+  //                      Phase 1.8). Each: { id, type, columnIds, wallIds, floorId,
+  //                      concreteVolFt3, pccVolFt3, plumVolFt3, footprintFt2, label, grade }.
+  // byColumnTypeInline:  auto-isolated footings for columns with foundationId=null,
+  //                      keyed by columnTypeId for backward compatibility with the
+  //                      previous getFootingQuantities() shape.
+  //
+  // Memoized on { columns, foundations, projectSettings, colQ } reference equality.
+  getFoundationQuantities: () => {
+    const { columns, foundations, projectSettings } = get()
     const { columnTypes } = projectSettings
-    const colQtys = get().getColumnQuantities()
-    const result = {}
-    for (const [ctId, colData] of Object.entries(colQtys)) {
+    const colQ = get().getColumnQuantities()
+
+    const c = _foundationCache
+    if (c.columns === columns && c.foundations === foundations && c.projectSettings === projectSettings && c.colQ === colQ)
+      return c.result
+
+    // Inline auto-isolated path: columns where foundationId is null.
+    const byColumnTypeInline = {}
+    for (const [ctId, colData] of Object.entries(colQ)) {
       const ct = columnTypes.find(t => t.id === ctId)
       if (!ct) continue
       const { footingLengthFt: lFt, footingWidthFt: wFt, footingDepthFt: dFt } = ct
       if (!lFt || !wFt || !dFt) continue
-      result[ctId] = {
-        count:           colData.count,
-        concreteVolFt3:  r2(lFt * wFt * dFt * colData.count),
-        pccVolFt3:       r2(lFt * wFt * PCC_BEDDING_THICKNESS_FT * colData.count),
+      const count = Object.values(columns).filter(col => col.columnTypeId === ctId && !col.foundationId).length
+      if (count === 0) continue
+      byColumnTypeInline[ctId] = {
+        count,
+        concreteVolFt3:  r2(lFt * wFt * dFt * count),
+        pccVolFt3:       r2(lFt * wFt * PCC_BEDDING_THICKNESS_FT * count),
+        plumVolFt3:      0,                             // Phase 1.6e sets plum on foundation entities (Phase 1.8 UI)
+        footprintFt2:    r2(lFt * wFt * count),
         label:           ct.label,
         lengthFt:        lFt,
         widthFt:         wFt,
         depthFt:         dFt,
       }
     }
+
+    // Foundation entity path
+    const byFoundation = {}
+    for (const [fid, f] of Object.entries(foundations)) {
+      const g = f.geometry || {}
+      let concreteVolFt3 = 0
+      let footprintFt2 = 0
+      // Phase 1.8 will flesh these out. Stage 0 T3 supports the common rect-prism cases.
+      if (f.type === 'ISOLATED' || f.type === 'COMBINED' || f.type === 'STRIP') {
+        const lFt = g.lengthFt || 0, wFt = g.widthFt || 0, dFt = g.depthFt || 0
+        footprintFt2   = lFt * wFt
+        concreteVolFt3 = footprintFt2 * dFt
+      } else if (f.type === 'RAFT') {
+        // Raft area = explicit areaFt2 (UI captures from polygon in Phase 1.8) × depth.
+        footprintFt2   = g.areaFt2 || 0
+        concreteVolFt3 = footprintFt2 * (g.depthFt || 0)
+      } else if (f.type === 'PILE') {
+        // Pile cap + pile volumes. Phase 1.8 fills the formula.
+        footprintFt2   = (g.capLengthFt || 0) * (g.capWidthFt || 0)
+        const capVol   = footprintFt2 * (g.capDepthFt || 0)
+        const pileCount = g.pilesCount || 0
+        const pileVol  = pileCount * Math.PI * Math.pow((g.pileDiamIn || 0) / 24, 2) * (g.pileLengthFt || 0)
+        concreteVolFt3 = capVol + pileVol
+      }
+      const pccDepthFt  = f.pccDepthFt ?? PCC_BEDDING_THICKNESS_FT
+      const plumDepthFt = f.plumDepthFt ?? 0
+      byFoundation[fid] = {
+        id:             fid,
+        type:           f.type,
+        columnIds:      f.columnIds || [],
+        wallIds:        f.wallIds || [],
+        floorId:        f.floorId || 'F1',
+        concreteVolFt3: r2(concreteVolFt3),
+        pccVolFt3:      r2(footprintFt2 * pccDepthFt),
+        plumVolFt3:     r2(footprintFt2 * plumDepthFt),
+        footprintFt2:   r2(footprintFt2),
+        label:          f.label ?? `${f.type} foundation`,
+        grade:          f.grade ?? 'M20',
+      }
+    }
+
+    const result = { byFoundation, byColumnTypeInline }
+    _foundationCache = { columns, foundations, projectSettings, colQ, result }
     return result
+  },
+
+  // Backward-compatible shape: { [columnTypeId]: { count, concreteVolFt3, pccVolFt3, label, lengthFt, widthFt, depthFt } }
+  // Returns only the auto-isolated inline subset. Foundation entities accessed via
+  // getFoundationQuantities().byFoundation.
+  getFootingQuantities: () => {
+    return get().getFoundationQuantities().byColumnTypeInline
   },
 
   // Returns { plinth: { totalLenFt, widthIn, depthIn, volFt3 }, lintel: {...}, roof: {...} }
@@ -714,7 +896,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     const state = get()
     const steelRatios = state.projectSettings.rccSpecs?.steelKgPerM3 ?? STEEL_KG_PER_M3
     const colQtys  = state.getColumnQuantities()
-    const footQtys = state.getFootingQuantities()
+    const fdnQtys  = state.getFoundationQuantities()
     const beamQtys = state.getBeamQuantities()
     const slabQtys = state.getSlabQuantities()
     const stairQtys = state.getStaircaseQuantities()
@@ -723,7 +905,10 @@ export const createStructuralSlice = (set, get, uid) => ({
 
     const toM3 = ft3 => ft3 * FT3_TO_M3
 
-    const footM3  = toM3(Object.values(footQtys).reduce((s, q) => s + q.concreteVolFt3, 0))
+    const footFt3 =
+      Object.values(fdnQtys.byFoundation).reduce((s, q) => s + q.concreteVolFt3, 0) +
+      Object.values(fdnQtys.byColumnTypeInline).reduce((s, q) => s + q.concreteVolFt3, 0)
+    const footM3  = toM3(footFt3)
     const colM3   = toM3(Object.values(colQtys).reduce((s, q) => s + q.volFt3, 0))
     const beamM3  = toM3(Object.values(beamQtys).filter(Boolean).reduce((s, q) => s + q.volFt3, 0))
     const slabM3  = toM3(slabQtys.mainVolFt3 + slabQtys.sunkenVolFt3)
@@ -746,23 +931,29 @@ export const createStructuralSlice = (set, get, uid) => ({
   getConcreteByGrade: () => {
     const state    = get()
     const colQ     = state.getColumnQuantities()
-    const footQ    = state.getFootingQuantities()
+    const fdnQ     = state.getFoundationQuantities()
     const beamQ    = state.getBeamQuantities()
     const slabQ    = state.getSlabQuantities()
     const stairQ   = state.getStaircaseQuantities()
     const sunQ     = state.getSunshadeQuantities()
     const c = _concreteCache
-    if (c.colQ === colQ && c.footQ === footQ && c.beamQ === beamQ && c.slabQ === slabQ && c.stairQ === stairQ && c.sunQ === sunQ) return c.result
+    if (c.colQ === colQ && c.fdnQ === fdnQ && c.beamQ === beamQ && c.slabQ === slabQ && c.stairQ === stairQ && c.sunQ === sunQ) return c.result
+
+    const fdnConcreteFt3 =
+      Object.values(fdnQ.byFoundation).reduce((s, q) => s + q.concreteVolFt3, 0) +
+      Object.values(fdnQ.byColumnTypeInline).reduce((s, q) => s + q.concreteVolFt3, 0)
 
     const m20Ft3 =
       Object.values(colQ).reduce((s, q) => s + q.volFt3, 0) +
-      Object.values(footQ).reduce((s, q) => s + q.concreteVolFt3, 0) +
+      fdnConcreteFt3 +
       Object.values(beamQ).filter(Boolean).reduce((s, q) => s + q.volFt3, 0) +
       slabQ.mainVolFt3 + slabQ.sunkenVolFt3 +
       stairQ.reduce((s, q) => s + q.totalRccFt3, 0) +
       sunQ.totalVolFt3
 
-    const pccFt3 = Object.values(footQ).reduce((s, q) => s + q.pccVolFt3, 0)
+    const pccFt3 =
+      Object.values(fdnQ.byFoundation).reduce((s, q) => s + q.pccVolFt3, 0) +
+      Object.values(fdnQ.byColumnTypeInline).reduce((s, q) => s + q.pccVolFt3, 0)
     const m20M3  = m20Ft3 * FT3_TO_M3
     const pccM3  = pccFt3 * FT3_TO_M3
 
@@ -785,7 +976,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       }
     }
 
-    _concreteCache = { colQ, footQ, beamQ, slabQ, stairQ, sunQ, result }
+    _concreteCache = { colQ, fdnQ, beamQ, slabQ, stairQ, sunQ, result }
     return result
   },
 
