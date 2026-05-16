@@ -224,11 +224,16 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
   })
 
   const sh = { rates, onRateChange, openId, onInfoClick }
-  // React `key` uses infoId when provided — required because Phase 1.7+ steel
-  // rows share the same rateKey across multiple grouped-by-spec rows in one
-  // category, so rateKey alone is not unique.
+  // React `key` is `rateKey + infoId` — neither alone is unique:
+  //   - Steel grouped-by-spec rows share a rateKey across rows in one category
+  //     (different infoIds per spec)
+  //   - Concrete M20 / M7.5 rows share an infoId across rows in one grade
+  //     (different rateKeys per material — cement / sand / aggregate)
+  // The composite collides only when both happen to match, which is by
+  // construction never (every row defines a unique formulaId scoped to its
+  // rateKey or shares one with a sibling that differs in rateKey).
   const row = (label, qty, unit, rk, infoId) => (
-    <PricedSubRow key={infoId ?? rk} label={label} qtyDisplay={`${qty} ${unit}`} unitLabel={`₹/${unit}`}
+    <PricedSubRow key={`${rk}::${infoId ?? rk}`} label={label} qtyDisplay={`${qty} ${unit}`} unitLabel={`₹/${unit}`}
       rateKey={rk} cost={calcCost(qty, rates[rk])} infoId={infoId ?? rk} {...sh} />
   )
 
