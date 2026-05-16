@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { resolveSlabReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -56,6 +57,24 @@ const addBtn = {
 
 const assignSelect = { fontSize: 12, marginLeft: 4 }
 
+const SLAB_SOURCE_COLOR = {
+  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
+  TYPE:            { bg: '#e3f2fd', fg: '#1565c0' },
+  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
+  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
+  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+}
+function slabResBadge(source) {
+  const c = SLAB_SOURCE_COLOR[source] ?? SLAB_SOURCE_COLOR.ESTIMATE
+  return { marginTop: 2, padding: '3px 7px', borderRadius: 4, fontSize: 10,
+           background: c.bg, color: c.fg, display: 'inline-block', lineHeight: 1.3 }
+}
+const slabApplyBtn = {
+  marginTop: 4, padding: '2px 8px', fontSize: 10,
+  background: '#fafafa', border: '1px solid #bbb', borderRadius: 3,
+  color: '#444', cursor: 'pointer',
+}
+
 const delBtn = {
   background: '#fff0f0', border: '1px solid #e74c3c',
   borderRadius: 4, color: '#e74c3c', cursor: 'pointer',
@@ -74,6 +93,7 @@ export default function SlabPanel() {
   const deleteSlab      = useStore(s => s.deleteSlab)
   const assignRoomToSlab = useStore(s => s.assignRoomToSlab)
   const setSlabReinforcementSpec = useStore(s => s.setSlabReinforcementSpec)
+  const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
   const projectSettings = useStore(s => s.projectSettings)
 
   if (activeTool !== 'slabs') return null
@@ -136,22 +156,55 @@ export default function SlabPanel() {
                 )}
               </div>
 
-              {/* Phase 1.7 — per-slab reinforcement spec */}
+              {/* Phase 1.7+ — per-slab reinforcement spec with centralized resolution */}
               {(() => {
                 const specs = projectSettings?.reinforcementSpecs ?? {}
                 const slabSpecs = Object.values(specs).filter(sp => sp.elementType === 'SLAB')
+                const state = useStore.getState()
+                const resolved = resolveSlabReinforcementSpec(state, slab.id)
+                const slabRole = slab.role ?? slab.classification ?? null
+                const handleApply = () => {
+                  const peers = Object.values(state.slabs).filter(
+                    sl => sl.id !== slab.id && (sl.role ?? sl.classification ?? null) === slabRole
+                  )
+                  if (peers.length === 0) {
+                    window.alert('No matching slabs to update — no other slabs share this role.')
+                    return
+                  }
+                  const specLabel = slab.reinforcementSpecId
+                    ? (specs[slab.reinforcementSpecId]?.label ?? slab.reinforcementSpecId)
+                    : 'no spec (clear)'
+                  const ok = window.confirm(
+                    `Apply "${specLabel}" to ${peers.length} other ${slabRole ?? 'matching'} slab${peers.length === 1 ? '' : 's'}?`
+                  )
+                  if (!ok) return
+                  applyReinforcementSpecToMatching({
+                    elementType: 'SLAB',
+                    sourceEntityId: slab.id,
+                    specId: slab.reinforcementSpecId ?? null,
+                  })
+                }
                 return (
-                  <div style={inlineRow}>
-                    <label style={{ fontSize: 11, color: '#888' }}>Steel spec</label>
-                    <select
-                      value={slab.reinforcementSpecId ?? ''}
-                      onKeyDown={e => e.stopPropagation()}
-                      onChange={e => setSlabReinforcementSpec(slab.id, e.target.value || null)}
-                      style={{ fontSize: 12 }}
-                    >
-                      <option value="">— Estimate —</option>
-                      {slabSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
-                    </select>
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={inlineRow}>
+                      <label style={{ fontSize: 11, color: '#888' }}>Steel spec</label>
+                      <select
+                        value={slab.reinforcementSpecId ?? ''}
+                        onKeyDown={e => e.stopPropagation()}
+                        onChange={e => setSlabReinforcementSpec(slab.id, e.target.value || null)}
+                        style={{ fontSize: 12 }}
+                      >
+                        <option value="">— Inherit —</option>
+                        {slabSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
+                      </select>
+                      <button style={slabApplyBtn} onClick={handleApply}
+                              title="Copy this spec to all other slabs with the same role">
+                        Apply to matching
+                      </button>
+                    </div>
+                    <div style={slabResBadge(resolved.source)}>
+                      {resolved.specLabel} · {humanizeAssignmentSource(resolved.source)}
+                    </div>
                   </div>
                 )
               })()}

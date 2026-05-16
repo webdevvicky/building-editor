@@ -30,6 +30,7 @@ import { computeExcavationQuantities } from '../quantities/excavation'
 import { computePlasterQuantities }    from '../quantities/plaster'
 import { computeFoundationQuantities } from '../quantities/foundations'
 import { computeBBSQuantities }        from '../quantities/bbs'
+import { humanizeAssignmentSource as humanizeSource } from '../specs/resolution'
 import { PLASTER_KIND }                from '../specs/plasterSystems'
 import { scopeStateToFloor }           from './scope'
 
@@ -152,33 +153,67 @@ export function getBoqLines(state, rates, opts = {}) {
   if (totalStairRcc > 0) push({ id: 'stair_rcc', category: 'staircase', label: 'Staircase RCC', qty: r2(totalStairRcc), unit: 'ft³', rateKey: 'stair_rcc', formulaId: 'stair_rcc' })
 
   // ── 5. Structural Steel ───────────────────────────────────────────────
-  // Phase 1.7: when reinforcement specs exist for an element, prefer BBS over kg/m³ estimate.
-  // Estimate path remains the default when no spec is attached.
-  const steelQ = state.getSteelQuantities()
-  const bbs    = computeBBSQuantities(state)
+  // Phase 1.7+ partial-coverage emit:
+  //   - BBS pipeline (quantities/bbs.js) resolves a spec per entity via the
+  //     central resolver. Each resolved spec emits ONE BOQ line per group.
+  //   - Entities resolving to ESTIMATE are excluded from BBS and fall to the
+  //     kg/m³ estimate (one line per category).
+  //   - BBS and Estimate lines coexist in the same category — never the old
+  //     "all-or-nothing" suppression. Same rateKey across all lines in a
+  //     category so users still enter one rate per element type.
+  const bbs = computeBBSQuantities(state)
+  const steelQ = state.getSteelQuantities({
+    excludeColumnIds:            bbs.excludeIds.columns,
+    excludeBeamIds:              bbs.excludeIds.beams,
+    excludeSlabIds:              bbs.excludeIds.slabs,
+    excludeFoundationIds:        bbs.excludeIds.foundations,
+    excludeColumnTypeFootingIds: bbs.excludeIds.columnTypeFootings,
+  })
   const STEEL_DEFS = [
-    { key: 'footing',    label: 'Footings',   rk: 'steel_footing',    et: 'FOOTING' },
-    { key: 'column',     label: 'Columns',    rk: 'steel_column',     et: 'COLUMN' },
-    { key: 'beam',       label: 'Beams',      rk: 'steel_beam',       et: 'BEAM' },
-    { key: 'slab',       label: 'Slabs',      rk: 'steel_slab',       et: 'SLAB' },
-    { key: 'staircase',  label: 'Staircases', rk: 'steel_staircase',  et: 'STAIRCASE' },
-    { key: 'civilStamp', label: 'Civil',      rk: 'steel_civil',      et: 'CIVIL_STAMP' },
+    { key: 'footing',    label: 'Footings',   rk: 'steel_footing',    et: 'FOOTING',    bbsKey: 'footing' },
+    { key: 'column',     label: 'Columns',    rk: 'steel_column',     et: 'COLUMN',     bbsKey: 'column'  },
+    { key: 'beam',       label: 'Beams',      rk: 'steel_beam',       et: 'BEAM',       bbsKey: 'beam'    },
+    { key: 'slab',       label: 'Slabs',      rk: 'steel_slab',       et: 'SLAB',       bbsKey: 'slab'    },
+    { key: 'staircase',  label: 'Staircases', rk: 'steel_staircase',  et: 'STAIRCASE',  bbsKey: null      },
+    { key: 'civilStamp', label: 'Civil',      rk: 'steel_civil',      et: 'CIVIL_STAMP', bbsKey: null     },
   ]
-  // BBS contribution per category (entity-driven). Lines marked "(BBS)" carry meta.bbs=true.
-  const bbsCategoryKg = {
-    column:  bbs.byColumn.reduce((s, c) => s + (c.totalKg || 0), 0),
-    beam:    Object.values(bbs.byBeamLevel || {}).reduce((s, b) => s + (b?.totalKg || 0), 0),
-    footing: bbs.byFooting.reduce((s, f) => s + (f.totalKg || 0), 0),
-    slab:    bbs.bySlab.reduce((s, sl) => s + (sl.totalKg || 0), 0),
-  }
-  for (const { key, label, rk, et } of STEEL_DEFS) {
-    const estKg = steelQ?.[key] ?? 0
-    const bbsKg = bbsCategoryKg[key] ?? 0
-    if (bbsKg > 0) {
-      push({ id: `${rk}_bbs`, category: 'steel', label: `Steel – ${label} (BBS)`, qty: r2(bbsKg), unit: 'kg', rateKey: rk, formulaId: `steel_${et}`, meta: { bbs: true } })
+  for (const { key, label, rk, et, bbsKey } of STEEL_DEFS) {
+    // Grouped-by-spec BBS lines (one per resolved spec in this category).
+    if (bbsKey) {
+      for (const grp of (bbs.groupedBySpec[bbsKey] ?? [])) {
+        if (grp.totalKg <= 0) continue
+        push({
+          id:        `${rk}_spec_${grp.specId}`,
+          category:  'steel',
+          label:     `Steel – ${label} — ${grp.specLabel} (${humanizeSource(grp.source)})`,
+          qty:       r2(grp.totalKg),
+          unit:      'kg',
+          rateKey:   rk,
+          formulaId: `steel_${et}_spec_${grp.specId}`,
+          meta: {
+            bbs:             true,
+            specId:          grp.specId,
+            specLabel:       grp.specLabel,
+            source:          grp.source,
+            instanceCount:   grp.instanceCount,
+            sourceEntityIds: grp.sourceEntityIds,
+          },
+        })
+      }
     }
-    if (estKg > 0 && bbsKg === 0) {
-      push({ id: rk, category: 'steel', label: `Steel – ${label} (Est.)`, qty: r2(estKg), unit: 'kg', rateKey: rk, formulaId: `steel_${et}`, meta: { bbs: false } })
+    // Remaining kg/m³ estimate line — only when the un-BBS'd pool has volume.
+    const estKg = steelQ?.[key] ?? 0
+    if (estKg > 0) {
+      push({
+        id:        rk,
+        category:  'steel',
+        label:     `Steel – ${label} (Estimate, kg/m³)`,
+        qty:       r2(estKg),
+        unit:      'kg',
+        rateKey:   rk,
+        formulaId: `steel_${et}`,
+        meta:      { bbs: false, source: 'ESTIMATE' },
+      })
     }
   }
 

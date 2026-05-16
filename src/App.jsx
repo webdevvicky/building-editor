@@ -7,6 +7,7 @@ import StampPanel from './components/StampPanel'
 import BulkWallPanel from './components/BulkWallPanel'
 import RoomDetailPanel from './components/RoomDetailPanel'
 import ColumnPanel from './components/ColumnPanel'
+import BeamPanel from './components/BeamPanel'
 import StaircasePanel from './components/StaircasePanel'
 import SlabPanel from './components/SlabPanel'
 import ProjectSettingsPanel from './components/ProjectSettingsPanel'
@@ -28,6 +29,7 @@ export default function App() {
       <BulkWallPanel />
       <RoomDetailPanel />
       <ColumnPanel />
+      <BeamPanel />
       <StaircasePanel />
       <SlabPanel />
       <FoundationPanel />

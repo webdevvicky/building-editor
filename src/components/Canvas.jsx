@@ -130,6 +130,8 @@ export default function Canvas() {
   const deleteColumn = useStore(s => s.deleteColumn)
   const selectColumn = useStore(s => s.selectColumn)
   const addBeam          = useStore(s => s.addBeam)
+  const selectBeam       = useStore(s => s.selectBeam)
+  const selectedBeamId   = useStore(s => s.selectedBeamId)
   const layerVisibility  = useStore(s => s.layerVisibility)
 
   const setTool = useStore(s => s.setTool)
@@ -753,19 +755,36 @@ export default function Canvas() {
             : beam.endpoints.to
           if (!fromPos || !toPos) return null
           const color = BEAM_LEVEL_REGISTRY.find(l => l.id === beam.level)?.color ?? '#888'
-          const dash  = beam.source === 'WALL_DERIVED' ? '6 3' : undefined
+          const isDerived = beam.source === 'WALL_DERIVED'
+          const dash  = isDerived ? '6 3' : undefined
           // Wall-derived beams inherit floor from their source wall; explicit beams carry floorId.
-          const beamFloorId = beam.source === 'WALL_DERIVED'
+          const beamFloorId = isDerived
             ? walls[beam.sourceWallId]?.floorId
             : beam.floorId
           const fBeam = entityStyle({ floorId: beamFloorId })
+          // Phase 1.7+ — explicit beams are selectable (click → selectBeam).
+          // Wall-derived beams stay unselectable by design.
+          const isSelected = !isDerived && beam.id === selectedBeamId
+          const clickable = !isDerived && activeTool === 'select'
+          const strokeW = isSelected ? 5 : 3
           return (
-            <line key={beam.id}
-              x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
-              stroke={color} strokeWidth={3} strokeOpacity={0.7 * (fBeam.opacity ?? 1)}
-              strokeDasharray={dash}
-              style={{ pointerEvents: 'none' }}
-            />
+            <g key={beam.id}>
+              {/* Wider invisible hit target for easier clicking */}
+              {clickable && (
+                <line
+                  x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
+                  stroke="transparent" strokeWidth={14}
+                  style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+                  onMouseDown={(e) => { e.stopPropagation(); selectBeam(beam.id) }}
+                />
+              )}
+              <line
+                x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
+                stroke={color} strokeWidth={strokeW} strokeOpacity={0.7 * (fBeam.opacity ?? 1)}
+                strokeDasharray={dash}
+                style={{ pointerEvents: 'none' }}
+              />
+            </g>
           )
         })}
         </>)}

@@ -6,6 +6,7 @@
 // from the store — never traverses foundations inline.
 
 import { useStore } from '../store'
+import { resolveFootingReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 
 const FOUNDATION_TYPES = ['ISOLATED', 'COMBINED', 'RAFT', 'STRIP', 'PILE']
 
@@ -91,6 +92,19 @@ const attachListStyle = {
   maxHeight: 140, overflowY: 'auto', padding: 4,
 }
 
+const FDN_SOURCE_COLOR = {
+  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
+  TYPE:            { bg: '#e3f2fd', fg: '#1565c0' },
+  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
+  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
+  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+}
+function fdnResBadge(source) {
+  const c = FDN_SOURCE_COLOR[source] ?? FDN_SOURCE_COLOR.ESTIMATE
+  return { marginTop: 2, padding: '3px 8px', borderRadius: 4, fontSize: 11,
+           background: c.bg, color: c.fg, display: 'inline-block', lineHeight: 1.3 }
+}
+
 function NumField({ label, value, onChange, min = 0, step = 0.5 }) {
   return (
     <div style={fieldRow}>
@@ -144,6 +158,8 @@ export default function FoundationPanel() {
   const attachWallToFoundation     = useStore(s => s.attachWallToFoundation)
   const detachWallFromFoundation   = useStore(s => s.detachWallFromFoundation)
   const selectFoundation           = useStore(s => s.selectFoundation)
+  const setFoundationReinforcementSpec = useStore(s => s.setFoundationReinforcementSpec)
+  const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
   const setTool                    = useStore(s => s.setTool)
 
   if (activeTool !== 'foundations') return null
@@ -188,6 +204,63 @@ export default function FoundationPanel() {
             ))}
           </select>
         </div>
+
+        {/* Phase 1.7+ — Reinforcement spec with centralized resolution */}
+        {(() => {
+          const specs = projectSettings.reinforcementSpecs ?? {}
+          const footingSpecs = Object.values(specs).filter(sp => sp.elementType === 'FOOTING')
+          const state = useStore.getState()
+          const resolved = resolveFootingReinforcementSpec(state, { foundationId: f.id })
+          const handleApply = () => {
+            const peers = Object.values(state.foundations)
+              .filter(o => o.id !== f.id && o.type === f.type)
+            if (peers.length === 0) {
+              window.alert('No matching foundations to update — this is the only foundation of its type.')
+              return
+            }
+            const specLabel = f.reinforcementSpecId
+              ? (specs[f.reinforcementSpecId]?.label ?? f.reinforcementSpecId)
+              : 'no spec (clear)'
+            const ok = window.confirm(
+              `Apply "${specLabel}" to ${peers.length} other ${f.type} foundation${peers.length === 1 ? '' : 's'}?`
+            )
+            if (!ok) return
+            applyReinforcementSpecToMatching({
+              elementType: 'FOUNDATION',
+              sourceEntityId: f.id,
+              specId: f.reinforcementSpecId ?? null,
+            })
+          }
+          return (
+            <>
+              <div style={fieldRow}>
+                <span style={lbl}>Steel spec (BBS)</span>
+                <select
+                  style={selectStyle}
+                  value={f.reinforcementSpecId ?? ''}
+                  onKeyDown={e => e.stopPropagation()}
+                  onChange={e => setFoundationReinforcementSpec(f.id, e.target.value || null)}
+                >
+                  <option value="">— Inherit —</option>
+                  {footingSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
+                </select>
+              </div>
+              <div style={{ ...fieldRow, marginTop: -2 }}>
+                <span style={lbl}></span>
+                <div>
+                  <span style={fdnResBadge(resolved.source)}>
+                    {resolved.specLabel} · {humanizeAssignmentSource(resolved.source)}
+                  </span>
+                  <button
+                    style={{ ...addBtn, fontSize: 11, padding: '3px 8px', marginLeft: 6 }}
+                    onClick={handleApply}
+                    title="Copy this spec to all other foundations of the same type"
+                  >Apply to matching</button>
+                </div>
+              </div>
+            </>
+          )
+        })()}
 
         <div style={divider} />
         <div style={sectionHead}>Geometry</div>

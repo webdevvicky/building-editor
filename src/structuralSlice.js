@@ -112,6 +112,25 @@ export const DEFAULT_PROJECT_SETTINGS = {
   foundationDefaults: {
     plumDepthFt: 0,    // 0 = no plum concrete; user can enable per project.
   },
+
+  // Phase 1.7 — reinforcement spec catalog (specId → spec) populated by user
+  // via BBSSpecPanel. Empty until user applies presets or creates specs.
+  reinforcementSpecs: {},
+
+  // Project-default specIds per element category. When an element's instance
+  // spec is unset, resolution.js falls through to these.
+  // BEAM is per-class because plinth/lintel/roof rebar typically differs.
+  // No global beam fallback — class default unset → ESTIMATE.
+  bbsDefaults: {
+    COLUMN:  null,
+    SLAB:    null,
+    FOOTING: null,
+    BEAM: {
+      plinth: null,
+      lintel: null,
+      roof:   null,
+    },
+  },
 }
 
 // Beam endpoint — discriminated union:
@@ -151,6 +170,9 @@ export const createStructuralSlice = (set, get, uid) => ({
 
   selectedColumnId: null,
   selectedFoundationId: null,
+  // Phase 1.7+ — per-instance BBS spec UX: explicit beam selection.
+  // Wall-derived beams are not selectable (no persistent entity to bind to).
+  selectedBeamId: null,
 
   // ── projectSettings actions ────────────────────────────────────────────────
 
@@ -544,8 +566,107 @@ export const createStructuralSlice = (set, get, uid) => ({
     set(state => {
       const next = { ...state.beams }
       delete next[id]
-      return { beams: next }
+      const cleared = state.selectedBeamId === id ? { selectedBeamId: null } : {}
+      return { beams: next, ...cleared }
     })
+  },
+
+  selectBeam: (id) => set({
+    selectedBeamId: id,
+    selectedWallId: null, selectedWallIds: [], selectedStampId: null,
+    selectedRoomId: null, selectedColumnId: null, selectedFoundationId: null,
+  }),
+
+  // Per-instance BBS — explicit beams only. Wall-derived beams have no entity.
+  setBeamReinforcementSpec: (beamId, reinforcementSpecId) => {
+    get()._save()
+    set(state => {
+      const beam = state.beams[beamId]
+      if (!beam) return {}
+      return { beams: { ...state.beams, [beamId]: { ...beam, reinforcementSpecId } } }
+    })
+  },
+
+  setFoundationReinforcementSpec: (foundationId, reinforcementSpecId) => {
+    get()._save()
+    set(state => {
+      const f = state.foundations[foundationId]
+      if (!f) return {}
+      return { foundations: { ...state.foundations, [foundationId]: { ...f, reinforcementSpecId } } }
+    })
+  },
+
+  // "Apply to matching elements" — propagate one entity's spec to all
+  // geometrically-matching peers (same type/dimensions/class).
+  //
+  // Match rules (geometry-only, never floor-based):
+  //   COLUMN     — same columnTypeId
+  //   BEAM       — same beamClass (explicit beams only; wall-derived beams
+  //                 resolve via class default and don't take instance specs)
+  //   SLAB       — same role/classification (FLOOR / ROOF / SUNKEN / STAIR_LANDING)
+  //   FOUNDATION — same type (ISOLATED / COMBINED / RAFT / STRIP / PILE)
+  //
+  // Returns the affected entity ids array so the UI can show a confirm count.
+  // (No confirm dialog inside the store — caller decides UX.)
+  applyReinforcementSpecToMatching: ({ elementType, sourceEntityId, specId }) => {
+    const state = get()
+    let affected = []
+    if (elementType === 'COLUMN') {
+      const src = state.columns[sourceEntityId]
+      if (!src) return []
+      affected = Object.values(state.columns)
+        .filter(c => c.id !== sourceEntityId && c.columnTypeId === src.columnTypeId)
+        .map(c => c.id)
+      if (affected.length === 0) return []
+      get()._save()
+      set(s => {
+        const next = { ...s.columns }
+        for (const id of affected) next[id] = { ...next[id], reinforcementSpecId: specId }
+        return { columns: next }
+      })
+    } else if (elementType === 'BEAM') {
+      const src = state.beams[sourceEntityId]
+      if (!src) return []
+      const srcClass = src.beamClass ?? src.level
+      affected = Object.values(state.beams)
+        .filter(b => b.id !== sourceEntityId && (b.beamClass ?? b.level) === srcClass)
+        .map(b => b.id)
+      if (affected.length === 0) return []
+      get()._save()
+      set(s => {
+        const next = { ...s.beams }
+        for (const id of affected) next[id] = { ...next[id], reinforcementSpecId: specId }
+        return { beams: next }
+      })
+    } else if (elementType === 'SLAB') {
+      const src = state.slabs[sourceEntityId]
+      if (!src) return []
+      const srcRole = src.role ?? src.classification ?? null
+      affected = Object.values(state.slabs)
+        .filter(sl => sl.id !== sourceEntityId && (sl.role ?? sl.classification ?? null) === srcRole)
+        .map(sl => sl.id)
+      if (affected.length === 0) return []
+      get()._save()
+      set(s => {
+        const next = { ...s.slabs }
+        for (const id of affected) next[id] = { ...next[id], reinforcementSpecId: specId }
+        return { slabs: next }
+      })
+    } else if (elementType === 'FOUNDATION') {
+      const src = state.foundations[sourceEntityId]
+      if (!src) return []
+      affected = Object.values(state.foundations)
+        .filter(f => f.id !== sourceEntityId && f.type === src.type)
+        .map(f => f.id)
+      if (affected.length === 0) return []
+      get()._save()
+      set(s => {
+        const next = { ...s.foundations }
+        for (const id of affected) next[id] = { ...next[id], reinforcementSpecId: specId }
+        return { foundations: next }
+      })
+    }
+    return affected
   },
 
   // ── Slab actions ───────────────────────────────────────────────────────────
@@ -1184,29 +1305,110 @@ export const createStructuralSlice = (set, get, uid) => ({
     }
   },
 
-  // Returns { footing, column, beam, slab, staircase, civilStamp, total } — all in kg
-  getSteelQuantities: () => {
+  // Returns { footing, column, beam, slab, staircase, civilStamp, total } — all in kg.
+  //
+  // opts (Phase 1.7+ partial-coverage support):
+  //   excludeColumnIds:           Set|Array of column ids whose volume is covered by BBS
+  //   excludeBeamIds:             Set|Array of beam ids covered by BBS
+  //   excludeSlabIds:             Set|Array of slab ids covered by BBS
+  //   excludeFoundationIds:       Set|Array of foundation entity ids covered by BBS
+  //   excludeColumnTypeFootingIds: Set|Array of columnTypeIds whose inline footings are covered by BBS
+  //
+  // Excluded entities contribute 0 to the kg/m³ estimate for their category.
+  // BBS for those entities is emitted by computeBBSQuantities() — boq/lines.js
+  // combines the two so the user sees one estimate line + N BBS lines per category.
+  getSteelQuantities: (opts = {}) => {
     const state = get()
     const steelRatios = state.projectSettings.rccSpecs?.steelKgPerM3 ?? STEEL_KG_PER_M3
-    const colQtys  = state.getColumnQuantities()
-    const fdnQtys  = state.getFoundationQuantities()
-    const beamQtys = state.getBeamQuantities()
-    const slabQtys = state.getSlabQuantities()
-    const stairQtys = state.getStaircaseQuantities()
-    const sumpQty   = state.getSumpCivilQty?.()   ?? { rccBottomFt3: 0, rccTopFt3: 0 }
-    const septicQty = state.getSepticCivilQty?.()  ?? { rccBottomFt3: 0, rccTopFt3: 0 }
+    const { columns, slabs, foundations, projectSettings, nodes } = state
+    const { columnTypes, beamDimensions, slabSettings } = projectSettings
+
+    const toSet = (v) => v instanceof Set ? v : new Set(v ?? [])
+    const exColumns      = toSet(opts.excludeColumnIds)
+    const exBeams        = toSet(opts.excludeBeamIds)
+    const exSlabs        = toSet(opts.excludeSlabIds)
+    const exFoundations  = toSet(opts.excludeFoundationIds)
+    const exInlineFooting = toSet(opts.excludeColumnTypeFootingIds)
 
     const toM3 = ft3 => ft3 * FT3_TO_M3
 
-    const footFt3 =
-      Object.values(fdnQtys.byFoundation).reduce((s, q) => s + q.concreteVolFt3, 0) +
-      Object.values(fdnQtys.byColumnTypeInline).reduce((s, q) => s + q.concreteVolFt3, 0)
-    const footM3  = toM3(footFt3)
-    const colM3   = toM3(Object.values(colQtys).reduce((s, q) => s + q.volFt3, 0))
-    const beamM3  = toM3(Object.values(beamQtys).filter(Boolean).reduce((s, q) => s + q.volFt3, 0))
-    const slabM3  = toM3(slabQtys.mainVolFt3 + slabQtys.sunkenVolFt3)
+    // ── Columns: per-instance, drop excluded ───────────────────────────────
+    let colFt3 = 0
+    for (const col of Object.values(columns)) {
+      if (exColumns.has(col.id)) continue
+      const ct = columnTypes.find(t => t.id === col.columnTypeId)
+      if (!ct) continue
+      colFt3 += getColumnAreaFt2(ct) * state.getColumnHeightFt(col)
+    }
+
+    // ── Beams: per-instance (explicit + wall-derived), drop excluded ───────
+    const endpointPos = (ref) => {
+      if (ref.type === 'COLUMN') {
+        const col = columns[ref.columnId]
+        if (!col) return null
+        if (col.attachedNodeId) { const nd = nodes[col.attachedNodeId]; return nd ?? null }
+        return { x: col.x, y: col.y }
+      }
+      return { x: ref.x, y: ref.y }
+    }
+    let beamFt3 = 0
+    for (const b of state.getAllBeams()) {
+      if (exBeams.has(b.id)) continue
+      const dims = beamDimensions[b.level]
+      if (!dims) continue
+      const from = endpointPos(b.endpoints.from)
+      const to   = endpointPos(b.endpoints.to)
+      if (!from || !to) continue
+      const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
+      beamFt3 += lenFt * (dims.widthIn / 12) * (dims.depthIn / 12)
+    }
+
+    // ── Slabs: per-instance when slabs map non-empty; fallback derives from rooms.
+    let slabFt3 = 0
+    if (Object.keys(slabs).length === 0) {
+      // Fallback path can't honor exclusion (no per-slab id exists yet).
+      const slabQtys = state.getSlabQuantities()
+      slabFt3 = slabQtys.mainVolFt3 + slabQtys.sunkenVolFt3
+    } else {
+      const validSet = new Set(state.getValidRoomIds())
+      for (const slab of Object.values(slabs)) {
+        if (exSlabs.has(slab.id)) continue
+        let areaFt2 = 0
+        for (const rid of (slab.roomIds ?? [])) {
+          if (!validSet.has(rid)) continue
+          areaFt2 += state.getRoomArea?.(rid) ?? 0
+        }
+        const isSunken = slab.type === 'SUNKEN'
+        const thickIn = (isSunken
+          ? slabSettings.mainThicknessIn + slabSettings.sunkenDepthIn
+          : slabSettings.mainThicknessIn)
+        slabFt3 += areaFt2 * thickIn / 12
+      }
+    }
+
+    // ── Footings: drop excluded foundations + inline buckets ───────────────
+    const fdnQtys = state.getFoundationQuantities()
+    let footFt3 = 0
+    for (const [fid, q] of Object.entries(fdnQtys.byFoundation)) {
+      if (exFoundations.has(fid)) continue
+      footFt3 += q.concreteVolFt3
+    }
+    for (const [ctId, q] of Object.entries(fdnQtys.byColumnTypeInline)) {
+      if (exInlineFooting.has(ctId)) continue
+      footFt3 += q.concreteVolFt3
+    }
+
+    // ── Staircase + civil — never covered by BBS today, full estimate ──────
+    const stairQtys = state.getStaircaseQuantities()
+    const sumpQty   = state.getSumpCivilQty?.()   ?? { rccBottomFt3: 0, rccTopFt3: 0 }
+    const septicQty = state.getSepticCivilQty?.() ?? { rccBottomFt3: 0, rccTopFt3: 0 }
     const stairM3 = toM3(stairQtys.reduce((s, q) => s + q.totalRccFt3, 0))
     const civilM3 = toM3(sumpQty.rccBottomFt3 + sumpQty.rccTopFt3 + septicQty.rccBottomFt3 + septicQty.rccTopFt3)
+
+    const footM3 = toM3(footFt3)
+    const colM3  = toM3(colFt3)
+    const beamM3 = toM3(beamFt3)
+    const slabM3 = toM3(slabFt3)
 
     const footing    = Math.round(footM3  * (steelRatios.FOOTING    ?? STEEL_KG_PER_M3.FOOTING))
     const column     = Math.round(colM3   * (steelRatios.COLUMN     ?? STEEL_KG_PER_M3.COLUMN))

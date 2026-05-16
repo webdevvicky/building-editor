@@ -1,13 +1,37 @@
-// Phase 1.7 — Bar Bending Schedule aggregator.
+// Phase 1.7+ — Bar Bending Schedule aggregator (per-instance + grouped-by-spec).
 //
-// Pure function: takes the live store state and returns BBS breakdown for
-// every column / beam-level / footing / slab that has a reinforcementSpecId
-// (entity-level) or a matching projectSettings.bbsDefaults[elementType]
-// (project-level fallback).
+// Every entity (column / explicit beam / slab / foundation / inline footing
+// bucket) is resolved through src/specs/resolution.js — this file never reads
+// reinforcementSpecs / bbsDefaults directly. The resolver returns
+//   { spec, specId, specLabel, source }
+// where `source` is INSTANCE | TYPE | CLASS | PROJECT_DEFAULT | ESTIMATE.
 //
-// Entities WITHOUT a spec are skipped here — getSteelQuantities() continues
-// to estimate their steel via kg/m³. The boq/lines aggregator should label
-// each steel row "BBS" vs "Est." based on which path computed it.
+// Entities resolved to ESTIMATE source are skipped here — their kg/m³ steel
+// is computed by getSteelQuantities() with their id passed in excludeIds=...
+// so the kg/m³ pool only covers what BBS did NOT compute. See boq/lines.js.
+//
+// Output shape:
+//   {
+//     byColumn:  [{ columnId, columnTypeId, resolvedSpecId, specLabel, source, kg:{longitudinal,stirrup,total} }],
+//     byBeam:    [{ beamId, beamClass, resolvedSpecId, specLabel, source, kg:{top,bottom,stirrup,total} }],
+//     byFooting: [{ foundationId|null, columnTypeId|null, count, resolvedSpecId, specLabel, source, kg:{x,y,total} }],
+//     bySlab:    [{ slabId, type, resolvedSpecId, specLabel, source, kg:{main,dist,total} }],
+//
+//     groupedBySpec: {
+//       column:  [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds }],
+//       beam:    [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds, beamClass }],
+//       footing: [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds }],
+//       slab:    [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds }],
+//     },
+//
+//     // Per-category bookkeeping for boq/lines.js partial-coverage handling.
+//     bbsCoveredKg:  { column, beam, footing, slab },     // BBS-computed kg total
+//     excludeIds:    { columns, beams, slabs, foundations, columnTypeFootings },
+//
+//     totalKg,
+//   }
+//
+// All lengths are in feet (matches reinforcementSpecs.js); kg via STEEL_UNIT_WEIGHT_KG_PER_M.
 
 import {
   computeColumnBBS,
@@ -15,151 +39,238 @@ import {
   computeFootingBBS,
   computeSlabBBS,
 } from '../specs/reinforcementSpecs'
-import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import {
+  resolveColumnReinforcementSpecForColumn,
+  resolveBeamReinforcementSpec,
+  resolveSlabReinforcementSpecForSlab,
+  resolveFootingReinforcementSpec,
+} from '../specs/resolution'
 
-// Resolve a spec id for one entity: entity override → project default → null.
-function resolveSpec(entitySpecId, elementType, specMap, defaults) {
-  const id = entitySpecId ?? defaults?.[elementType] ?? null
-  if (!id) return null
-  return specMap[id] ?? null
+function r2(n) { return Math.round(n * 100) / 100 }
+
+function groupByResolvedSpec(rows, extraFields = () => ({})) {
+  const byKey = new Map()
+  for (const r of rows) {
+    if (!r || r.source === 'ESTIMATE') continue
+    const key = r.resolvedSpecId
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        specId: r.resolvedSpecId,
+        specLabel: r.specLabel,
+        source: r.source,
+        totalKg: 0,
+        instanceCount: 0,
+        sourceEntityIds: [],
+        ...extraFields(r),
+      })
+    }
+    const acc = byKey.get(key)
+    acc.totalKg += (r.kg?.total ?? 0)
+    acc.instanceCount += (r.instanceCount ?? 1)
+    if (r.entityId) acc.sourceEntityIds.push(r.entityId)
+    else if (r.entityIds) acc.sourceEntityIds.push(...r.entityIds)
+  }
+  // Round and sort by descending kg for stable BOQ ordering.
+  const out = [...byKey.values()].map(g => ({ ...g, totalKg: r2(g.totalKg) }))
+  out.sort((a, b) => b.totalKg - a.totalKg)
+  return out
 }
 
 export function computeBBSQuantities(state) {
-  const {
-    columns,
-    beams,
-    slabs,
-    foundations,
-    projectSettings,
-  } = state
-
-  const specMap  = projectSettings?.reinforcementSpecs ?? {}
-  const defaults = projectSettings?.bbsDefaults ?? {}
+  const { columns, beams, slabs, foundations, projectSettings } = state
   const columnTypes = projectSettings?.columnTypes ?? []
 
-  const byColumn    = []
-  const byBeamLevel = Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.id, null]))
-  const byFooting   = []
-  const bySlab      = []
+  const byColumn  = []
+  const byBeam    = []
+  const byFooting = []
+  const bySlab    = []
   let totalKg = 0
+
+  const excludeColumns      = new Set()
+  const excludeBeams        = new Set()
+  const excludeSlabs        = new Set()
+  const excludeFoundations  = new Set()
+  const excludeColumnTypeFootings = new Set()
 
   // ── Columns ────────────────────────────────────────────────────────────────
   for (const col of Object.values(columns ?? {})) {
-    const spec = resolveSpec(col.reinforcementSpecId, 'COLUMN', specMap, defaults)
-    if (!spec) continue
     const ct = columnTypes.find(t => t.id === col.columnTypeId)
     if (!ct) continue
+    const resolved = resolveColumnReinforcementSpecForColumn(state, col, ct)
+    if (!resolved.spec) continue   // ESTIMATE — kg/m³ handles it
     const heightFt = state.getColumnHeightFt(col)
-    const { longitudinalKg, stirrupKg, totalKg: ckg } = computeColumnBBS(spec, heightFt, ct)
+    const r = computeColumnBBS(resolved.spec, heightFt, ct)
     byColumn.push({
-      columnId: col.id,
-      label: ct.label,
-      specId: spec.id,
-      longitudinalKg,
-      stirrupKg,
-      totalKg: ckg,
+      columnId:       col.id,
+      entityId:       col.id,
+      columnTypeId:   col.columnTypeId,
+      label:          ct.label,
+      resolvedSpecId: resolved.specId,
+      specLabel:      resolved.specLabel,
+      source:         resolved.source,
+      kg: { longitudinal: r2(r.longitudinalKg), stirrup: r2(r.stirrupKg), total: r2(r.totalKg) },
     })
-    totalKg += ckg
+    excludeColumns.add(col.id)
+    totalKg += r.totalKg
   }
 
-  // ── Beams (per level — beam entities don't all carry reinforcementSpecId yet
-  // in Phase 1.7; we honour entity-level overrides where present and otherwise
-  // fall back to project-default per level). For now we aggregate by level
-  // using the total length from getBeamQuantities() and assume all beams in
-  // that level share the same spec resolution (per-beam overrides can later
-  // emit additional byBeamLevel splits — schema already supports it).
-  const beamQtys = state.getBeamQuantities()
-  for (const lvl of BEAM_LEVEL_REGISTRY) {
-    const lq = beamQtys[lvl.id]
-    if (!lq || !lq.totalLenFt) continue
-    // Find a representative spec: first beam at this level with a specId,
-    // else project default.
-    let specId = null
-    for (const b of Object.values(beams ?? {})) {
-      if (b.level === lvl.id && b.reinforcementSpecId) { specId = b.reinforcementSpecId; break }
+  // ── Beams (explicit + wall-derived) ────────────────────────────────────────
+  // Both kinds resolve through the same resolver. Wall-derived beams have
+  // no entity-level spec but inherit from class default → bbsDefaults.BEAM[class].
+  const beamDims = projectSettings?.beamDimensions ?? {}
+  const allBeams = state.getAllBeams?.() ?? Object.values(beams ?? {})
+  const beamLengthsById = (() => {
+    // Reuse beam quantities so we don't duplicate endpoint geometry math.
+    // getBeamQuantities collapses by level, so we re-compute lengths here
+    // — but we can re-use the endpointPos logic via getAllBeams + state.nodes/columns.
+    const lengths = new Map()
+    const nodesMap = state.nodes || {}
+    const colsMap  = state.columns || {}
+    const endpointPos = (ref) => {
+      if (ref.type === 'COLUMN') {
+        const col = colsMap[ref.columnId]
+        if (!col) return null
+        if (col.attachedNodeId) { const nd = nodesMap[col.attachedNodeId]; return nd ?? null }
+        return { x: col.x, y: col.y }
+      }
+      return { x: ref.x, y: ref.y }
     }
-    const spec = resolveSpec(specId, 'BEAM', specMap, defaults)
-    if (!spec) continue
-    const { topKg, bottomKg, stirrupKg, totalKg: bkg } =
-      computeBeamBBS(spec, lq.totalLenFt, lq.widthIn, lq.depthIn)
-    byBeamLevel[lvl.id] = {
-      specId: spec.id,
-      totalLengthFt: lq.totalLenFt,
-      topKg,
-      bottomKg,
-      stirrupKg,
-      totalKg: bkg,
+    for (const b of allBeams) {
+      const from = endpointPos(b.endpoints.from)
+      const to   = endpointPos(b.endpoints.to)
+      if (!from || !to) continue
+      lengths.set(b.id, Math.hypot(to.x - from.x, to.y - from.y) / 12)
     }
-    totalKg += bkg
+    return lengths
+  })()
+  for (const beam of allBeams) {
+    const resolved = resolveBeamReinforcementSpec(state, beam)
+    if (!resolved.spec) continue   // ESTIMATE
+    const lenFt = beamLengthsById.get(beam.id) ?? 0
+    const dims = beamDims[beam.level]
+    if (!dims || lenFt <= 0) continue
+    const r = computeBeamBBS(resolved.spec, lenFt, dims.widthIn, dims.depthIn)
+    const beamClass = beam.beamClass ?? beam.level
+    byBeam.push({
+      beamId:         beam.id,
+      entityId:       beam.id,
+      beamClass,
+      lengthFt:       r2(lenFt),
+      resolvedSpecId: resolved.specId,
+      specLabel:      resolved.specLabel,
+      source:         resolved.source,
+      kg: { top: r2(r.topKg), bottom: r2(r.bottomKg), stirrup: r2(r.stirrupKg), total: r2(r.totalKg) },
+    })
+    excludeBeams.add(beam.id)
+    totalKg += r.totalKg
   }
 
-  // ── Footings ───────────────────────────────────────────────────────────────
-  // Two paths: inline auto-isolated (keyed by columnTypeId) and explicit
-  // foundation entities. For inline, we use the column type's own
-  // reinforcementSpecId (foundations may not exist yet) or the project default.
+  // ── Footings: inline auto-isolated buckets (keyed by columnTypeId) ─────────
   const fdnQ = state.getFoundationQuantities()
   for (const [ctId, inline] of Object.entries(fdnQ.byColumnTypeInline ?? {})) {
-    const ct = columnTypes.find(t => t.id === ctId)
-    const specIdHint = ct?.reinforcementSpecId ?? null
-    const spec = resolveSpec(specIdHint, 'FOOTING', specMap, defaults)
-    if (!spec) continue
-    const per = computeFootingBBS(spec, inline.lengthFt, inline.widthFt)
-    const perKg = per.totalKg * inline.count
+    const resolved = resolveFootingReinforcementSpec(state, { columnTypeId: ctId })
+    if (!resolved.spec) continue
+    const per = computeFootingBBS(resolved.spec, inline.lengthFt, inline.widthFt)
+    const totalKgForBucket = per.totalKg * inline.count
     byFooting.push({
-      foundationId: null,
-      columnTypeId: ctId,
-      label: `${inline.label} footings (×${inline.count})`,
-      specId: spec.id,
-      xKg: per.xKg * inline.count,
-      yKg: per.yKg * inline.count,
-      totalKg: perKg,
+      foundationId:   null,
+      columnTypeId:   ctId,
+      entityId:       null,
+      entityIds:      [],   // inline footings don't reference foundation entity ids
+      label:          `${inline.label} footings (×${inline.count})`,
+      count:          inline.count,
+      resolvedSpecId: resolved.specId,
+      specLabel:      resolved.specLabel,
+      source:         resolved.source,
+      instanceCount:  inline.count,
+      kg: { x: r2(per.xKg * inline.count), y: r2(per.yKg * inline.count), total: r2(totalKgForBucket) },
     })
-    totalKg += perKg
+    excludeColumnTypeFootings.add(ctId)
+    totalKg += totalKgForBucket
   }
+  // ── Footings: foundation entities ──────────────────────────────────────────
   for (const f of Object.values(foundations ?? {})) {
-    const spec = resolveSpec(f.reinforcementSpecId, 'FOOTING', specMap, defaults)
-    if (!spec) continue
+    const resolved = resolveFootingReinforcementSpec(state, { foundationId: f.id })
+    if (!resolved.spec) continue
     const g = f.geometry || {}
     const lFt = g.lengthFt || 0, wFt = g.widthFt || 0
     if (!lFt || !wFt) continue
-    const r = computeFootingBBS(spec, lFt, wFt)
+    const r = computeFootingBBS(resolved.spec, lFt, wFt)
     byFooting.push({
-      foundationId: f.id,
-      columnTypeId: null,
-      label: f.label ?? `${f.type} foundation`,
-      specId: spec.id,
-      xKg: r.xKg,
-      yKg: r.yKg,
-      totalKg: r.totalKg,
+      foundationId:   f.id,
+      columnTypeId:   null,
+      entityId:       f.id,
+      label:          f.label ?? `${f.type} foundation`,
+      count:          1,
+      resolvedSpecId: resolved.specId,
+      specLabel:      resolved.specLabel,
+      source:         resolved.source,
+      instanceCount:  1,
+      kg: { x: r2(r.xKg), y: r2(r.yKg), total: r2(r.totalKg) },
     })
+    excludeFoundations.add(f.id)
     totalKg += r.totalKg
   }
 
   // ── Slabs ──────────────────────────────────────────────────────────────────
-  // Slab entities carry reinforcementSpecId (Stage 0 Fix 3). For each slab,
-  // compute span/width from sqrt(area) (square approximation — Phase 2.0 will
-  // refine via slab.geometry once polygon data is available).
+  // Span/width approximation = sqrt(area). Phase 2.x will refine via slab.geometry.
+  const validSet = new Set(state.getValidRoomIds?.() ?? [])
   for (const slab of Object.values(slabs ?? {})) {
-    const spec = resolveSpec(slab.reinforcementSpecId, 'SLAB', specMap, defaults)
-    if (!spec) continue
-    // Sum room areas in the slab
+    const resolved = resolveSlabReinforcementSpecForSlab(state, slab)
+    if (!resolved.spec) continue
     let areaFt2 = 0
     for (const rid of (slab.roomIds ?? [])) {
+      if (validSet.size && !validSet.has(rid)) continue
       areaFt2 += state.getRoomArea?.(rid) ?? 0
     }
     if (areaFt2 <= 0) continue
     const sideFt = Math.sqrt(areaFt2)
-    const r = computeSlabBBS(spec, areaFt2, sideFt, sideFt)
+    const r = computeSlabBBS(resolved.spec, areaFt2, sideFt, sideFt)
     bySlab.push({
-      slabId: slab.id,
-      type: slab.type,
-      specId: spec.id,
-      mainKg: r.mainKg,
-      distKg: r.distKg,
-      totalKg: r.totalKg,
+      slabId:         slab.id,
+      entityId:       slab.id,
+      type:           slab.type,
+      areaFt2:        r2(areaFt2),
+      resolvedSpecId: resolved.specId,
+      specLabel:      resolved.specLabel,
+      source:         resolved.source,
+      kg: { main: r2(r.mainKg), dist: r2(r.distKg), total: r2(r.totalKg) },
     })
+    excludeSlabs.add(slab.id)
     totalKg += r.totalKg
   }
 
-  return { byColumn, byBeamLevel, byFooting, bySlab, totalKg }
+  // ── Grouped-by-resolved-spec (one BOQ line per group) ──────────────────────
+  const groupedBySpec = {
+    column:  groupByResolvedSpec(byColumn),
+    beam:    groupByResolvedSpec(byBeam, (r) => ({ beamClass: r.beamClass })),
+    footing: groupByResolvedSpec(
+      byFooting.map(f => ({ ...f, instanceCount: f.count })),
+    ),
+    slab:    groupByResolvedSpec(bySlab),
+  }
+
+  const bbsCoveredKg = {
+    column:  groupedBySpec.column.reduce((s, g) => s + g.totalKg, 0),
+    beam:    groupedBySpec.beam.reduce((s, g) => s + g.totalKg, 0),
+    footing: groupedBySpec.footing.reduce((s, g) => s + g.totalKg, 0),
+    slab:    groupedBySpec.slab.reduce((s, g) => s + g.totalKg, 0),
+  }
+
+  return {
+    byColumn,
+    byBeam,
+    byFooting,
+    bySlab,
+    groupedBySpec,
+    bbsCoveredKg,
+    excludeIds: {
+      columns:             excludeColumns,
+      beams:               excludeBeams,
+      slabs:               excludeSlabs,
+      foundations:         excludeFoundations,
+      columnTypeFootings:  excludeColumnTypeFootings,
+    },
+    totalKg: r2(totalKg),
+  }
 }

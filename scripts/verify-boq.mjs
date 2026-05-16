@@ -352,6 +352,152 @@ const isolatedState = (() => {
 check('Foundation pits dug independently of bulk (additive)', isolatedState > 0,
       `foundation contribution alone = ${isolatedState}`)
 
+// ── Phase 1.7+ — per-instance BBS resolution checks ─────────────────────
+header('6. Per-instance BBS resolution (Phase 1.7+)')
+
+const { resolveColumnReinforcementSpec, resolveBeamReinforcementSpec, resolveSlabReinforcementSpec, resolveFootingReinforcementSpec } =
+  await import('../src/specs/resolution.js')
+const { computeBBSQuantities } = await import('../src/quantities/bbs.js')
+
+// Default state — no specs anywhere → every resolver returns ESTIMATE.
+const col0 = Object.values(s().columns)[0]
+const colRes0 = resolveColumnReinforcementSpec(s(), col0.id)
+check('Resolver: column with no spec → ESTIMATE', colRes0.source === 'ESTIMATE', `got ${colRes0.source}`)
+
+// Seed the spec catalog + per-instance assignment.
+s().setProjectSettings({
+  reinforcementSpecs: {
+    COL_TEST: { id: 'COL_TEST', label: 'C-Test', elementType: 'COLUMN',
+      longitudinalBarCount: 4, longitudinalBarDiaMm: 12, stirrupBarDiaMm: 8,
+      stirrupSpacingIn: 6, coverMm: 25, lapLengthMultiplier: 50 },
+    COL_TYPEDEF: { id: 'COL_TYPEDEF', label: 'C-TypeDefault', elementType: 'COLUMN',
+      longitudinalBarCount: 4, longitudinalBarDiaMm: 12, stirrupBarDiaMm: 8,
+      stirrupSpacingIn: 6, coverMm: 25, lapLengthMultiplier: 50 },
+    COL_PROJDEF: { id: 'COL_PROJDEF', label: 'C-ProjDefault', elementType: 'COLUMN',
+      longitudinalBarCount: 4, longitudinalBarDiaMm: 12, stirrupBarDiaMm: 8,
+      stirrupSpacingIn: 6, coverMm: 25, lapLengthMultiplier: 50 },
+    FTG_DEF: { id: 'FTG_DEF', label: 'F-Default', elementType: 'FOOTING',
+      xBars: { count: 6, diaMm: 12 }, yBars: { count: 6, diaMm: 12 },
+      developmentLengthMultiplier: 50, coverMm: 40 },
+    BEAM_PLINTH: { id: 'BEAM_PLINTH', label: 'B-Plinth', elementType: 'BEAM',
+      topBars: { count: 2, diaMm: 12 }, bottomBars: { count: 2, diaMm: 16 },
+      stirrupBarDiaMm: 8, stirrupSpacingIn: 6, coverMm: 25 },
+  },
+  bbsDefaults: {
+    COLUMN: 'COL_PROJDEF',
+    FOOTING: 'FTG_DEF',
+    SLAB: null,
+    BEAM: { plinth: 'BEAM_PLINTH', lintel: null, roof: null },
+  },
+})
+
+// Column resolver — project default applies for the second column (no instance).
+const col1 = Object.values(s().columns)[1]
+const colRes1 = resolveColumnReinforcementSpec(s(), col1.id)
+check('Resolver: column falls through to PROJECT_DEFAULT',
+      colRes1.source === 'PROJECT_DEFAULT' && colRes1.specId === 'COL_PROJDEF',
+      `got source=${colRes1.source}, id=${colRes1.specId}`)
+
+// Set per-instance spec on col0 — should now return INSTANCE.
+s().setColumnReinforcementSpec(col0.id, 'COL_TEST')
+const colRes0After = resolveColumnReinforcementSpec(s(), col0.id)
+check('Resolver: column INSTANCE override beats default',
+      colRes0After.source === 'INSTANCE' && colRes0After.specId === 'COL_TEST',
+      `got source=${colRes0After.source}, id=${colRes0After.specId}`)
+
+// Set TYPE-level spec on C1 — clear the instance, ensure TYPE wins next.
+s().setColumnReinforcementSpec(col0.id, null)
+s().setColumnTypeEntry('C1', { reinforcementSpecId: 'COL_TYPEDEF' })
+const colRes0Type = resolveColumnReinforcementSpec(s(), col0.id)
+check('Resolver: column TYPE tier resolves when instance is null',
+      colRes0Type.source === 'TYPE' && colRes0Type.specId === 'COL_TYPEDEF',
+      `got source=${colRes0Type.source}, id=${colRes0Type.specId}`)
+
+// Foundation inline (columnTypeId path) — column type still has spec.
+const ftgRes = resolveFootingReinforcementSpec(s(), { columnTypeId: 'C1' })
+check('Resolver: inline footing inherits column-type spec',
+      ftgRes.source === 'TYPE' && ftgRes.specId === 'COL_TYPEDEF',
+      `got source=${ftgRes.source}`)
+
+// Clear type, project default kicks in.
+s().setColumnTypeEntry('C1', { reinforcementSpecId: null })
+const ftgResD = resolveFootingReinforcementSpec(s(), { columnTypeId: 'C1' })
+check('Resolver: inline footing falls through to PROJECT_DEFAULT',
+      ftgResD.source === 'PROJECT_DEFAULT' && ftgResD.specId === 'FTG_DEF',
+      `got source=${ftgResD.source}`)
+
+// BBS aggregator — per-instance entries + groupedBySpec.
+s().setColumnReinforcementSpec(col0.id, 'COL_TEST')
+const bbsQ = computeBBSQuantities(s())
+check('BBS: byColumn has one entry per resolved column',
+      bbsQ.byColumn.length === 2,  // col0 INSTANCE, col1 PROJECT_DEFAULT
+      `got ${bbsQ.byColumn.length}`)
+check('BBS: groupedBySpec.column has 2 groups (INSTANCE + PROJECT_DEFAULT)',
+      bbsQ.groupedBySpec.column.length === 2,
+      `got ${bbsQ.groupedBySpec.column.length}`)
+check('BBS: excludeIds.columns is a Set with both column ids',
+      bbsQ.excludeIds.columns instanceof Set && bbsQ.excludeIds.columns.size === 2)
+check('BBS: bbsCoveredKg.column > 0',
+      bbsQ.bbsCoveredKg.column > 0, `got ${bbsQ.bbsCoveredKg.column}`)
+
+// Inline footings — project default covers C1 bucket.
+check('BBS: byFooting has one inline entry for C1',
+      bbsQ.byFooting.some(f => f.columnTypeId === 'C1'),
+      `byFooting=${JSON.stringify(bbsQ.byFooting.map(f => f.columnTypeId))}`)
+check('BBS: excludeIds.columnTypeFootings includes C1',
+      bbsQ.excludeIds.columnTypeFootings.has('C1'))
+
+// Partial coverage — getSteelQuantities with exclusion produces zero column kg
+// because both columns are covered.
+const steelExcl = s().getSteelQuantities({
+  excludeColumnIds: bbsQ.excludeIds.columns,
+  excludeColumnTypeFootingIds: bbsQ.excludeIds.columnTypeFootings,
+})
+check('Steel(opts): excluded columns produce zero estimate kg',
+      steelExcl.column === 0, `got ${steelExcl.column}`)
+check('Steel(opts): excluded inline footings produce zero estimate kg',
+      steelExcl.footing === 0, `got ${steelExcl.footing}`)
+
+// Steel(no opts) — full estimate kg still > 0 for backward compat.
+const steelFull = s().getSteelQuantities()
+check('Steel(no opts): full estimate > 0',
+      steelFull.column > 0 && steelFull.footing > 0,
+      `column=${steelFull.column}, footing=${steelFull.footing}`)
+
+// BOQ lines — grouped-by-spec emits more than one column steel line when two sources differ.
+const linesAfterBBS = getBoqLines(s(), {})
+const colSteelLines = linesAfterBBS.filter(l =>
+  l.category === 'steel' && l.label.startsWith('Steel – Columns'))
+check('BOQ: at least 2 column steel lines (one per resolved spec source)',
+      colSteelLines.length >= 2,
+      `got ${colSteelLines.length}: ${colSteelLines.map(l => l.label).join(' | ')}`)
+check('BOQ: column steel lines carry meta.specId + meta.source',
+      colSteelLines.filter(l => l.meta?.bbs).every(l => l.meta.specId && l.meta.source),
+      'meta missing on BBS line')
+
+// "Apply to matching" — propagate one column's spec to its peer.
+s().setColumnReinforcementSpec(col0.id, 'COL_TEST')
+s().setColumnReinforcementSpec(col1.id, null)
+const affected = s().applyReinforcementSpecToMatching({
+  elementType: 'COLUMN', sourceEntityId: col0.id, specId: 'COL_TEST',
+})
+check('Apply-to-matching: returns affected ids', affected.length === 1, `got ${affected.length}`)
+check('Apply-to-matching: peer column now has spec',
+      s().columns[col1.id].reinforcementSpecId === 'COL_TEST',
+      `got ${s().columns[col1.id].reinforcementSpecId}`)
+
+// New beam-class-default fallback: beamDefaults.BEAM.plinth set → wall-derived
+// plinth beams resolve to CLASS. (Easier than constructing explicit beams here;
+// just resolve directly against an existing derived beam id.)
+const derivedBeams = s().getDerivedWallBeams()
+const plinthBeam = derivedBeams.find(b => b.level === 'plinth')
+if (plinthBeam) {
+  const beamRes = resolveBeamReinforcementSpec(s(), plinthBeam)
+  check('Resolver: wall-derived plinth beam resolves via CLASS default',
+        beamRes.source === 'CLASS' && beamRes.specId === 'BEAM_PLINTH',
+        `got source=${beamRes.source}, id=${beamRes.specId}`)
+}
+
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)
 if (failed.length > 0) {

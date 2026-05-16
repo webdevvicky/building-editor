@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { getColumnDimLabel } from '../lib/columnShapes'
+import { resolveColumnReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 
 const panelStyle = {
   position: 'absolute', top: 56, left: 16,
@@ -33,6 +34,26 @@ const detachBtn = {
 const fieldRow = { marginTop: 8 }
 const label = { color: '#888', marginBottom: 2, fontSize: 11 }
 
+const SOURCE_COLOR = {
+  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
+  TYPE:            { bg: '#e3f2fd', fg: '#1565c0' },
+  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
+  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
+  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+}
+function resolutionBadge(source) {
+  const c = SOURCE_COLOR[source] ?? SOURCE_COLOR.ESTIMATE
+  return {
+    marginTop: 4, padding: '4px 8px', borderRadius: 4,
+    fontSize: 11, background: c.bg, color: c.fg, lineHeight: 1.3,
+  }
+}
+const applyBtn = {
+  marginTop: 6, padding: '4px 10px', fontSize: 11,
+  background: '#fafafa', border: '1px solid #bbb', borderRadius: 4,
+  color: '#444', cursor: 'pointer', width: '100%',
+}
+
 export default function ColumnPanel() {
   const selectedColumnId = useStore(s => s.selectedColumnId)
   const columns          = useStore(s => s.columns)
@@ -44,6 +65,15 @@ export default function ColumnPanel() {
   const setColumnFloorSpan = useStore(s => s.setColumnFloorSpan)
   const setColumnReinforcementSpec = useStore(s => s.setColumnReinforcementSpec)
   const getFoundationForColumn = useStore(s => s.getFoundationForColumn)
+  const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
+  // Subscribe so the resolution badge re-renders when the spec map or
+  // bbsDefaults change in BBSSpecPanel.
+  const reinforcementSpecs = useStore(s => s.projectSettings?.reinforcementSpecs)
+  const bbsDefaults        = useStore(s => s.projectSettings?.bbsDefaults)
+  const allColumns         = useStore(s => s.columns)
+  // Reference both so eslint doesn't flag them as unused — they exist only
+  // to make the badge reactive to spec/default edits.
+  void reinforcementSpecs; void bbsDefaults; void allColumns;
 
   if (!selectedColumnId) return null
   const column = columns[selectedColumnId]
@@ -137,10 +167,32 @@ export default function ColumnPanel() {
         )
       })()}
 
-      {/* Phase 1.7 — Reinforcement spec (BBS) */}
+      {/* Phase 1.7+ — Reinforcement spec (BBS) with centralized resolution */}
       {(() => {
         const specs = projectSettings.reinforcementSpecs ?? {}
         const colSpecs = Object.values(specs).filter(s => s.elementType === 'COLUMN')
+        const state = useStore.getState()
+        const resolved = resolveColumnReinforcementSpec(state, selectedColumnId)
+        const handleApplyToMatching = () => {
+          const peers = Object.values(state.columns)
+            .filter(c => c.id !== selectedColumnId && c.columnTypeId === column.columnTypeId)
+          if (peers.length === 0) {
+            window.alert('No matching columns to update — this is the only column of its type.')
+            return
+          }
+          const specLabel = column.reinforcementSpecId
+            ? (specs[column.reinforcementSpecId]?.label ?? column.reinforcementSpecId)
+            : 'no spec (clear)'
+          const ok = window.confirm(
+            `Apply "${specLabel}" to ${peers.length} other column${peers.length === 1 ? '' : 's'} of type ${colType?.label ?? column.columnTypeId}?`
+          )
+          if (!ok) return
+          applyReinforcementSpecToMatching({
+            elementType: 'COLUMN',
+            sourceEntityId: selectedColumnId,
+            specId: column.reinforcementSpecId ?? null,
+          })
+        }
         return (
           <div style={fieldRow}>
             <div style={label}>Steel spec (BBS)</div>
@@ -150,9 +202,18 @@ export default function ColumnPanel() {
               onKeyDown={e => e.stopPropagation()}
               style={{ width: '100%', fontSize: 13 }}
             >
-              <option value="">— Estimate (kg/m³) —</option>
+              <option value="">— Inherit —</option>
               {colSpecs.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
+            <div style={resolutionBadge(resolved.source)}>
+              <span style={{ fontWeight: 600 }}>{resolved.specLabel}</span>
+              <span style={{ opacity: 0.75 }}> · {humanizeAssignmentSource(resolved.source)}</span>
+            </div>
+            <button
+              style={applyBtn}
+              onClick={handleApplyToMatching}
+              title="Copy this column's spec to all other columns of the same type"
+            >Apply to matching columns</button>
             {colSpecs.length === 0 && (
               <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>
                 Open BBS panel to define column specs.

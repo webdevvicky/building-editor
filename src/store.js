@@ -146,7 +146,7 @@ export const useStore = create((set, get) => ({
       slabs:   prev.slabs      ?? s.slabs,
       staircases:  prev.staircases  ?? s.staircases,
       foundations: prev.foundations ?? s.foundations,
-      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
+      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, pendingWallIds: [],
     }))
   },
 
@@ -166,14 +166,14 @@ export const useStore = create((set, get) => ({
       slabs:   next.slabs      ?? s.slabs,
       staircases:  next.staircases  ?? s.staircases,
       foundations: next.foundations ?? s.foundations,
-      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, pendingWallIds: [],
+      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, pendingWallIds: [],
     }))
   },
 
   // ── Tools ─────────────────────────────────────────────────────────────
 
   setTool(tool) {
-    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, selectedFoundationId: null, pendingWallIds: [], draftOpening: null })
+    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [], draftOpening: null })
   },
 
   toggleDrawVirtual()    { set(s => ({ drawVirtual: !s.drawVirtual })) },
@@ -272,8 +272,8 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  selectWall(wallId) { set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, draftOpening: null }) },
-  selectRoom(roomId) { set({ selectedRoomId: roomId, selectedWallId: null, selectedWallIds: [], selectedStampId: null, draftOpening: null }) },
+  selectWall(wallId) { set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedBeamId: null, draftOpening: null }) },
+  selectRoom(roomId) { set({ selectedRoomId: roomId, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, draftOpening: null }) },
 
   toggleWallMultiSelect(wallId) {
     set(s => {
@@ -509,7 +509,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  selectStamp(stampId) { set({ selectedStampId: stampId, selectedWallId: null }) },
+  selectStamp(stampId) { set({ selectedStampId: stampId, selectedWallId: null, selectedBeamId: null }) },
 
   // ── Rooms ─────────────────────────────────────────────────────────────
 
@@ -806,7 +806,7 @@ export const useStore = create((set, get) => ({
       staircases:  migratedStaircases,
       foundations: migratedFoundations,
       history: [], future: [],
-      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, pendingWallIds: [],
+      drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [],
     })
   },
 

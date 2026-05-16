@@ -472,25 +472,94 @@ export function scopeStateToFloor(state, floorId) {
   ) / 100
 
   // ── Composed: steel + concrete ────────────────────────────────────────
-  const getSteelQuantities = () => {
+  // Per-entity steel computation with partial BBS exclusion. Mirrors the
+  // store's getSteelQuantities(opts) signature so boq/lines.js can pass
+  // the BBS-aggregator-emitted excludeIds and avoid double-counting.
+  const getSteelQuantities = (opts = {}) => {
     const steelRatios = state.projectSettings.rccSpecs?.steelKgPerM3 ?? STEEL_KG_PER_M3
     const toM3 = ft3 => ft3 * FT3_TO_M3
-    const colQ = getColumnQuantities()
+
+    const toSet = (v) => v instanceof Set ? v : new Set(v ?? [])
+    const exColumns       = toSet(opts.excludeColumnIds)
+    const exBeams         = toSet(opts.excludeBeamIds)
+    const exSlabs         = toSet(opts.excludeSlabIds)
+    const exFoundations   = toSet(opts.excludeFoundationIds)
+    const exInlineFooting = toSet(opts.excludeColumnTypeFootingIds)
+
+    const { columnTypes, beamDimensions, slabSettings } = state.projectSettings
+
+    // Columns
+    let colFt3 = 0
+    for (const col of Object.values(columns)) {
+      if (exColumns.has(col.id)) continue
+      const ct = columnTypes.find(t => t.id === col.columnTypeId)
+      if (!ct) continue
+      colFt3 += getColumnAreaFt2(ct) * getColumnHeightFt(col)
+    }
+
+    // Beams (scoped explicit + scoped wall-derived)
+    const endpointPos = (ref) => {
+      if (ref.type === 'COLUMN') {
+        const col = columns[ref.columnId]
+        if (!col) return null
+        if (col.attachedNodeId) { const nd = state.nodes[col.attachedNodeId]; return nd ?? null }
+        return { x: col.x, y: col.y }
+      }
+      return { x: ref.x, y: ref.y }
+    }
+    let beamFt3 = 0
+    for (const b of getAllBeams()) {
+      if (exBeams.has(b.id)) continue
+      const dims = beamDimensions[b.level]
+      if (!dims) continue
+      const from = endpointPos(b.endpoints.from)
+      const to   = endpointPos(b.endpoints.to)
+      if (!from || !to) continue
+      const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
+      beamFt3 += lenFt * (dims.widthIn / 12) * (dims.depthIn / 12)
+    }
+
+    // Slabs (scoped). When scoped slabs map is empty, fall back to derived.
+    let slabFt3 = 0
+    if (Object.keys(slabs).length === 0) {
+      const slabQ = getSlabQuantities()
+      slabFt3 = slabQ.mainVolFt3 + slabQ.sunkenVolFt3
+    } else {
+      const validSet = new Set(getValidRoomIds())
+      for (const slab of Object.values(slabs)) {
+        if (exSlabs.has(slab.id)) continue
+        let areaFt2 = 0
+        for (const rid of (slab.roomIds ?? [])) {
+          if (!validSet.has(rid)) continue
+          areaFt2 += getRoomArea(rid) ?? 0
+        }
+        const isSunken = slab.type === 'SUNKEN'
+        const thickIn = isSunken
+          ? slabSettings.mainThicknessIn + slabSettings.sunkenDepthIn
+          : slabSettings.mainThicknessIn
+        slabFt3 += areaFt2 * thickIn / 12
+      }
+    }
+
+    // Footings (scoped foundations + inline buckets)
     const fdnQ = getFoundationQuantities()
-    const beamQ = getBeamQuantities()
-    const slabQ = getSlabQuantities()
+    let footFt3 = 0
+    for (const [fid, q] of Object.entries(fdnQ.byFoundation)) {
+      if (exFoundations.has(fid)) continue
+      footFt3 += q.concreteVolFt3
+    }
+    for (const [ctId, q] of Object.entries(fdnQ.byColumnTypeInline)) {
+      if (exInlineFooting.has(ctId)) continue
+      footFt3 += q.concreteVolFt3
+    }
+
     const stairQ = getStaircaseQuantities()
     const sumpQty   = getSumpCivilQty()
     const septicQty = getSepticCivilQty()
-    const footFt3 =
-      Object.values(fdnQ.byFoundation).reduce((s, q) => s + q.concreteVolFt3, 0) +
-      Object.values(fdnQ.byColumnTypeInline).reduce((s, q) => s + q.concreteVolFt3, 0)
-    const footM3  = toM3(footFt3)
-    const colM3   = toM3(Object.values(colQ).reduce((s, q) => s + q.volFt3, 0))
-    const beamM3  = toM3(Object.values(beamQ).filter(Boolean).reduce((s, q) => s + q.volFt3, 0))
-    const slabM3  = toM3(slabQ.mainVolFt3 + slabQ.sunkenVolFt3)
     const stairM3 = toM3(stairQ.reduce((s, q) => s + q.totalRccFt3, 0))
     const civilM3 = toM3(sumpQty.rccBottomFt3 + sumpQty.rccTopFt3 + septicQty.rccBottomFt3 + septicQty.rccTopFt3)
+
+    const footM3 = toM3(footFt3), colM3 = toM3(colFt3), beamM3 = toM3(beamFt3), slabM3 = toM3(slabFt3)
     const footing    = Math.round(footM3  * (steelRatios.FOOTING    ?? STEEL_KG_PER_M3.FOOTING))
     const column     = Math.round(colM3   * (steelRatios.COLUMN     ?? STEEL_KG_PER_M3.COLUMN))
     const beam       = Math.round(beamM3  * (steelRatios.BEAM       ?? STEEL_KG_PER_M3.BEAM))

@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { REINFORCEMENT_SPEC_PRESETS } from '../specs/reinforcementSpecs'
+import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -215,16 +216,50 @@ export default function BBSSpecPanel() {
     const next = { ...specMap }
     delete next[id]
     updateSpecMap(next)
-    // also clear from defaults if referenced
+    // also clear from defaults if referenced. BEAM defaults are per-class
+    // (nested object); other element-type defaults are flat specIds.
     const nextDefaults = { ...defaults }
     for (const k of Object.keys(nextDefaults)) {
-      if (nextDefaults[k] === id) delete nextDefaults[k]
+      if (k === 'BEAM' && nextDefaults.BEAM && typeof nextDefaults.BEAM === 'object') {
+        const nextBeam = { ...nextDefaults.BEAM }
+        for (const cls of Object.keys(nextBeam)) {
+          if (nextBeam[cls] === id) delete nextBeam[cls]
+        }
+        nextDefaults.BEAM = nextBeam
+      } else if (nextDefaults[k] === id) {
+        delete nextDefaults[k]
+      }
     }
     setProjectSettings({ bbsDefaults: nextDefaults })
     if (selectedId === id) setSelectedId(null)
   }
   const setAsDefault = (spec) => {
+    // BEAM defaults are per-class { plinth, lintel, roof }. Other element
+    // types use a flat specId. When prompted, pick a single class to set —
+    // user can refine via the Project defaults panel rows below.
+    if (spec.elementType === 'BEAM') {
+      const classChoice = window.prompt(
+        `Apply as default for which beam class? (${BEAM_LEVEL_REGISTRY.map(l => l.id).join(' | ')})`,
+        'plinth'
+      )
+      if (!classChoice || !BEAM_LEVEL_REGISTRY.some(l => l.id === classChoice)) return
+      const beamDefaults = { ...(defaults.BEAM ?? {}) }
+      beamDefaults[classChoice] = spec.id
+      setProjectSettings({ bbsDefaults: { ...defaults, BEAM: beamDefaults } })
+      return
+    }
     setProjectSettings({ bbsDefaults: { ...defaults, [spec.elementType]: spec.id } })
+  }
+  const clearBeamClassDefault = (classId) => {
+    const beamDefaults = { ...(defaults.BEAM ?? {}) }
+    delete beamDefaults[classId]
+    setProjectSettings({ bbsDefaults: { ...defaults, BEAM: beamDefaults } })
+  }
+  const setBeamClassDefault = (classId, specId) => {
+    const beamDefaults = { ...(defaults.BEAM ?? {}) }
+    if (specId) beamDefaults[classId] = specId
+    else delete beamDefaults[classId]
+    setProjectSettings({ bbsDefaults: { ...defaults, BEAM: beamDefaults } })
   }
 
   const createSpec = () => {
@@ -277,7 +312,9 @@ export default function BBSSpecPanel() {
         </div>
       )}
       {specs.map(s => {
-        const isDefault = defaults[s.elementType] === s.id
+        const isDefault = s.elementType === 'BEAM'
+          ? Object.values(defaults.BEAM ?? {}).includes(s.id)
+          : defaults[s.elementType] === s.id
         const isSelected = selectedId === s.id
         return (
           <div key={s.id} style={{ ...card, borderColor: isSelected ? '#3498db' : '#eee' }}>
@@ -330,14 +367,43 @@ export default function BBSSpecPanel() {
         defaults. Entities without spec AND without default fall back to the
         kg/m³ estimate.
       </div>
-      {ELEMENT_TYPES.map(et => (
-        <div key={et} style={fieldRow}>
-          <span style={lbl}>{et}</span>
-          <span style={{ fontSize: 12, color: defaults[et] ? '#27ae60' : '#aaa' }}>
-            {defaults[et] ? specMap[defaults[et]]?.label ?? defaults[et] : '— (use kg/m³ estimate)'}
-          </span>
-        </div>
-      ))}
+      {ELEMENT_TYPES.map(et => {
+        if (et === 'BEAM') {
+          // Per-class defaults — one row per beam class (plinth / lintel / roof).
+          // No global beam fallback: unset class → ESTIMATE for beams of that class.
+          const beamDefaults = defaults.BEAM ?? {}
+          const beamSpecs = Object.values(specMap).filter(sp => sp.elementType === 'BEAM')
+          return (
+            <div key={et}>
+              <div style={{ ...fieldRow, marginBottom: 2 }}>
+                <span style={lbl}>BEAM (per class)</span>
+              </div>
+              {BEAM_LEVEL_REGISTRY.map(lvl => (
+                <div key={lvl.id} style={{ ...fieldRow, paddingLeft: 12 }}>
+                  <span style={{ ...lbl, minWidth: 120, fontSize: 11 }}>{lvl.label}</span>
+                  <select
+                    style={{ flex: 1, fontSize: 12, padding: '2px 6px', border: '1px solid #ccc', borderRadius: 4 }}
+                    value={beamDefaults[lvl.id] ?? ''}
+                    onKeyDown={e => e.stopPropagation()}
+                    onChange={e => setBeamClassDefault(lvl.id, e.target.value || null)}
+                  >
+                    <option value="">— (use kg/m³ estimate) —</option>
+                    {beamSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )
+        }
+        return (
+          <div key={et} style={fieldRow}>
+            <span style={lbl}>{et}</span>
+            <span style={{ fontSize: 12, color: defaults[et] ? '#27ae60' : '#aaa' }}>
+              {defaults[et] ? specMap[defaults[et]]?.label ?? defaults[et] : '— (use kg/m³ estimate)'}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }

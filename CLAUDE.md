@@ -21,14 +21,13 @@ Query Context7 before writing any code that uses:
 Training data for these versions is outdated.
 
 ## Verification Commands
-node scripts/verify-boq.mjs        # 39 single-floor checks
+node scripts/verify-boq.mjs        # 59 single-floor checks (incl. per-instance BBS)
 node scripts/verify-multifloor.mjs # 15 multi-floor checks
 Both must pass green before any commit.
 
 ## Planned Features (do not implement yet)
 - DXF import (Phase 2.1) — parse AutoCAD floor plans into walls/rooms
 - Canvas ghost rendering per-floor (deferred — data wired, render not done)
-- BBS per-beam overrides (currently per beam level only)
 - Slab BBS span (currently sqrt(area) approximation)
 - Constraint/conflict detection engine (src/validation/ stub exists)
 
@@ -180,6 +179,102 @@ F2 masonry < All, F1+F2 ≈ All; per-line `floorId` tagging is correct;
 `getColumnsOnFloor` / `getWallsOnFloor` / `getRoomsOnFloor` return correct
 counts. All 15 multi-floor assertions pass; `verify-boq.mjs` (single-floor)
 still 39/39 green.
+
+## Phase 1.7.1 — Per-instance BBS + centralized resolution (2026-05-16)
+
+Extends Phase 1.7 with per-instance reinforcement-spec assignment for columns,
+explicit beams, slabs, and foundations. The fallback chain now has a single
+home and the BOQ output groups by resolved spec.
+
+**Resolution module (`src/specs/resolution.js`).** SINGLE source of truth for
+the spec fallback chain. Every UI panel, every aggregator, every BOQ line
+goes through one of:
+- `resolveColumnReinforcementSpec(state, columnId)`
+- `resolveBeamReinforcementSpec(state, beamOrId)`
+- `resolveSlabReinforcementSpec(state, slabId)`
+- `resolveFootingReinforcementSpec(state, { foundationId | columnTypeId })`
+
+Output shape `{ spec, specId, specLabel, source }` where
+`source ∈ INSTANCE | TYPE | CLASS | PROJECT_DEFAULT | ESTIMATE`. Resolvers
+NEVER read `projectSettings.reinforcementSpecs` or `bbsDefaults` from
+anywhere else. No panel reimplements the chain — panels show the resolved
+badge by calling the resolver.
+
+Fallback chains:
+- **COLUMN:** instance → `columnType.reinforcementSpecId` → `bbsDefaults.COLUMN` → ESTIMATE
+- **BEAM:** instance (explicit only) → `bbsDefaults.BEAM[beamClass]` → ESTIMATE  *(no global beam fallback)*
+- **SLAB:** instance → `bbsDefaults.SLAB` → ESTIMATE
+- **FOOTING — foundation entity:** `foundation.reinforcementSpecId` → `bbsDefaults.FOOTING` → ESTIMATE
+- **FOOTING — inline (column-type-keyed):** `columnType.reinforcementSpecId` → `bbsDefaults.FOOTING` → ESTIMATE
+
+**`bbsDefaults.BEAM` is per-class** (`{ plinth, lintel, roof }` — keyed by
+`BEAM_LEVEL_REGISTRY` id). No flat `bbsDefaults.BEAM = specId` shape exists.
+
+**Per-instance state slots.**
+- `column.reinforcementSpecId` (pre-existing)
+- `slab.reinforcementSpecId` (pre-existing)
+- `beam.reinforcementSpecId` — slot existed, now wired via
+  `setBeamReinforcementSpec(beamId, specId)` action. Explicit beams only;
+  wall-derived beams have no entity to bind to and always resolve via
+  CLASS → ESTIMATE.
+- `foundation.reinforcementSpecId` — slot existed, now wired via
+  `setFoundationReinforcementSpec(foundationId, specId)` action.
+
+**"Apply to matching elements."** New action
+`applyReinforcementSpecToMatching({ elementType, sourceEntityId, specId })`
+propagates one entity's spec to all geometrically-matching peers and
+returns the affected entity-id array. Match rules (geometry-only — never
+floor-based, per stated design):
+- COLUMN — same `columnTypeId`
+- BEAM — same `beamClass` (explicit beams only)
+- SLAB — same `role`/`classification` (FLOOR / ROOF / SUNKEN / STAIR_LANDING)
+- FOUNDATION — same `type` (ISOLATED / COMBINED / RAFT / STRIP / PILE)
+
+UI: every panel shows an "Apply to matching" button that uses
+`window.confirm` with the affected count before propagating.
+
+**BBS aggregator (`src/quantities/bbs.js`) — rewritten.** Per-instance
+output + grouped-by-spec roll-up + exclusion sets for partial coverage:
+```
+{
+  byColumn:  [{ columnId, resolvedSpecId, source, kg:{...} }],
+  byBeam:    [{ beamId, beamClass, resolvedSpecId, source, kg:{...} }],
+  byFooting: [{ foundationId|null, columnTypeId|null, count, resolvedSpecId, source, kg:{...} }],
+  bySlab:    [{ slabId, resolvedSpecId, source, kg:{...} }],
+  groupedBySpec: { column[], beam[], footing[], slab[] },  // { specId, source, totalKg, instanceCount, sourceEntityIds }
+  bbsCoveredKg: { column, beam, footing, slab },
+  excludeIds:   { columns, beams, slabs, foundations, columnTypeFootings },  // Sets
+  totalKg,
+}
+```
+Resolution is the ONLY decision point — `boq/lines.js` never branches on
+spec presence, it just iterates `groupedBySpec`.
+
+**Partial BBS coverage in `getSteelQuantities(opts)`.** The selector now
+accepts `{ excludeColumnIds, excludeBeamIds, excludeSlabIds,
+excludeFoundationIds, excludeColumnTypeFootingIds }` (Sets or Arrays).
+Excluded entities contribute zero to the kg/m³ estimate pool. BOQ emits
+both: N grouped-by-spec BBS lines + one estimate line per category
+(skipped when its pool is empty). The previous "all-or-nothing"
+suppression in `boq/lines.js` is gone. Same `rateKey` per category across
+all spec/estimate lines so users still enter one rate per element type.
+
+**BOQ output format.** Example after the rewrite (column category):
+```
+Steel – Columns — C-Test (instance override)          55.2 kg
+Steel – Columns — C-ProjDefault (project default)     27.6 kg
+Steel – Columns (Estimate, kg/m³)                     12.0 kg   ← only when un-BBS'd pool exists
+```
+Every BBS line carries `meta.{specId, specLabel, source, instanceCount,
+sourceEntityIds}` for downstream PDF/Excel/ERP.
+
+**Canvas beam selection (Phase 1.7+ UI).** Explicit beams are now
+selectable on the canvas — a transparent 14px hit-target stroke triggers
+`selectBeam(beamId)`. Wall-derived beams stay unselectable by design (no
+entity to bind a spec to). `BeamPanel.jsx` mounts on `selectedBeamId` and
+shows class/section readout + spec dropdown + resolution badge +
+Apply-to-matching button. Selected explicit beams render at 5px stroke
+instead of 3px.
 
 ## Phase 1.7 — Professional Steel BBS (2026-05-16, commit `1096667`)
 
@@ -629,7 +724,12 @@ under the cost total.
 - **Fix 3 — slab role.** A slab's structural role is `slab.role` / `slab.classification`. Derive via `inferSlabRole(state, floorId)` (`'ROOF' | 'FLOOR' | 'SUNKEN' | 'STAIR_LANDING'`). Never branch on `slab.type` for role logic — type is layout (MAIN/SUNKEN), role is structural.
 - **Selector discipline.** Phase 1.7+ code uses `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor / getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor / getEntitiesOnFloor` for floor scoping. No inline `.filter(e => e.floorId === ...)` in components or quantity functions.
 - **Foundation BOQ pipeline.** `computeFoundationQuantities(state)` is the per-type geometry source. `getFoundationQuantities()` keeps the inline `byColumnTypeInline` path for legacy columns with no foundation attached. `boq/lines.js`, `excavation.js`, `shuttering.js` all read from `computeFoundationQuantities`.
-- **Steel BBS vs Est.** When `reinforcementSpecId` is set on an element, BBS replaces the kg/m³ estimate for that element's category. `boq/lines.js` emits at most one steel line per category, labeled `(BBS)` when `computeBBSQuantities` produced kg, else `(Est.)`.
+- **Steel BBS resolution — centralized only.** All reinforcement-spec fallback chains run through `src/specs/resolution.js`. UI panels, `quantities/bbs.js`, and `boq/lines.js` never branch on `entity.reinforcementSpecId`, `columnType.reinforcementSpecId`, or `projectSettings.bbsDefaults` directly — they call `resolveColumnReinforcementSpec` / `resolveBeamReinforcementSpec` / `resolveSlabReinforcementSpec` / `resolveFootingReinforcementSpec`. Each returns `{ spec, specId, specLabel, source }` with `source ∈ INSTANCE | TYPE | CLASS | PROJECT_DEFAULT | ESTIMATE`. Adding a new fallback tier = edit `resolution.js` only.
+- **Grouped-by-spec steel BOQ.** `boq/lines.js` emits one steel line per resolved spec group from `computeBBSQuantities().groupedBySpec[category]`, plus at most one `(Estimate, kg/m³)` line per category covering the un-BBS'd pool. Never one BBS line and one estimate line that double-count the same entities.
+- **Partial BBS coverage via excludeIds.** `getSteelQuantities(opts)` accepts `{ excludeColumnIds, excludeBeamIds, excludeSlabIds, excludeFoundationIds, excludeColumnTypeFootingIds }` (Sets or Arrays). `computeBBSQuantities(state).excludeIds` is the source — `boq/lines.js` passes the entire object through. Excluded entities contribute zero to the kg/m³ estimate for their category so BBS and estimate cleanly coexist.
+- **`bbsDefaults.BEAM` is per-class** (`{ plinth, lintel, roof }`). Never flat. No global beam fallback by design — unset class → ESTIMATE for that class.
+- **Use `beamClass` in new APIs.** New resolvers, aggregator outputs, and UI surface `beamClass`. The existing `beam.level` storage stays; readers use `beam.beamClass ?? beam.level` for compatibility. `BEAM_LEVEL_REGISTRY` ids ARE the beam-class ids.
+- **Wall-derived beams are unselectable.** Only explicit beams accept a per-instance spec — wall-derived ones resolve straight to CLASS → ESTIMATE. Canvas click handler ignores them; `BeamPanel` returns null on derived ids (which never appear in `state.beams`).
 - **Floor scope in BOQ.** Never compute per-floor BOQ via `lines.filter(...)` after `getBoqLines()`. Store selectors are bound to live `get()` and ignore any scoped state passed as argument. Use `getBoqLines(state, rates, { floorId })` which routes through `scopeStateToFloor` in `src/boq/scope.js`. When adding a new aggregator that needs floor scoping, add its re-implementation to `scope.js` alongside the others; pure-function quantities in `src/quantities/` auto-scope and need no change.
 - **Project manager snapshot caching.** `listProjects()` and `getCurrentProjectId()` MUST keep stable references between calls. `notify()` invalidates the in-module caches before fanning out. Required by `useSyncExternalStore` in `ProjectsPanel`.
 - **PDF currency.** Default jsPDF helvetica lacks `U+20B9`. Use the ASCII `Rs. ` prefix in `src/export/pdf.js`. Excel uses formulas (`=C*D`) so the column header carries the currency note instead.
