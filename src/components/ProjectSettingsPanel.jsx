@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnDimLabel } from '../lib/columnShapes'
+import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -75,9 +76,11 @@ export default function ProjectSettingsPanel() {
   const setParapetSettings   = useStore(s => s.setParapetSettings)
   const setStaircaseDefaults = useStore(s => s.setStaircaseDefaults)
   const setRccSpecs          = useStore(s => s.setRccSpecs)
-  const setColumnTypeEntry   = useStore(s => s.setColumnTypeEntry)
-  const addColumnType        = useStore(s => s.addColumnType)
-  const removeColumnType     = useStore(s => s.removeColumnType)
+  const setColumnTypeEntry      = useStore(s => s.setColumnTypeEntry)
+  const addColumnType           = useStore(s => s.addColumnType)
+  const removeColumnType        = useStore(s => s.removeColumnType)
+  const setProjectSettings      = useStore(s => s.setProjectSettings)
+  const setFoundationDefaults   = useStore(s => s.setFoundationDefaults)
 
   if (activeTool !== 'settings') return null
 
@@ -122,6 +125,40 @@ export default function ProjectSettingsPanel() {
         value={heights.floorHeightFt}
         onChange={v => setHeights({ floorHeightFt: v })}
       />
+
+      <div style={divider} />
+
+      {/* 1b. Default Plaster System (Phase 1.6f) */}
+      <div style={sectionHead}>Default Plaster System</div>
+      <div style={fieldRow}>
+        <span style={lbl}>System</span>
+        <select
+          style={{ flex: 1, fontSize: 13, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
+          value={projectSettings?.defaultPlasterSystemId ?? ''}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setProjectSettings({ defaultPlasterSystemId: e.target.value })}
+        >
+          {Object.values(PLASTER_SYSTEMS).map(sys => (
+            <option key={sys.id} value={sys.id}>{sys.label}</option>
+          ))}
+        </select>
+      </div>
+      <div style={{ fontSize: 10, color: '#aaa', marginBottom: 8 }}>
+        Per-room override available in Room panel.
+      </div>
+
+      <div style={divider} />
+
+      {/* 1c. Foundation Defaults (Phase 1.6e — plum concrete) */}
+      <div style={sectionHead}>Foundation Defaults</div>
+      <NumField
+        label="Plum concrete depth (ft)" step={0.25} min={0}
+        value={projectSettings?.foundationDefaults?.plumDepthFt ?? 0}
+        onChange={v => setFoundationDefaults({ plumDepthFt: v })}
+      />
+      <div style={{ fontSize: 10, color: '#aaa', marginBottom: 8 }}>
+        Mass concrete (typically M15 with 30–40% stone) under footings. 0 disables.
+      </div>
 
       <div style={divider} />
 

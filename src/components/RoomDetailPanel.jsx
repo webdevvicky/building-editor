@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
+import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
 
 function Row({ label, value, sub }) {
   return (
@@ -31,14 +32,16 @@ export default function RoomDetailPanel() {
   const walls          = useStore(s => s.walls)
   const nodes          = useStore(s => s.nodes)
   const unit           = useStore(s => s.unit)
+  const projectSettings = useStore(s => s.projectSettings)
   const getRoomArea    = useStore(s => s.getRoomArea)
   const isRoomValid    = useStore(s => s.isRoomValid)
-  const renameRoom           = useStore(s => s.renameRoom)
-  const deleteRoom           = useStore(s => s.deleteRoom)
-  const selectRoom           = useStore(s => s.selectRoom)
-  const setRoomType          = useStore(s => s.setRoomType)
-  const setRoomFinishes      = useStore(s => s.setRoomFinishes)
-  const getOverlappingRoomName = useStore(s => s.getOverlappingRoomName)
+  const renameRoom              = useStore(s => s.renameRoom)
+  const deleteRoom              = useStore(s => s.deleteRoom)
+  const selectRoom              = useStore(s => s.selectRoom)
+  const setRoomType             = useStore(s => s.setRoomType)
+  const setRoomFinishes         = useStore(s => s.setRoomFinishes)
+  const setRoomPlasterSystem    = useStore(s => s.setRoomPlasterSystem)
+  const getOverlappingRoomName  = useStore(s => s.getOverlappingRoomName)
 
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal]         = useState('')
@@ -164,6 +167,23 @@ export default function RoomDetailPanel() {
             borderRadius: 4, fontSize: 13, color: '#333', background: '#fff' }}>
           {ROOM_TYPES.map(t => (
             <option key={t} value={t}>{ROOM_TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Plaster system override (Phase 1.6f) */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
+          letterSpacing: 0.6, marginBottom: 5 }}>Plaster System</div>
+        <select value={room.plasterSystemId ?? ''}
+          onChange={e => setRoomPlasterSystem(room.id, e.target.value || null)}
+          style={{ width: '100%', padding: '5px 8px', border: '1px solid #ccc',
+            borderRadius: 4, fontSize: 13, color: '#333', background: '#fff' }}>
+          <option value="">
+            Use project default ({PLASTER_SYSTEMS[projectSettings?.defaultPlasterSystemId]?.label ?? '—'})
+          </option>
+          {Object.values(PLASTER_SYSTEMS).map(sys => (
+            <option key={sys.id} value={sys.id}>{sys.label}</option>
           ))}
         </select>
       </div>
