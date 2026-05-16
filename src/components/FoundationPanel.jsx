@@ -109,10 +109,15 @@ function fdnResBadge(source) {
 // cleanliness — useful for stored constants like PCC bedding (2/12 ft =
 // 0.16666…) so the input shows "0.17" not the full float. Stored value
 // is unchanged; the round only affects the input's value attribute.
+//
+// Pass the toFixed STRING (not Number(toFixed(...))) so trailing zeros
+// survive: 0.10 displays as "0.10", 0.17 displays as "0.17". The
+// Number-round trip strips trailing zeros and was the source of a
+// reported "010"-style display glitch.
 function NumField({ label, value, onChange, min = 0, step = 0.5, decimals }) {
   const raw = value ?? 0
   const shown = typeof decimals === 'number'
-    ? Number(raw.toFixed(decimals))
+    ? raw.toFixed(decimals)
     : raw
   return (
     <div style={fieldRow}>

@@ -548,6 +548,14 @@ check('BOQ: non-PILE foundation still emits a single combined RCC line',
       !isoLines.some(l => l.id === `fdn_${isoId}_rcc_shaft`),
       `lines: ${isoLines.filter(l => l.id.startsWith(`fdn_${isoId}`)).map(l => l.id).join(', ')}`)
 
+// Foundation-entity perFoundation should be visible in BOQ regardless of
+// whether columns/beams/slabs exist — this is the data StructuralBOQSection
+// reads to render the RCC section header.
+const fdnAlone = computeFoundationQuantities(s()).perFoundation
+check('Foundation entities have non-zero RCC in perFoundation (for section gating)',
+      fdnAlone.filter(f => (f.concreteVolFt3 ?? 0) > 0 || (f.pccVolFt3 ?? 0) > 0).length >= 2,
+      `got ${fdnAlone.length} entries`)
+
 // Clean up test foundations.
 s().deleteFoundation(pileId)
 s().deleteFoundation(isoId)

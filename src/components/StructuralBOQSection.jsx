@@ -7,6 +7,7 @@ import {
 } from '../formulas'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { computeBBSQuantities } from '../quantities/bbs'
+import { computeFoundationQuantities } from '../quantities/foundations'
 import { humanizeAssignmentSource } from '../specs/resolution'
 
 const COL = '1fr 68px 88px 70px'
@@ -128,7 +129,15 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
     steelCategoryTotal('beam') + steelCategoryTotal('slab') +
     (steelQtys.staircase ?? 0) + (steelQtys.civilStamp ?? 0)
 
+  // Foundation entities (PILE / RAFT / STRIP / COMBINED / ISOLATED entities)
+  // — rendered separately from the inline auto-isolated `fotQtys` bucket.
+  // Without this, projects with only foundation entities (e.g., a standalone
+  // PILE foundation, no columns) had no Structural RCC section at all.
+  const fdnEntities = computeFoundationQuantities(useStore.getState()).perFoundation
+    .filter(f => (f.concreteVolFt3 ?? 0) > 0 || (f.pccVolFt3 ?? 0) > 0)
+
   const hasRCC = Object.keys(colQtys).length > 0 || Object.keys(fotQtys).length > 0 ||
+    fdnEntities.length > 0 ||
     BEAM_LEVEL_REGISTRY.some(l => beamQtys[l.id]) || slabQ.mainVolFt3 > 0 ||
     (sunshadeQ?.count > 0) || (parapetQ?.totalLenFt > 0)
   const hasSteel = totalSteelKg > 0
@@ -146,6 +155,24 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
     for (const [typeId, q] of Object.entries(fotQtys)) {
       add(`Footing ${q.label} ×${q.count}`, r2(q.concreteVolFt3), 'ft³', `fot_${typeId}_rcc`)
       add(`PCC under ${q.label}`, r2(q.pccVolFt3), 'ft³', `fot_${typeId}_pcc`)
+    }
+
+    // Foundation entities — mirror boq/lines.js emission (PILE → shaft + cap;
+    // others → one combined line). Same rateKeys, same labels.
+    for (const f of fdnEntities) {
+      if (f.type === 'PILE') {
+        const pg = f.pileGeometry || {}
+        if ((f.shaftVolFt3 ?? 0) > 0)
+          add(`${f.label} — Shaft (${pg.pilesCount}× Ø${pg.pileDiamIn}″ × ${pg.pileLengthFt}ft)`,
+              r2(f.shaftVolFt3), 'ft³', `fdn_${f.id}_rcc_shaft`)
+        if ((f.capVolFt3 ?? 0) > 0)
+          add(`${f.label} — Cap (${pg.capLengthFt}×${pg.capWidthFt}×${pg.capDepthFt}ft)`,
+              r2(f.capVolFt3), 'ft³', `fdn_${f.id}_rcc_cap`)
+      } else if ((f.concreteVolFt3 ?? 0) > 0) {
+        add(`Foundation ${f.label}`, r2(f.concreteVolFt3), 'ft³', `fdn_${f.id}_rcc`)
+      }
+      if ((f.pccVolFt3 ?? 0) > 0)
+        add(`PCC under ${f.label}`, r2(f.pccVolFt3), 'ft³', `fdn_${f.id}_pcc`)
     }
 
     for (const lvl of BEAM_LEVEL_REGISTRY)
@@ -217,6 +244,31 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
               {row(`PCC under ${q.label}`, r2(q.pccVolFt3), 'ft³', `fot_${id}_pcc`)}
             </div>
           ))}
+          {fdnEntities.map(f => {
+            if (f.type === 'PILE') {
+              const pg = f.pileGeometry || {}
+              return (
+                <div key={f.id}>
+                  {(f.shaftVolFt3 ?? 0) > 0 && row(
+                    `${f.label} — Shaft (${pg.pilesCount}× Ø${pg.pileDiamIn}″ × ${pg.pileLengthFt}ft)`,
+                    r2(f.shaftVolFt3), 'ft³', `fdn_${f.id}_rcc_shaft`)}
+                  {(f.capVolFt3 ?? 0) > 0 && row(
+                    `${f.label} — Cap (${pg.capLengthFt}×${pg.capWidthFt}×${pg.capDepthFt}ft)`,
+                    r2(f.capVolFt3), 'ft³', `fdn_${f.id}_rcc_cap`)}
+                  {(f.pccVolFt3 ?? 0) > 0 && row(
+                    `PCC under ${f.label}`, r2(f.pccVolFt3), 'ft³', `fdn_${f.id}_pcc`)}
+                </div>
+              )
+            }
+            return (
+              <div key={f.id}>
+                {(f.concreteVolFt3 ?? 0) > 0 && row(
+                  `Foundation ${f.label}`, r2(f.concreteVolFt3), 'ft³', `fdn_${f.id}_rcc`)}
+                {(f.pccVolFt3 ?? 0) > 0 && row(
+                  `PCC under ${f.label}`, r2(f.pccVolFt3), 'ft³', `fdn_${f.id}_pcc`)}
+              </div>
+            )
+          })}
           {BEAM_LEVEL_REGISTRY.map(lvl => beamQtys[lvl.id]
             ? row(`${lvl.label} beams`, r2(beamQtys[lvl.id].volFt3), 'ft³', `beam_${lvl.id}`)
             : null
