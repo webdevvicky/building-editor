@@ -123,7 +123,10 @@ canonical BOQ pipeline.
 **Quantities (`src/quantities/foundations.js`).** Pure function
 `computeFoundationQuantities(state) → { perFoundation, totals }` where each
 entry has `{ id, type, label, columnCount, wallCount, concreteVolFt3,
-pccVolFt3, plumVolFt3, excavVolFt3, shutterAreaFt2 }`. Geometry rules:
+pccVolFt3, plumVolFt3, excavVolFt3, shutterAreaFt2 }`. PILE entries also
+carry `shaftVolFt3`, `capVolFt3`, and `pileGeometry: { pilesCount,
+pileDiamIn, pileLengthFt, capLengthFt, capWidthFt, capDepthFt }` for
+the split BOQ emission (see Integration note below). Geometry rules:
 - **ISOLATED / COMBINED:** `footprint = L×W`; `excav = (L+2m)×(W+2m)×(D+pcc)`;
   `shutter = 2(L+W)×D`.
 - **RAFT:** `footprint = geometry.areaFt2` (no margin — raft IS the footprint);
@@ -131,8 +134,11 @@ pccVolFt3, plumVolFt3, excavVolFt3, shutterAreaFt2 }`. Geometry rules:
 - **STRIP:** attaches to `wallIds[]`; `totalLenFt = Σ getWallLength(wid)`;
   `excav = totalLenFt × (W+2m) × (D+pcc)`; `shutter = 2 × totalLenFt × D`.
 - **PILE:** `shaftFt3 = pilesCount · π·(d/2)² · L`; cap = `capL×capW×capD`;
-  `excav = capFootprint × (capD+pcc)` (pile shafts displace ground — not
-  counted in dig volume).
+  `concreteVolFt3 = shaftFt3 + capFt3` (combined for steel/concrete-mix
+  aggregators — they consume one number); BOQ emits TWO RCC lines per
+  pile foundation (shaft + cap) labeled with geometry hints; `excav =
+  capFootprint × (capD+pcc)` (pile shafts displace ground — not counted
+  in dig volume).
 
 `marginFt = projectSettings.excavationSettings?.workingMarginFt ?? 0.5`.
 
@@ -142,9 +148,17 @@ geometry inputs; column-attachment multi-select for COMBINED; wall-attachment
 multi-select for STRIP. Foundation badge appears in `ColumnPanel` when a
 column is attached.
 
-**Integration.** `boq/lines.js` emits one `rcc` + one `pcc` line per foundation
-entity from `computeFoundationQuantities().perFoundation` (the inline
-`byColumnTypeInline` path is unchanged for columns with no foundation).
+**Integration.** `boq/lines.js` emits foundation-entity RCC + PCC lines
+from `computeFoundationQuantities().perFoundation`. PILE foundations emit
+TWO RCC lines per entity (shaft + cap, with distinct rateKeys
+`fdn_<id>_rcc_shaft` and `fdn_<id>_rcc_cap`) labeled with geometry
+hints — they're separate procurement pours. All other types emit one
+combined RCC line `fdn_<id>_rcc`. PCC line `fdn_<id>_pcc` is per
+foundation regardless of type. `StructuralBOQSection.jsx` mirrors this
+emission for the on-screen rendering and includes foundation entities
+in its `hasRCC` gate so foundation-only projects (no columns/beams)
+still render the Structural RCC section header. The inline
+`byColumnTypeInline` path is unchanged for columns with no foundation.
 `quantities/excavation.js` and `quantities/shuttering.js` consume the same
 aggregator instead of the previous square-root approximations.
 
@@ -819,6 +833,11 @@ under the cost total.
 - **Fix 3 — slab role.** A slab's structural role is `slab.role` / `slab.classification`. Derive via `inferSlabRole(state, floorId)` (`'ROOF' | 'FLOOR' | 'SUNKEN' | 'STAIR_LANDING'`). Never branch on `slab.type` for role logic — type is layout (MAIN/SUNKEN), role is structural.
 - **Selector discipline.** Phase 1.7+ code uses `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor / getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor / getEntitiesOnFloor` for floor scoping. No inline `.filter(e => e.floorId === ...)` in components or quantity functions.
 - **Foundation BOQ pipeline.** `computeFoundationQuantities(state)` is the per-type geometry source. `getFoundationQuantities()` keeps the inline `byColumnTypeInline` path for legacy columns with no foundation attached. `boq/lines.js`, `excavation.js`, `shuttering.js` all read from `computeFoundationQuantities`.
+- **Room overlap is same-floor only.** `saveRoom`, `getOverlappingRoomName`, `getValidRoomIds` (pairwise loop), and the `loadProject` dev-warning all filter by `room.floorId === subject.floorId` before running the overlap check. Identical or overlapping footprints across floors are the expected case for multi-storey buildings — never conflicts.
+- **PILE foundation emits TWO RCC BOQ lines.** Cast-in-situ pile shaft concrete and on-top pile-cap concrete are distinct procurement pours. `boq/lines.js` and `StructuralBOQSection.jsx` both branch on `f.type === 'PILE'` to emit `_rcc_shaft` + `_rcc_cap` (separate rateKeys); all other foundation types emit a single combined `_rcc` line. `computeFoundationQuantities` carries `shaftVolFt3` / `capVolFt3` / `pileGeometry` alongside the combined `concreteVolFt3` so steel/concrete-mix aggregators stay simple.
+- **Foundation entities render in the Structural RCC section.** `StructuralBOQSection.jsx` consumes `computeFoundationQuantities().perFoundation` (not just `getFootingQuantities`'s inline-by-columnType subset), and includes `fdnEntities.length > 0` in its `hasRCC` gate. Foundation-only projects (PILE/RAFT/etc. with no columns) still render the section header.
+- **BOQ row React key is composite `${rateKey}::${infoId}`.** Multiple BOQ rows legitimately share a rateKey (steel grouped-by-spec lines) OR an infoId (concrete grade rows sharing one formula popover). Either alone is non-unique; the composite guarantees uniqueness in both directions. Defined in the `row` helper at the top of `StructuralBOQSection.jsx`.
+- **PCC depth display rounds via `NumField`'s `decimals` prop.** PCC bedding default is `PCC_BEDDING_THICKNESS_FT = 2/12 ft` (0.16666…). `FoundationPanel` passes `decimals={2}` to every PCC/plum-depth NumField; the helper formats with `toFixed(2)` as a STRING (not `Number(...)`) so trailing zeros survive ("0.10" stays "0.10", not "0.1"). Display only — stored value is untouched.
 - **Topology is floor-scoped.** Spatial alignment across floors does not imply shared ownership. Vertical relationships must be explicit, never inferred from shared node identity. Two corners at the same XY on different floors are TWO distinct node entities — not one shared geometric point. Vertical-spanning entities (multi-storey columns via `baseFloorId/topFloorId`, staircases via `fromFloorId/toFloorId`) carry their own explicit floor identifiers; nothing is inferred from spatial collision.
 - **Node ownership via `floorIds[]`.** Every node carries `floorIds: string[]` — required, non-empty, length 1 today, future-proof for vertical shafts and staircase cores. All three node creators in `store.js` (`getOrCreateNode` fresh + auto-split branches, `splitWall` midpoint) stamp `floorIds` at creation. Auto-split + `splitWall` midpoints INHERIT from the wall (`[wall.floorId]`), not from `currentFloorId` — this matters for programmatic `splitWall(..., { force: true })` calls across floors. Snap-during-draw uses `state.getNodeIdsByFloor(currentFloorId)`; cross-floor coordinate collisions create distinct nodes by design.
 - **Floor-scoped wall checks.** `addWall` runs duplicate + collinear-overlap checks only against `state.getWallIdsByFloor(currentFloorId)`. Identical wall geometry on two floors is the expected case for multi-storey buildings. The plot polygon stays floor-agnostic (site boundary is single).
