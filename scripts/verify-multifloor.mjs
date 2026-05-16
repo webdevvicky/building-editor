@@ -126,6 +126,61 @@ check('getColumnsOnFloor F2 = 1', s().getColumnsOnFloor(f2Id).length === 1)
 check('getRoomsOnFloor F1 = 1', s().getRoomsOnFloor('F1').length === 1)
 check('getRoomsOnFloor F2 = 1', s().getRoomsOnFloor(f2Id).length === 1)
 
+// ── Floor-aware overlap: identical footprint on different floors is OK ──────
+header('4. Floor-aware room overlap')
+// Build a room on F2 with EXACTLY the same coordinates as the Living room on F1.
+s().setCurrentFloorId(f2Id)
+const dupSW = s().getOrCreateNode(0,       0)
+const dupSE = s().getOrCreateNode(20 * FT, 0)
+const dupNE = s().getOrCreateNode(20 * FT, 15 * FT)
+const dupNW = s().getOrCreateNode(0,       15 * FT)
+s().addWall(dupSW, dupSE); s().addWall(dupSE, dupNE)
+s().addWall(dupNE, dupNW); s().addWall(dupNW, dupSW)
+const allWalls = Object.values(s().walls)
+const dupIds = [
+  allWalls.find(w => (w.n1===dupSW&&w.n2===dupSE)||(w.n2===dupSW&&w.n1===dupSE))?.id,
+  allWalls.find(w => (w.n1===dupSE&&w.n2===dupNE)||(w.n2===dupSE&&w.n1===dupNE))?.id,
+  allWalls.find(w => (w.n1===dupNE&&w.n2===dupNW)||(w.n2===dupNE&&w.n1===dupNW))?.id,
+  allWalls.find(w => (w.n1===dupNW&&w.n2===dupSW)||(w.n2===dupNW&&w.n1===dupSW))?.id,
+].filter(Boolean)
+dupIds.forEach(id => s().togglePendingWall(id))
+const dupResult = s().saveRoom('Living-F2', 'LIVING')
+
+check('saveRoom on F2 over F1 footprint does NOT return overlap error',
+      dupResult === null, `got ${JSON.stringify(dupResult)}`)
+check('Both same-footprint rooms (F1+F2) are present',
+      Object.values(s().rooms).filter(r => r.name === 'Living' || r.name === 'Living-F2').length === 2)
+
+// getOverlappingRoomName: subject on F2 sees no conflict with F1 twin.
+const f2RoomId = Object.values(s().rooms).find(r => r.name === 'Living-F2')?.id
+check('getOverlappingRoomName returns null across floors',
+      s().getOverlappingRoomName(f2RoomId) === null,
+      `got ${s().getOverlappingRoomName(f2RoomId)}`)
+
+// getValidRoomIds pairwise loop now floor-aware — both rooms remain valid.
+const validIds = s().getValidRoomIds()
+const f1LivingId = Object.values(s().rooms).find(r => r.name === 'Living')?.id
+check('F1 Living still in getValidRoomIds after F2 duplicate added',
+      validIds.includes(f1LivingId))
+check('F2 Living-F2 in getValidRoomIds (not excluded as overlap)',
+      validIds.includes(f2RoomId))
+
+// Sanity: an actual same-floor overlap is still caught.
+// Build a second 20×15 room at the same coords on F2 — should be blocked.
+const blockSW = s().getOrCreateNode(0,       0)
+const blockSE = s().getOrCreateNode(20 * FT, 0)
+const blockNE = s().getOrCreateNode(20 * FT, 15 * FT)
+const blockNW = s().getOrCreateNode(0,       15 * FT)
+// Walls already exist from the previous F2 room — saveRoom needs pending wall ids.
+// Use the same wall set; this should hit the overlap check against the existing F2 room.
+dupIds.forEach(id => s().togglePendingWall(id))    // re-pend
+const blockResult = s().saveRoom('Living-F2-dup', 'LIVING')
+check('Same-floor overlap is still blocked',
+      blockResult?.error === 'overlap',
+      `got ${JSON.stringify(blockResult)}`)
+// Use blockSW/SE/NE/NW so eslint doesn't complain about unused vars.
+void blockSW; void blockSE; void blockNE; void blockNW
+
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ✓ ${p}`)
 if (failed.length) {
