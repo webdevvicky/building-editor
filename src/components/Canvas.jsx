@@ -123,6 +123,7 @@ export default function Canvas() {
   const columns          = useStore(s => s.columns)
   const selectedColumnId = useStore(s => s.selectedColumnId)
   const projectSettings  = useStore(s => s.projectSettings)
+  const currentFloorId   = useStore(s => s.currentFloorId)
   const getAllBeams       = useStore(s => s.getAllBeams)
   const addColumn    = useStore(s => s.addColumn)
   const deleteColumn = useStore(s => s.deleteColumn)
