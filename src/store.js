@@ -84,6 +84,15 @@ function walkPolygon(wallIds, walls) {
   return isClosed ? best : null
 }
 
+// Dev-only handle for browser console debugging. Stripped from production builds.
+// Usage in DevTools: useStore.getState().getValidRoomIds(), etc.
+function exposeStoreForDev(store) {
+  // import.meta.env is injected by Vite — undefined in plain Node (verify scripts).
+  if (import.meta.env?.DEV && typeof window !== 'undefined') {
+    window.useStore = store
+  }
+}
+
 export const useStore = create((set, get) => ({
   nodes:  {},
   walls:  {},
@@ -1067,3 +1076,5 @@ export const useStore = create((set, get) => ({
   // ── Structural slice (columns, beams, slabs, staircases, projectSettings) ──
   ...createStructuralSlice(set, get, uid),
 }))
+
+exposeStoreForDev(useStore)

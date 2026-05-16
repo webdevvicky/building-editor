@@ -1,17 +1,33 @@
 // Excavation quantity computation (Phase 1.6b).
 //
-// Three layers, summed to a total:
-//   1. Bulk excavation     — overall building footprint × bulk depth.
-//                            Bulk depth defaults to plinth height (the basement of the
-//                            ground floor) unless projectSettings.excavationSettings
-//                            overrides it.
-//   2. Per-foundation pits — additional volume for foundation pits below bulk.
-//                            volume = footprintFt2 × (pitDepthFt - bulkDepthFt)  if positive
-//                            (the pit goes deeper than bulk, so only the excess counts).
-//   3. Per-civil-stamp     — already returned by getSumpCivilQty / getSepticCivilQty.
+// Soil-removal model (additive — no vertical overlap between layers):
 //
-// Working margin (overcut around each pit for formwork access) is included via
-// projectSettings.excavationSettings.workingMarginFt — default 0.5 ft per side.
+//   1. Bulk excavation     — top layer across the building footprint.
+//                            Depth = projectSettings.excavationSettings.bulkDepthFt
+//                                    (defaults to heights.plinthHeightFt — the plinth
+//                                    height above grade, mirrored as below-grade dig).
+//                            Volume = footprint × bulkDepth.
+//                            When no rooms are saved, footprint = 0 and bulk = 0.
+//
+//   2. Per-foundation pits — extra dig BELOW the bulk layer for each footing pit.
+//                            Each pit goes deeper by:
+//                                footing_thickness + PCC_BEDDING_THICKNESS_FT
+//                            from the bulk floor.  When bulk = 0 (no rooms yet) this
+//                            is dug from grade — the math is the same either way.
+//                            Per pit volume = pit_envelope × pit_extra_depth.
+//                            Pit envelope = (L + 2·margin) × (W + 2·margin) for
+//                            formwork access.
+//
+//   3. Per-civil-stamp     — full depth of sumps + septic tanks (independent of bulk).
+//                            Each stamp's envelope × its declared depth.
+//
+// Working margin (overcut for formwork access) defaults to 0.5 ft per side;
+// override via projectSettings.excavationSettings.workingMarginFt.
+//
+// Section visibility (in ExcavationSection.jsx): hides only when totalVolFt3 === 0.
+// With any column / foundation / civil stamp present, the section is shown.
+
+import { PCC_BEDDING_THICKNESS_FT } from '../constants/structural'
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
@@ -38,49 +54,51 @@ export function computeExcavationQuantities(state) {
   const footprintFt2   = buildingFootprintFt2(state)
   const bulkVolFt3     = footprintFt2 * bulkDepthFt
 
-  // ── Per-foundation pits (excess depth below bulk) ─────────────────────
+  // ── Per-foundation pits ───────────────────────────────────────────────
+  // Pit extra depth (below bulk floor) = footing_thickness + PCC bedding.
+  // This is additive to bulk excavation — they don't overlap vertically.
   const fdnQ = state.getFoundationQuantities()
   const perFoundation = []
-  let foundationExtraVolFt3 = 0
+  let foundationVolFt3 = 0
+
   for (const [ctId, q] of Object.entries(fdnQ.byColumnTypeInline)) {
-    const pitDepthFt   = q.depthFt
-    const extraDepthFt = Math.max(0, pitDepthFt - bulkDepthFt)
-    if (extraDepthFt === 0 || !q.count) continue
-    // Working margin around each pit: (L + 2m) × (W + 2m), not just footprint.
-    const pitLFt = q.lengthFt + 2 * marginFt
-    const pitWFt = q.widthFt  + 2 * marginFt
-    const volPerPit = pitLFt * pitWFt * extraDepthFt
-    const volTotal  = volPerPit * q.count
-    foundationExtraVolFt3 += volTotal
+    if (!q.count || !q.depthFt) continue
+    const pitExtraDepthFt = q.depthFt + PCC_BEDDING_THICKNESS_FT
+    const pitLFt          = q.lengthFt + 2 * marginFt
+    const pitWFt          = q.widthFt  + 2 * marginFt
+    const volPerPit       = pitLFt * pitWFt * pitExtraDepthFt
+    const volTotal        = volPerPit * q.count
+    foundationVolFt3     += volTotal
     perFoundation.push({
-      key:           `inline_${ctId}`,
-      label:         q.label,
-      count:         q.count,
-      pitDimFt:      `${r2(pitLFt)}×${r2(pitWFt)}×${r2(extraDepthFt)}`,
-      volFt3:        r2(volTotal),
+      key:      `inline_${ctId}`,
+      label:    q.label,
+      count:    q.count,
+      pitDimFt: `${r2(pitLFt)}×${r2(pitWFt)}×${r2(pitExtraDepthFt)}`,
+      volFt3:   r2(volTotal),
     })
   }
   for (const [fid, q] of Object.entries(fdnQ.byFoundation)) {
-    // Foundation entities — use footprint + working-margin envelope.
     if (!q.footprintFt2) continue
-    const depthFt = q.concreteVolFt3 && q.footprintFt2 ? q.concreteVolFt3 / q.footprintFt2 : 0
-    const extraDepthFt = Math.max(0, depthFt - bulkDepthFt)
-    if (extraDepthFt === 0) continue
-    // Working margin approximation: scale footprint by √(1 + 4m/√A) ≈ +marginFt around perimeter.
-    const sqrtA   = Math.sqrt(q.footprintFt2)
+    const footingThicknessFt = q.concreteVolFt3 && q.footprintFt2
+      ? q.concreteVolFt3 / q.footprintFt2
+      : 0
+    if (footingThicknessFt === 0) continue
+    const pitExtraDepthFt = footingThicknessFt + PCC_BEDDING_THICKNESS_FT
+    // Working margin approximation: envelope = (√A + 2·margin)² for rectangular pits.
+    const sqrtA       = Math.sqrt(q.footprintFt2)
     const envelopeFt2 = Math.pow(sqrtA + 2 * marginFt, 2)
-    const volTotal    = envelopeFt2 * extraDepthFt
-    foundationExtraVolFt3 += volTotal
+    const volTotal    = envelopeFt2 * pitExtraDepthFt
+    foundationVolFt3 += volTotal
     perFoundation.push({
       key:      `fdn_${fid}`,
       label:    q.label,
       count:    1,
-      pitDimFt: `${r2(sqrtA + 2 * marginFt)}²×${r2(extraDepthFt)}`,
+      pitDimFt: `${r2(sqrtA + 2 * marginFt)}²×${r2(pitExtraDepthFt)}`,
       volFt3:   r2(volTotal),
     })
   }
 
-  // ── Per-civil-stamp (already computed by store selectors) ─────────────
+  // ── Per-civil-stamp (sump + septic, full depth always) ────────────────
   const stamps = state.stamps || {}
   const civilStamps = []
   let civilTotalFt3 = 0
@@ -88,7 +106,6 @@ export function computeExcavationQuantities(state) {
     if (!stamp.depth) continue
     if (stamp.type !== 'sump' && stamp.type !== 'septic_tank') continue
     const wFt = stamp.w / 12, hFt = stamp.h / 12, dFt = stamp.depth / 12
-    // Working margin
     const lEnvFt = wFt + 2 * marginFt
     const wEnvFt = hFt + 2 * marginFt
     const vol = lEnvFt * wEnvFt * dFt
@@ -101,7 +118,7 @@ export function computeExcavationQuantities(state) {
     })
   }
 
-  const totalVolFt3 = r2(bulkVolFt3 + foundationExtraVolFt3 + civilTotalFt3)
+  const totalVolFt3 = r2(bulkVolFt3 + foundationVolFt3 + civilTotalFt3)
 
   return {
     bulk: {
@@ -114,7 +131,7 @@ export function computeExcavationQuantities(state) {
     workingMarginFt: marginFt,
     subtotals: {
       bulk:         r2(bulkVolFt3),
-      foundation:   r2(foundationExtraVolFt3),
+      foundation:   r2(foundationVolFt3),
       civil:        r2(civilTotalFt3),
     },
     totalVolFt3,
