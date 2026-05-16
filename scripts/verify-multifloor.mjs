@@ -205,6 +205,111 @@ check('Same-floor overlap is still blocked',
 // Use blockSW/SE/NE/NW so eslint doesn't complain about unused vars.
 void blockSW; void blockSE; void blockNE; void blockNW
 
+// ── Floor-aware node ownership (Phase 1.7+ floorIds[]) ─────────────────────
+header('5. Node-floor ownership invariants')
+
+// Every node must carry floorIds (non-empty array).
+const allNodeIds = Object.keys(s().nodes)
+const malformedNodes = allNodeIds.filter(id => {
+  const n = s().nodes[id]
+  return !Array.isArray(n.floorIds) || n.floorIds.length === 0
+})
+check('Every node has a non-empty floorIds[]',
+      malformedNodes.length === 0,
+      `${malformedNodes.length} malformed`)
+
+// Single-floor invariant today: each node belongs to exactly one floor.
+const multiFloorNodes = allNodeIds.filter(id => (s().nodes[id].floorIds || []).length > 1)
+check('Single-floor-per-node invariant holds (length === 1)',
+      multiFloorNodes.length === 0,
+      `${multiFloorNodes.length} multi-floor nodes`)
+
+// Floor partition: union == all, intersection == empty.
+const f1NodeSet = s().getNodeIdsByFloor('F1')
+const f2NodeSet = s().getNodeIdsByFloor(f2Id)
+const unionSet = new Set([...f1NodeSet, ...f2NodeSet])
+check('getNodeIdsByFloor("F1") ∪ getNodeIdsByFloor(F2) covers all nodes',
+      unionSet.size === allNodeIds.length,
+      `union=${unionSet.size}, total=${allNodeIds.length}`)
+const intersectionIds = [...f1NodeSet].filter(id => f2NodeSet.has(id))
+check('getNodeIdsByFloor("F1") ∩ getNodeIdsByFloor(F2) is empty',
+      intersectionIds.length === 0,
+      `${intersectionIds.length} shared`)
+
+// Core topology invariant: every wall's endpoints belong to that wall's floor.
+const allWallsList = Object.values(s().walls)
+const brokenTopology = allWallsList.filter(w => {
+  const n1 = s().nodes[w.n1], n2 = s().nodes[w.n2]
+  const wFloor = w.floorId ?? 'F1'
+  return !(n1?.floorIds?.includes(wFloor)) || !(n2?.floorIds?.includes(wFloor))
+})
+check('Every wall.n1/n2 references nodes whose floorIds include wall.floorId',
+      brokenTopology.length === 0,
+      `${brokenTopology.length} broken (first: ${brokenTopology[0]?.id})`)
+
+// F2 duplicate room created REAL F2 walls (not blocked by F1 geometry).
+const f2Walls = allWallsList.filter(w => (w.floorId ?? 'F1') === f2Id)
+// 4 original F2 walls (100ft-offset Bedroom) + 4 duplicate-coord F2 walls = 8 total.
+check('F2 duplicate room created 4 NEW F2 walls (8 total on F2)',
+      f2Walls.length === 8,
+      `got ${f2Walls.length}`)
+
+// F2 wall ids are disjoint from F1 wall ids.
+const f1WallIds = new Set(allWallsList.filter(w => (w.floorId ?? 'F1') === 'F1').map(w => w.id))
+const f2WallIds = new Set(f2Walls.map(w => w.id))
+const sharedWallIds = [...f1WallIds].filter(id => f2WallIds.has(id))
+check('F1 wall ids ∩ F2 wall ids is empty',
+      sharedWallIds.length === 0)
+
+// New F2 duplicate-coord nodes are distinct from F1 corner nodes.
+const f1CornerIds = [f1SW, f1SE, f1NE, f1NW]
+const f2DupCornerIds = [dupSW, dupSE, dupNE, dupNW]
+const idCollisions = f2DupCornerIds.filter(id => f1CornerIds.includes(id))
+check('F2 duplicate-coord nodes have NEW ids (not snapped to F1)',
+      idCollisions.length === 0,
+      `${idCollisions.length} id collisions`)
+check('F2 duplicate-coord nodes carry floorIds=[F2]',
+      f2DupCornerIds.every(id => {
+        const n = s().nodes[id]
+        return n?.floorIds?.length === 1 && n.floorIds[0] === f2Id
+      }))
+
+// splitWall defensive guard: off-floor split is rejected + emits validation event.
+const { runValidation } = await import('../src/validation/engine.js')
+const f1WallToSplit = allWallsList.find(w => (w.floorId ?? 'F1') === 'F1')
+const eventsBefore = (s().validationEvents ?? []).length
+s().setCurrentFloorId(f2Id)
+const splitResult = s().splitWall(f1WallToSplit.id, 6 * FT, 0)
+check('splitWall on F1 wall while currentFloor=F2 returns null (rejected)',
+      splitResult === null)
+const eventsAfter = (s().validationEvents ?? []).length
+check('Rejected splitWall emits a validation event',
+      eventsAfter === eventsBefore + 1,
+      `before=${eventsBefore}, after=${eventsAfter}`)
+const evt = s().validationEvents[s().validationEvents.length - 1]
+check('Validation event has ruleId=cross_floor_split_attempt',
+      evt.ruleId === 'cross_floor_split_attempt' && evt.severity === 'warning' &&
+        evt.entityType === 'wall' && evt.entityId === f1WallToSplit.id)
+
+// runValidation() surfaces the event.
+const v = runValidation(s())
+check('runValidation surfaces cross_floor_split_attempt issue',
+      v.issues.some(i => i.ruleId === 'cross_floor_split_attempt'),
+      `${v.issues.length} issues`)
+
+// Forced cross-floor split succeeds (programmatic caller path).
+const eventsBeforeForce = (s().validationEvents ?? []).length
+const forced = s().splitWall(f1WallToSplit.id, 6 * FT, 0, { force: true })
+check('splitWall with { force: true } succeeds across floors',
+      forced !== null,
+      `got ${forced}`)
+check('Forced split does NOT emit a validation event',
+      (s().validationEvents ?? []).length === eventsBeforeForce)
+// Midpoint node inherits floorIds from the split wall (F1), not currentFloorId.
+check('Forced-split midpoint node inherits floorIds from wall topology',
+      s().nodes[forced]?.floorIds?.length === 1 && s().nodes[forced]?.floorIds?.[0] === 'F1',
+      `got ${JSON.stringify(s().nodes[forced]?.floorIds)}`)
+
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ✓ ${p}`)
 if (failed.length) {

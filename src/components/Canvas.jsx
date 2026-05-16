@@ -125,6 +125,7 @@ export default function Canvas() {
   const projectSettings  = useStore(s => s.projectSettings)
   const currentFloorId   = useStore(s => s.currentFloorId)
   const getColumnsOnFloor = useStore(s => s.getColumnsOnFloor)
+  const getNodeIdsByFloor = useStore(s => s.getNodeIdsByFloor)
   const getAllBeams       = useStore(s => s.getAllBeams)
   const addColumn    = useStore(s => s.addColumn)
   const deleteColumn = useStore(s => s.deleteColumn)
@@ -810,21 +811,15 @@ export default function Canvas() {
         })()}
 
         {layerVisibility.nodes && (<>
-        {/* Nodes — floor-aware: a node is "on" the current floor if ANY wall
-         * referencing it lives on currentFloorId. Shared-junction nodes (used
-         * by walls on both the current floor and another) count as active.
-         * Nodes used only by ghost-floor walls render at 0.15 opacity with
-         * pointerEvents disabled. Single-floor projects skip the filter. */}
+        {/* Nodes — floor-aware ownership via node.floorIds[]. Single-floor
+         * projects render every node active. Multi-floor: dim nodes whose
+         * floorIds don't include currentFloorId. Topology is floor-scoped:
+         * a node at the same XY as one on another floor is a DISTINCT entity.
+         * Vertical relationships are explicit, never inferred from coords. */}
         {(() => {
-          const activeNodeIds = new Set()
-          if (multiFloor) {
-            for (const w of Object.values(walls)) {
-              if (floorOf(w) === currentFloorId) {
-                activeNodeIds.add(w.n1)
-                activeNodeIds.add(w.n2)
-              }
-            }
-          }
+          const activeNodeIds = multiFloor
+            ? getNodeIdsByFloor(currentFloorId)
+            : null
           return Object.values(nodes).map(node => {
             const isStart      = node.id === drawStartId
             const onActiveFloor = !multiFloor || activeNodeIds.has(node.id)

@@ -84,6 +84,41 @@ function walkPolygon(wallIds, walls) {
   return isClosed ? best : null
 }
 
+// ── Floor-aware topology helpers (Phase 1.7+ multi-floor) ───────────────────
+//
+// Nodes are floor-owned: every node carries floorIds: string[] (length 1 for
+// single-floor projects, future-proofed for vertical shafts / cores). Walls
+// are floor-owned via wall.floorId. Drawing on F2 NEVER snaps to or mutates
+// F1 topology — spatial alignment across floors does not imply shared
+// ownership. Vertical relationships are explicit entities, never inferred
+// from shared node identity.
+//
+// Both helpers return the FULL maps for single-floor projects so the
+// existing single-floor behavior is byte-identical.
+
+function getActiveFloorNodes(state, floorId) {
+  const floors = state.projectSettings?.floors ?? []
+  if (floors.length <= 1) return state.nodes
+  const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+  const out = {}
+  for (const [id, node] of Object.entries(state.nodes)) {
+    const ids = node.floorIds ?? [DEFAULT_FLOOR_ID]
+    if (ids.includes(fid)) out[id] = node
+  }
+  return out
+}
+
+function getActiveFloorWalls(state, floorId) {
+  const floors = state.projectSettings?.floors ?? []
+  if (floors.length <= 1) return state.walls
+  const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+  const out = {}
+  for (const [id, w] of Object.entries(state.walls)) {
+    if ((w.floorId ?? DEFAULT_FLOOR_ID) === fid) out[id] = w
+  }
+  return out
+}
+
 // Dev-only handle for browser console debugging. Stripped from production builds.
 // Usage in DevTools: useStore.getState().getValidRoomIds(), etc.
 function exposeStoreForDev(store) {
@@ -119,6 +154,13 @@ export const useStore = create((set, get) => ({
   // UI state for floor switcher (Phase 1.9 UI). Stage 0 stays on F1.
   // Excluded from history snapshots — switching floors is a view operation.
   currentFloorId: DEFAULT_FLOOR_ID,
+
+  // Ring buffer of action-emitted validation events (Phase 1.7+ floor topology).
+  // Store actions that REJECT an invalid operation (e.g., splitWall on an
+  // off-floor wall) push a pre-formed issue record here. runValidation() picks
+  // them up. Capped at 100 entries — older events drop off the head.
+  // Excluded from history (transient observability, not user-meaningful state).
+  validationEvents: [],
 
   // ── History ───────────────────────────────────────────────────────────
 
@@ -185,21 +227,38 @@ export const useStore = create((set, get) => ({
 
   // ── Nodes ─────────────────────────────────────────────────────────────
 
-  // x, y are world inches (Y-up)
+  // x, y are world inches (Y-up).
+  //
+  // Floor-aware topology (Phase 1.7+):
+  //   - findNearbyNode searches only nodes owned by the current floor.
+  //     Cross-floor coordinate collisions create distinct nodes — spatial
+  //     alignment never implies shared ownership.
+  //   - Auto-split-on-segment iterates only current-floor walls. Drawing on
+  //     F2 over an F1 wall body does NOT mutate F1.
+  //   - The new node carries floorIds: [currentFloorId]. Auto-split midpoint
+  //     inherits its topology context from the parent wall.
   getOrCreateNode(x, y) {
-    const existing = findNearbyNode(get().nodes, x, y)
+    const state = get()
+    const cur = state.currentFloorId ?? DEFAULT_FLOOR_ID
+
+    // Snap candidates: nodes owned by current floor only.
+    const candidateNodes = getActiveFloorNodes(state, cur)
+    const existing = findNearbyNode(candidateNodes, x, y)
     if (existing) return existing.id
 
-    // If the point lies on the body of an existing wall, auto-split it so the
-    // new node is properly shared (fixes T-junction room-marking failures).
-    const { walls, nodes: currentNodes } = get()
-    for (const wall of Object.values(walls)) {
+    // Auto-split: walls owned by current floor only.
+    const { walls, nodes: currentNodes } = state
+    const splittableWalls = getActiveFloorWalls(state, cur)
+    for (const wall of Object.values(splittableWalls)) {
       const a = currentNodes[wall.n1], b = currentNodes[wall.n2]
       if (!a || !b) continue
       if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) continue
       if (Math.hypot(x - a.x, y - a.y) < SNAP_IN || Math.hypot(x - b.x, y - b.y) < SNAP_IN) continue
       const newNodeId = uid()
       const w1Id = uid(), w2Id = uid()
+      // Midpoint node inherits topology from the wall being split. Wall is
+      // single-floor today (wall.floorId), so the node's floorIds wraps it.
+      const newNodeFloorIds = [wall.floorId ?? cur]
       set(s => {
         const newWalls = { ...s.walls }
         delete newWalls[wall.id]
@@ -213,13 +272,16 @@ export const useStore = create((set, get) => ({
             : [...r.wallIds.slice(0, idx), w1Id, w2Id, ...r.wallIds.slice(idx + 1)]
           rooms[r.id] = { ...r, wallIds }
         })
-        return { nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, x, y } }, walls: newWalls, rooms }
+        return {
+          nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, x, y, floorIds: newNodeFloorIds } },
+          walls: newWalls, rooms,
+        }
       })
       return newNodeId
     }
 
     const id = uid()
-    set(s => ({ nodes: { ...s.nodes, [id]: { id, x, y } } }))
+    set(s => ({ nodes: { ...s.nodes, [id]: { id, x, y, floorIds: [cur] } } }))
     return id
   },
 
@@ -227,22 +289,32 @@ export const useStore = create((set, get) => ({
 
   addWall(n1, n2) {
     if (n1 === n2) return
-    const { nodes } = get()
+    const state = get()
+    const { nodes } = state
     const a = nodes[n1], b = nodes[n2]
     if (a && b && Math.hypot(b.x - a.x, b.y - a.y) < 1) return
-    const already = Object.values(get().walls).some(
+
+    // Floor-scoped dedup + collinear-overlap. Identical wall geometry on
+    // different floors is the expected case for multi-storey buildings —
+    // cross-floor walls share no topology and cannot be duplicates of
+    // each other. Plot polygon containment stays floor-agnostic (site
+    // boundary is single, not per-floor).
+    const cur = state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const sameFloorWalls = Object.values(getActiveFloorWalls(state, cur))
+    const already = sameFloorWalls.some(
       w => (w.n1 === n1 && w.n2 === n2) || (w.n1 === n2 && w.n2 === n1)
     )
     if (already) return
-    const { nodes: ns } = get()
+    const ns = nodes
     const na = ns[n1], nb = ns[n2]
-    const overlaps = Object.values(get().walls).some(w => {
+    const overlaps = sameFloorWalls.some(w => {
       const c = ns[w.n1], d = ns[w.n2]
       if (!c || !d) return false
       return collinearOverlap(na.x, na.y, nb.x, nb.y, c.x, c.y, d.x, d.y)
     })
     if (overlaps) return
-    const { walls: currentWalls, nodes: currentNodes } = get()
+
+    const { walls: currentWalls, nodes: currentNodes } = state
     const plotPoly = buildPlotPolygon(currentWalls, currentNodes)
     if (plotPoly) {
       const nodeA = currentNodes[n1], nodeB = currentNodes[n2]
@@ -251,7 +323,7 @@ export const useStore = create((set, get) => ({
     get()._save()
     const id = uid()
     const isVirtual = get().drawVirtual
-    const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
+    const floorId = cur
     set(s => ({
       walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null } },
       drawStartId: null,
@@ -298,25 +370,57 @@ export const useStore = create((set, get) => ({
 
   setDrawStart(nodeId) { set({ drawStartId: nodeId }) },
 
-  // x, y are world inches
-  splitWall(wallId, x, y) {
-    const { walls, nodes } = get()
+  // x, y are world inches.
+  //
+  // Floor-aware (Phase 1.7+): cross-floor splits are rejected unless the
+  // caller passes { force: true } (importers / clone tools). Rejections
+  // emit a validation event so the BOQ panel footer / verification surface
+  // them — no console.warn anywhere. The midpoint node inherits floorIds
+  // from the wall being split (wall.floorId wrapped in an array), so
+  // forced cross-floor splits still produce consistent topology.
+  splitWall(wallId, x, y, opts = {}) {
+    const state = get()
+    const { walls, nodes } = state
     const wall = walls[wallId]
     if (!wall) return null
+
+    const wallFloorId = wall.floorId ?? DEFAULT_FLOOR_ID
+    const cur = state.currentFloorId ?? DEFAULT_FLOOR_ID
+    if (wallFloorId !== cur && !opts.force) {
+      set(s => ({
+        validationEvents: [
+          ...(s.validationEvents ?? []),
+          {
+            ruleId:     'cross_floor_split_attempt',
+            severity:   'warning',
+            category:   'topology',
+            entityType: 'wall',
+            entityId:   wallId,
+            message:    'splitWall called on off-floor wall',
+          },
+        ].slice(-100),
+      }))
+      return null
+    }
+
     const a = nodes[wall.n1], b = nodes[wall.n2]
     if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) return null
     if (
       (Math.abs(x - a.x) < SNAP_IN && Math.abs(y - a.y) < SNAP_IN) ||
       (Math.abs(x - b.x) < SNAP_IN && Math.abs(y - b.y) < SNAP_IN)
     ) return null
+
     get()._save()
     const newNodeId = uid()
     const w1Id = uid(), w2Id = uid()
+    // Midpoint node inherits topology from the wall it splits. Wall is
+    // single-floor today; floorIds wraps that one floor.
+    const newNodeFloorIds = [wallFloorId]
     set(s => {
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
-      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wall.floorId ?? DEFAULT_FLOOR_ID, classification: wall.classification ?? null, meta: wall.meta ?? null }
-      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wall.floorId ?? DEFAULT_FLOOR_ID, classification: wall.classification ?? null, meta: wall.meta ?? null }
+      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
+      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
       const rooms = {}
       Object.values(s.rooms).forEach(r => {
         const idx = r.wallIds.indexOf(wallId)
@@ -325,7 +429,10 @@ export const useStore = create((set, get) => ({
           : [...r.wallIds.slice(0, idx), w1Id, w2Id, ...r.wallIds.slice(idx + 1)]
         rooms[r.id] = { ...r, wallIds }
       })
-      return { nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, x, y } }, walls: newWalls, rooms }
+      return {
+        nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, x, y, floorIds: newNodeFloorIds } },
+        walls: newWalls, rooms,
+      }
     })
     return newNodeId
   },
@@ -625,6 +732,21 @@ export const useStore = create((set, get) => ({
   },
 
   loadProject(data) {
+    // ── Normalize nodes: floor-aware topology requires every node to carry
+    // floorIds: string[] (length 1 today; future-proofed for vertical shafts
+    // / staircase cores / DXF-imported multi-floor anchors).
+    //
+    // Greenfield rule: no migration / no inference from referencing walls.
+    // Nodes lacking floorIds simply default to ['F1']. Saves from this
+    // version onward carry floorIds verbatim.
+    const migratedNodes = {}
+    for (const [id, node] of Object.entries(data.nodes || {})) {
+      const floorIds = Array.isArray(node.floorIds) && node.floorIds.length > 0
+        ? node.floorIds
+        : [DEFAULT_FLOOR_ID]
+      migratedNodes[id] = { ...node, floorIds }
+    }
+
     // Migrate rooms: add type/finishes if missing, validate type against known presets
     const migratedRooms = {}
     for (const [id, room] of Object.entries(data.rooms || {})) {
@@ -639,7 +761,7 @@ export const useStore = create((set, get) => ({
           : getPresetFinishes(safeType),             // v1/v2 rooms: use type preset (OTHER=ALL_FINISHES)
       }
     }
-    if (import.meta.env.DEV) {
+    if (import.meta.env?.DEV) {
       const loadedWalls = data.walls || {}
       const wallRoomCount = {}
       for (const room of Object.values(migratedRooms)) {
@@ -775,7 +897,7 @@ export const useStore = create((set, get) => ({
     )
 
     set({
-      nodes:  data.nodes  || {},
+      nodes:  migratedNodes,
       walls:  migratedWalls,
       rooms:  migratedRooms,
       stamps: migratedStamps,
@@ -980,7 +1102,7 @@ export const useStore = create((set, get) => ({
       for (let j = i + 1; j < polys.length; j++) {
         if (polys[i].floorId !== polys[j].floorId) continue
         if (doRoomsOverlap(polys[i].poly, polys[j].poly)) {
-          if (import.meta.env.DEV)
+          if (import.meta.env?.DEV)
             console.warn(`[topology] Rooms "${rooms[polys[i].id].name}" and "${rooms[polys[j].id].name}" overlap on floor ${polys[i].floorId} — both excluded.`)
           overlapExcluded.add(polys[i].id)
           overlapExcluded.add(polys[j].id)

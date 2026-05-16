@@ -21,8 +21,8 @@ Query Context7 before writing any code that uses:
 Training data for these versions is outdated.
 
 ## Verification Commands
-node scripts/verify-boq.mjs        # 59 single-floor checks (incl. per-instance BBS)
-node scripts/verify-multifloor.mjs # 15 multi-floor checks
+node scripts/verify-boq.mjs        # 77 single-floor checks (incl. per-instance BBS + node ownership)
+node scripts/verify-multifloor.mjs # 37 multi-floor checks (incl. floor-aware topology + splitWall guard)
 Both must pass green before any commit.
 
 ## Planned Features (do not implement yet)
@@ -179,6 +179,71 @@ F2 masonry < All, F1+F2 ≈ All; per-line `floorId` tagging is correct;
 `getColumnsOnFloor` / `getWallsOnFloor` / `getRoomsOnFloor` return correct
 counts. All 15 multi-floor assertions pass; `verify-boq.mjs` (single-floor)
 still 39/39 green.
+
+## Phase 1.7.2 — Floor-aware node ownership (2026-05-16)
+
+**Architectural principle (load-bearing).** *Topology is floor-scoped.
+Spatial alignment across floors does not imply shared ownership. Vertical
+relationships must be explicit, never inferred from shared node identity.*
+
+Two F2 corners at the same XY as two F1 corners are **distinct node
+entities** — not one shared geometric point. Vertical entities (columns
+spanning floors, staircases that connect floors, future shafts) carry
+their own multi-floor identifiers; nothing is inferred from spatial
+collision.
+
+**Node schema.** Every node carries `floorIds: string[]` — required,
+non-empty, length 1 today, future-proof for vertical shafts / staircase
+cores / DXF anchors that legitimately span floors.
+
+**Node creators (3 sites, all in `store.js`).**
+- `getOrCreateNode` fresh-node branch — stamps `floorIds: [currentFloorId]`.
+- `getOrCreateNode` auto-split midpoint — inherits `floorIds: [wall.floorId]`
+  from the wall being split.
+- `splitWall` midpoint — inherits `floorIds: [wall.floorId]` from the
+  wall, **not** `currentFloorId`. This matters for forced cross-floor
+  splits invoked by importers / clone tools (`{ force: true }`).
+
+**Snap scope.**
+- `getOrCreateNode` pre-filters via `getNodeIdsByFloor(currentFloorId)` —
+  `findNearbyNode` stays a pure geometry helper, never sees the floor.
+- `addWall` duplicate-wall + collinear-overlap checks filter via
+  `getWallIdsByFloor(currentFloorId)`. Identical wall geometry on two
+  floors is the expected case for multi-storey buildings — they're not
+  duplicates of each other.
+- Plot polygon containment check stays floor-agnostic (site boundary is
+  single, not per-floor).
+- Single-floor projects (`floors.length <= 1`) take a fast path that
+  returns the full nodes / walls maps — behavior byte-identical to
+  pre-Phase-1.7.2.
+
+**Floor-topology selectors (`structuralSlice.js`).**
+- `getNodeIdsByFloor(floorId) → Set<nodeId>` — `node.floorIds.includes(floorId)`.
+- `getWallIdsByFloor(floorId) → Set<wallId>` — `wall.floorId === floorId`.
+- `getEntitiesOnFloor(floorId)` extended to include `nodes: Node[]`.
+
+**`splitWall` defensive guard.** Cross-floor split attempts (called on a
+wall whose `floorId !== currentFloorId`) are rejected: function returns
+`null` and pushes an issue record to `state.validationEvents` with
+`ruleId: 'cross_floor_split_attempt'`, severity `warning`, category
+`topology`. The validation engine surfaces these alongside rule-emitted
+issues. Programmatic callers (DXF importer / clone tools) pass
+`{ force: true }` to bypass the guard — the midpoint node still inherits
+`floorIds` from the wall's topology, not from `currentFloorId`.
+
+**No `console.warn` / `console.log` anywhere in the action path.** Signal
+flows through `runValidation()` → `state.validationEvents`. Store keeps
+a 100-entry ring buffer.
+
+**`loadProject` normalization.** Nodes lacking `floorIds` or carrying
+empty `floorIds: []` get `['F1']` injected on load. Greenfield rule —
+no migration, no inference from referencing walls. Saves from this
+version onward carry `floorIds` verbatim.
+
+**Canvas rendering.** Node circles consult `state.getNodeIdsByFloor`
+to decide opacity + `pointerEvents`. Off-floor nodes render at 0.15
+opacity with events disabled. Single-floor projects render all nodes
+active.
 
 ## Phase 1.7.1 — Per-instance BBS + centralized resolution (2026-05-16)
 
@@ -724,6 +789,10 @@ under the cost total.
 - **Fix 3 — slab role.** A slab's structural role is `slab.role` / `slab.classification`. Derive via `inferSlabRole(state, floorId)` (`'ROOF' | 'FLOOR' | 'SUNKEN' | 'STAIR_LANDING'`). Never branch on `slab.type` for role logic — type is layout (MAIN/SUNKEN), role is structural.
 - **Selector discipline.** Phase 1.7+ code uses `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor / getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor / getEntitiesOnFloor` for floor scoping. No inline `.filter(e => e.floorId === ...)` in components or quantity functions.
 - **Foundation BOQ pipeline.** `computeFoundationQuantities(state)` is the per-type geometry source. `getFoundationQuantities()` keeps the inline `byColumnTypeInline` path for legacy columns with no foundation attached. `boq/lines.js`, `excavation.js`, `shuttering.js` all read from `computeFoundationQuantities`.
+- **Topology is floor-scoped.** Spatial alignment across floors does not imply shared ownership. Vertical relationships must be explicit, never inferred from shared node identity. Two corners at the same XY on different floors are TWO distinct node entities — not one shared geometric point. Vertical-spanning entities (multi-storey columns via `baseFloorId/topFloorId`, staircases via `fromFloorId/toFloorId`) carry their own explicit floor identifiers; nothing is inferred from spatial collision.
+- **Node ownership via `floorIds[]`.** Every node carries `floorIds: string[]` — required, non-empty, length 1 today, future-proof for vertical shafts and staircase cores. All three node creators in `store.js` (`getOrCreateNode` fresh + auto-split branches, `splitWall` midpoint) stamp `floorIds` at creation. Auto-split + `splitWall` midpoints INHERIT from the wall (`[wall.floorId]`), not from `currentFloorId` — this matters for programmatic `splitWall(..., { force: true })` calls across floors. Snap-during-draw uses `state.getNodeIdsByFloor(currentFloorId)`; cross-floor coordinate collisions create distinct nodes by design.
+- **Floor-scoped wall checks.** `addWall` runs duplicate + collinear-overlap checks only against `state.getWallIdsByFloor(currentFloorId)`. Identical wall geometry on two floors is the expected case for multi-storey buildings. The plot polygon stays floor-agnostic (site boundary is single).
+- **`splitWall` floor-defensive.** A `splitWall(wallId, x, y)` call where `wall.floorId !== currentFloorId` returns `null` and pushes a `cross_floor_split_attempt` warning into `state.validationEvents`. Programmatic callers (DXF / clone tools) bypass with `{ force: true }`. No `console.warn` anywhere — all signal flows through `runValidation()`.
 - **Steel BBS resolution — centralized only.** All reinforcement-spec fallback chains run through `src/specs/resolution.js`. UI panels, `quantities/bbs.js`, and `boq/lines.js` never branch on `entity.reinforcementSpecId`, `columnType.reinforcementSpecId`, or `projectSettings.bbsDefaults` directly — they call `resolveColumnReinforcementSpec` / `resolveBeamReinforcementSpec` / `resolveSlabReinforcementSpec` / `resolveFootingReinforcementSpec`. Each returns `{ spec, specId, specLabel, source }` with `source ∈ INSTANCE | TYPE | CLASS | PROJECT_DEFAULT | ESTIMATE`. Adding a new fallback tier = edit `resolution.js` only.
 - **Grouped-by-spec steel BOQ.** `boq/lines.js` emits one steel line per resolved spec group from `computeBBSQuantities().groupedBySpec[category]`, plus at most one `(Estimate, kg/m³)` line per category covering the un-BBS'd pool. Never one BBS line and one estimate line that double-count the same entities.
 - **Partial BBS coverage via excludeIds.** `getSteelQuantities(opts)` accepts `{ excludeColumnIds, excludeBeamIds, excludeSlabIds, excludeFoundationIds, excludeColumnTypeFootingIds }` (Sets or Arrays). `computeBBSQuantities(state).excludeIds` is the source — `boq/lines.js` passes the entire object through. Excluded entities contribute zero to the kg/m³ estimate for their category so BBS and estimate cleanly coexist.

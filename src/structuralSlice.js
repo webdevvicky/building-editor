@@ -1034,16 +1034,48 @@ export const createStructuralSlice = (set, get, uid) => ({
     )
   },
 
+  // Floor-aware topology selectors (Phase 1.7+ multi-floor).
+  //
+  // Nodes are floor-owned via node.floorIds[] (length 1 today, future-proof
+  // for vertical shafts / staircase cores). Walls are floor-owned via
+  // wall.floorId. These Set-returning selectors are the canonical way to
+  // ask "which node/wall ids belong to floor X" and are used by mutating
+  // actions (getOrCreateNode, addWall) to scope geometric operations.
+  getNodeIdsByFloor: (floorId) => {
+    const { nodes } = get()
+    const out = new Set()
+    for (const [id, node] of Object.entries(nodes)) {
+      const ids = node.floorIds ?? ['F1']
+      if (ids.includes(floorId)) out.add(id)
+    }
+    return out
+  },
+
+  getWallIdsByFloor: (floorId) => {
+    const { walls } = get()
+    const out = new Set()
+    for (const [id, w] of Object.entries(walls)) {
+      if ((w.floorId ?? 'F1') === floorId) out.add(id)
+    }
+    return out
+  },
+
   // Convenience aggregate — every entity visible on a given floor.
-  getEntitiesOnFloor: (floorId) => ({
-    walls:      get().getWallsOnFloor(floorId),
-    rooms:      get().getRoomsOnFloor(floorId),
-    stamps:     get().getStampsOnFloor(floorId),
-    columns:    get().getColumnsOnFloor(floorId),
-    beams:      get().getBeamsOnFloor(floorId),
-    slabs:      get().getSlabsOnFloor(floorId),
-    staircases: get().getStaircasesOnFloor(floorId),
-  }),
+  // `nodes` is Node[] (entity records), parallel to walls/rooms/stamps shape.
+  getEntitiesOnFloor: (floorId) => {
+    const { nodes } = get()
+    const nodeIds   = get().getNodeIdsByFloor(floorId)
+    return {
+      nodes:      [...nodeIds].map(id => nodes[id]).filter(Boolean),
+      walls:      get().getWallsOnFloor(floorId),
+      rooms:      get().getRoomsOnFloor(floorId),
+      stamps:     get().getStampsOnFloor(floorId),
+      columns:    get().getColumnsOnFloor(floorId),
+      beams:      get().getBeamsOnFloor(floorId),
+      slabs:      get().getSlabsOnFloor(floorId),
+      staircases: get().getStaircasesOnFloor(floorId),
+    }
+  },
 
   // Returns { byFoundation, byColumnTypeInline } — combined foundation view.
   //

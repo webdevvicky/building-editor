@@ -560,6 +560,45 @@ check('Foundation entities have non-zero RCC in perFoundation (for section gatin
 s().deleteFoundation(pileId)
 s().deleteFoundation(isoId)
 
+// ── Floor-aware node ownership — single-floor invariants ────────────────────
+header('7. Node ownership invariants (single-floor)')
+
+// Single-floor project: every node carries floorIds=['F1'].
+const sfNodes = Object.values(s().nodes)
+check('Single-floor: every node has floorIds=["F1"]',
+      sfNodes.every(n => Array.isArray(n.floorIds) && n.floorIds.length === 1 && n.floorIds[0] === 'F1'),
+      `${sfNodes.length} nodes`)
+
+// getOrCreateNode snaps to existing nearby nodes (no regression in single-floor projects).
+const beforeCount = sfNodes.length
+const snappedId = s().getOrCreateNode(0, 0)  // exactly on lvSW from the test setup
+check('Single-floor: getOrCreateNode snaps to existing node (no new node created)',
+      snappedId === lvSW && Object.keys(s().nodes).length === beforeCount,
+      `snappedId=${snappedId}, expected=${lvSW}`)
+
+// Freshly-created node carries floorIds.
+const freshId = s().getOrCreateNode(500 * FT, 500 * FT)
+check('Single-floor: freshly-created node has floorIds=["F1"]',
+      s().nodes[freshId]?.floorIds?.[0] === 'F1' &&
+      s().nodes[freshId]?.floorIds?.length === 1)
+
+// loadProject normalization: load a project where some nodes lack floorIds.
+const cleanSnapshot = {
+  nodes: {
+    'legacy-1': { id: 'legacy-1', x: 0,   y: 0   },           // no floorIds
+    'legacy-2': { id: 'legacy-2', x: 120, y: 0,   floorIds: ['F1'] }, // already has
+    'legacy-3': { id: 'legacy-3', x: 120, y: 120, floorIds: [] },    // empty array
+  },
+  walls: {}, rooms: {}, stamps: {},
+}
+s().loadProject(cleanSnapshot)
+check('loadProject normalization: nodes lacking floorIds get ["F1"]',
+      s().nodes['legacy-1']?.floorIds?.[0] === 'F1' && s().nodes['legacy-1']?.floorIds?.length === 1)
+check('loadProject normalization: nodes with empty floorIds get ["F1"]',
+      s().nodes['legacy-3']?.floorIds?.[0] === 'F1' && s().nodes['legacy-3']?.floorIds?.length === 1)
+check('loadProject normalization: nodes already carrying floorIds are preserved',
+      s().nodes['legacy-2']?.floorIds?.[0] === 'F1' && s().nodes['legacy-2']?.floorIds?.length === 1)
+
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)
 if (failed.length > 0) {
