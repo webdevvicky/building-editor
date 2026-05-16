@@ -6,7 +6,7 @@ import {
 } from './geometry'
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
-import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS } from './structuralSlice'
+import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS, DEFAULT_FLOOR_ID, DEFAULT_FLOORS } from './structuralSlice'
 import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
 
 const uid = () => crypto.randomUUID()
@@ -107,6 +107,10 @@ export const useStore = create((set, get) => ({
   showDimensions: false,
   layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
 
+  // UI state for floor switcher (Phase 1.9 UI). Stage 0 stays on F1.
+  // Excluded from history snapshots — switching floors is a view operation.
+  currentFloorId: DEFAULT_FLOOR_ID,
+
   // ── History ───────────────────────────────────────────────────────────
 
   _save() {
@@ -168,6 +172,7 @@ export const useStore = create((set, get) => ({
   toggleShowDimensions() { set(s => ({ showDimensions: !s.showDimensions })) },
   setDraftOpening(data)  { set({ draftOpening: data }) },
   setLayerVisibility(partial) { set(s => ({ layerVisibility: { ...s.layerVisibility, ...partial } })) },
+  setCurrentFloorId(id)  { set({ currentFloorId: id }) },
 
   // ── Nodes ─────────────────────────────────────────────────────────────
 
@@ -237,8 +242,9 @@ export const useStore = create((set, get) => ({
     get()._save()
     const id = uid()
     const isVirtual = get().drawVirtual
+    const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
     set(s => ({
-      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null } },
+      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null } },
       drawStartId: null,
     }))
   },
@@ -300,8 +306,8 @@ export const useStore = create((set, get) => ({
     set(s => {
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
-      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
-      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
+      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wall.floorId ?? DEFAULT_FLOOR_ID, classification: wall.classification ?? null, meta: wall.meta ?? null }
+      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wall.floorId ?? DEFAULT_FLOOR_ID, classification: wall.classification ?? null, meta: wall.meta ?? null }
       const rooms = {}
       Object.values(s.rooms).forEach(r => {
         const idx = r.wallIds.indexOf(wallId)
@@ -412,6 +418,7 @@ export const useStore = create((set, get) => ({
   addStamp(type, x, y) {
     get()._save()
     const id = uid()
+    const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
     // w, h = footprint dimensions (plan view, inches)
     // depth = vertical depth (civil stamps only — undefined for stairs/lift)
     const defaults = {
@@ -423,13 +430,25 @@ export const useStore = create((set, get) => ({
     }[type] || { w: 48, h: 48 }
     set(s => {
       const nextState = {
-        stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults } },
+        stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults, floorId, meta: null } },
       }
       if (type === 'stairs') {
         const sd = s.projectSettings?.staircaseDefaults ?? DEFAULT_PROJECT_SETTINGS.staircaseDefaults
         nextState.staircases = {
           ...s.staircases,
-          [id]: { id, type: sd.type, flightCount: 2, stepsPerFlight: 7, treadIn: sd.treadIn, riserIn: sd.riserIn, waistSlabIn: sd.waistSlabIn, landingFtWidth: sd.landingFtWidth, landingFtLength: sd.landingFtLength, flightWidthFt: sd.flightWidthFt, grade: 'M20' },
+          [id]: {
+            id,
+            type: sd.type,
+            flightCount: 2, stepsPerFlight: 7,
+            treadIn: sd.treadIn, riserIn: sd.riserIn, waistSlabIn: sd.waistSlabIn,
+            landingFtWidth: sd.landingFtWidth, landingFtLength: sd.landingFtLength,
+            flightWidthFt: sd.flightWidthFt,
+            grade: 'M20',
+            floorId,              // floor the staircase sits ON (single-floor today)
+            fromFloorId: floorId, // Phase 1.9 will set this to floor below
+            toFloorId: floorId,   // Phase 1.9 will set this to floor above
+            meta: null,
+          },
         }
       }
       return nextState
@@ -509,6 +528,7 @@ export const useStore = create((set, get) => ({
     get()._save()
     const id       = uid()
     const safeType = ROOM_PRESETS[type] ? type : 'OTHER'
+    const floorId  = get().currentFloorId ?? DEFAULT_FLOOR_ID
     set(s => ({
       rooms: {
         ...s.rooms,
@@ -520,6 +540,9 @@ export const useStore = create((set, get) => ({
           customType:       null,
           finishes:         getPresetFinishes(safeType),
           plasterSystemId:  null,   // null = use projectSettings.defaultPlasterSystemId
+          floorId,
+          classification:   null,
+          meta:             null,
         },
       },
       pendingWallIds: [],
@@ -636,10 +659,24 @@ export const useStore = create((set, get) => ({
       }
     }
 
-    // ── Migrate walls: inject materialKey default for saves without it ──
+    // ── Migrate walls: inject materialKey + floor/classification/meta defaults ──
     const migratedWalls = {}
     for (const [id, wall] of Object.entries(data.walls || {})) {
-      migratedWalls[id] = { materialKey: 'IS_MODULAR_BRICK', ...wall }
+      migratedWalls[id] = {
+        materialKey:    'IS_MODULAR_BRICK',
+        floorId:        DEFAULT_FLOOR_ID,
+        classification: null,
+        meta:           null,
+        ...wall,
+      }
+    }
+
+    // Rooms already migrated above; add floor/classification/meta where missing.
+    for (const id of Object.keys(migratedRooms)) {
+      const r = migratedRooms[id]
+      if (r.floorId === undefined)        r.floorId        = DEFAULT_FLOOR_ID
+      if (r.classification === undefined) r.classification = null
+      if (r.meta === undefined)           r.meta           = null
     }
 
     // ── Migrate stamps (v1/v2/v3 → v4): inject depth/name defaults for civil types ──
@@ -651,16 +688,68 @@ export const useStore = create((set, get) => ({
     const migratedStamps = {}
     for (const [id, stamp] of Object.entries(data.stamps || {})) {
       const civilDefaults = CIVIL_STAMP_DEFAULTS[stamp.type]
+      const base = { floorId: DEFAULT_FLOOR_ID, meta: null }
       migratedStamps[id] = civilDefaults
-        ? { ...civilDefaults, ...stamp }   // defaults first so saved values win
-        : { ...stamp }
+        ? { ...base, ...civilDefaults, ...stamp }
+        : { ...base, ...stamp }
     }
+
+    // ── Migrate columns: inject floor/classification/meta ──
+    const migratedColumns = Object.fromEntries(
+      Object.entries(data.columns ?? {}).map(([id, col]) => [id, {
+        foundationId:   null,
+        floorId:        DEFAULT_FLOOR_ID,
+        classification: null,
+        meta:           null,
+        ...col,
+      }])
+    )
+
+    // ── Migrate beams: inject floor + meta ──
+    const migratedBeams = Object.fromEntries(
+      Object.entries(data.beams ?? {}).map(([id, beam]) => [id, {
+        floorId: DEFAULT_FLOOR_ID,
+        meta:    null,
+        ...beam,
+      }])
+    )
+
+    // ── Migrate slabs: inject floor + meta ──
+    const migratedSlabs = Object.fromEntries(
+      Object.entries(data.slabs ?? {}).map(([id, slab]) => [id, {
+        floorId: DEFAULT_FLOOR_ID,
+        meta:    null,
+        ...slab,
+      }])
+    )
+
+    // ── Migrate staircases: inject floor/fromFloor/toFloor + meta ──
+    const migratedStaircases = Object.fromEntries(
+      Object.entries(data.staircases ?? {}).map(([id, sc]) => [id, {
+        floorId:     DEFAULT_FLOOR_ID,
+        fromFloorId: DEFAULT_FLOOR_ID,
+        toFloorId:   DEFAULT_FLOOR_ID,
+        meta:        null,
+        ...sc,
+      }])
+    )
+
+    // ── Migrate foundations: inject classification + meta + ensure floor ──
+    const migratedFoundations = Object.fromEntries(
+      Object.entries(data.foundations ?? {}).map(([id, f]) => [id, {
+        floorId:        DEFAULT_FLOOR_ID,
+        classification: null,
+        meta:           null,
+        ...f,
+      }])
+    )
 
     set({
       nodes:  data.nodes  || {},
       walls:  migratedWalls,
       rooms:  migratedRooms,
       stamps: migratedStamps,
+      currentFloorId: DEFAULT_FLOOR_ID,
       // Structural state — migrate then load.
       projectSettings: (() => {
         const ps = data.projectSettings ?? DEFAULT_PROJECT_SETTINGS
@@ -680,16 +769,20 @@ export const useStore = create((set, get) => ({
         const rccSpecs = psRest.rccSpecs ?? DEFAULT_PROJECT_SETTINGS.rccSpecs
         // Stage 0 T2 migration: inject defaultPlasterSystemId for saves without it.
         const defaultPlasterSystemId = psRest.defaultPlasterSystemId ?? DEFAULT_PROJECT_SETTINGS.defaultPlasterSystemId
-        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs, defaultPlasterSystemId }
+        // Stage 0 T1 migration: synthesize floors[] from legacy heights if absent.
+        const floors = psRest.floors ?? [
+          { id: DEFAULT_FLOOR_ID, label: 'Floor 1', sequence: 0,
+            plinthHeightFt: psRest.heights?.plinthHeightFt ?? 1.5,
+            floorHeightFt:  psRest.heights?.floorHeightFt  ?? 10,
+            meta: null },
+        ]
+        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs, defaultPlasterSystemId, floors }
       })(),
-      // Columns: ensure foundationId field exists on legacy saves.
-      columns: Object.fromEntries(
-        Object.entries(data.columns ?? {}).map(([id, col]) => [id, { foundationId: null, ...col }])
-      ),
-      beams:       data.beams       ?? {},
-      slabs:       data.slabs       ?? {},
-      staircases:  data.staircases  ?? {},
-      foundations: data.foundations ?? {},
+      columns:     migratedColumns,
+      beams:       migratedBeams,
+      slabs:       migratedSlabs,
+      staircases:  migratedStaircases,
+      foundations: migratedFoundations,
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, pendingWallIds: [],
     })

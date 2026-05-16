@@ -36,14 +36,23 @@ export const DEFAULT_COLUMN_TYPES = [
   { id: 'C4', label: 'Circular Φ12',  diamIn: 12,              shape: 'circle', footingLengthFt: 4, footingWidthFt: 4, footingDepthFt: 1    },
 ]
 
+export const DEFAULT_FLOOR_ID = 'F1'
+
+export const DEFAULT_FLOORS = [
+  { id: DEFAULT_FLOOR_ID, label: 'Floor 1', sequence: 0, plinthHeightFt: 1.5, floorHeightFt: 10, meta: null },
+]
+
 export const DEFAULT_PROJECT_SETTINGS = {
   mortarRatio: '1:6',
   wastagePercent: 5,
   plasterThicknessMm: { internal: 12, ceiling: 10, external: 15 },  // legacy; superseded by defaultPlasterSystemId
   defaultPlasterSystemId: DEFAULT_PLASTER_SYSTEM_ID,
 
-  // Explicit floor heights — column height = plinthHeightFt + floorHeightFt + slabThicknessIn/12
-  // TODO Phase 2: Multi-floor support will multiply this per floor count.
+  // Floor list — multi-floor expansion lives in floors[]. Phase 1.9 adds the
+  // floor switcher UI. heights{} below is retained as the legacy single-floor
+  // shortcut and now mirrors floors[0]'s values; new code should iterate floors[].
+  floors: DEFAULT_FLOORS,
+
   heights: {
     plinthHeightFt: 1.5,
     floorHeightFt: 10,
@@ -208,10 +217,49 @@ export const createStructuralSlice = (set, get, uid) => ({
     },
   })),
 
-  setHeights: (partial) => set(state => ({
+  setHeights: (partial) => set(state => {
+    const nextHeights = { ...state.projectSettings.heights, ...partial }
+    // Keep floors[0] in sync with the legacy heights shortcut.
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map((f, i) =>
+      i === 0 ? { ...f, ...partial } : f
+    )
+    return {
+      projectSettings: { ...state.projectSettings, heights: nextHeights, floors },
+    }
+  }),
+
+  // ── Floor actions ─────────────────────────────────────────────────────────
+  // Multi-floor UI lives in Phase 1.9; Stage 0 wires the data plumbing.
+
+  addFloor: (fields = {}) => {
+    const id = uid()
+    set(state => {
+      const existing = state.projectSettings.floors ?? DEFAULT_FLOORS
+      const sequence = existing.length
+      return {
+        projectSettings: {
+          ...state.projectSettings,
+          floors: [
+            ...existing,
+            { id, label: `Floor ${sequence + 1}`, sequence, plinthHeightFt: 0, floorHeightFt: 10, meta: null, ...fields },
+          ],
+        },
+      }
+    })
+    return id
+  },
+
+  removeFloor: (id) => set(state => ({
     projectSettings: {
       ...state.projectSettings,
-      heights: { ...state.projectSettings.heights, ...partial },
+      floors: (state.projectSettings.floors ?? DEFAULT_FLOORS).filter(f => f.id !== id),
+    },
+  })),
+
+  updateFloor: (id, partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      floors: (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f => f.id === id ? { ...f, ...partial } : f),
     },
   })),
 
@@ -232,9 +280,13 @@ export const createStructuralSlice = (set, get, uid) => ({
 
   addColumn: (x, y, columnTypeId, attachedNodeId = null) => {
     const id = uid()
+    const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
     get()._save()
     set(state => ({
-      columns: { ...state.columns, [id]: { id, x, y, columnTypeId, attachedNodeId, foundationId: null } },
+      columns: {
+        ...state.columns,
+        [id]: { id, x, y, columnTypeId, attachedNodeId, foundationId: null, floorId, classification: null, meta: null },
+      },
     }))
     return id
   },
@@ -318,8 +370,9 @@ export const createStructuralSlice = (set, get, uid) => ({
           grade: 'M20',
           pccDepthFt: PCC_BEDDING_THICKNESS_FT,
           plumDepthFt: 0,
-          floorId: 'F1',
+          floorId: DEFAULT_FLOOR_ID,   // foundations live below all floors; field present for symmetry
           label: null,
+          classification: null,
           meta: null,
           ...fields,
         },
@@ -398,10 +451,15 @@ export const createStructuralSlice = (set, get, uid) => ({
 
   addBeam: (fromColumnId, toColumnId, level) => {
     const id = uid()
-    get()._save()
-    set(state => ({
+    const state = get()
+    // Beam floor = endpoint column's floor (they must match — UI should enforce this; here we trust).
+    const floorId = state.columns[fromColumnId]?.floorId
+      ?? state.columns[toColumnId]?.floorId
+      ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    state._save()
+    set(s => ({
       beams: {
-        ...state.beams,
+        ...s.beams,
         [id]: {
           id,
           endpoints: {
@@ -410,6 +468,8 @@ export const createStructuralSlice = (set, get, uid) => ({
           },
           level,
           source: 'EXPLICIT',
+          floorId,
+          meta: null,
         },
       },
     }))
@@ -429,11 +489,12 @@ export const createStructuralSlice = (set, get, uid) => ({
 
   addSlab: (type, roomIds, thicknessIn, sinkDepthIn = 0) => {
     const id = uid()
+    const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
     get()._save()
     set(state => ({
       slabs: {
         ...state.slabs,
-        [id]: { id, type, roomIds: [...roomIds], thicknessIn, sinkDepthIn, grade: 'M20' },
+        [id]: { id, type, roomIds: [...roomIds], thicknessIn, sinkDepthIn, grade: 'M20', floorId, meta: null },
       },
     }))
     return id
@@ -480,6 +541,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     if (validIds.length === 0) return
 
     const { mainThicknessIn, sunkenDepthIn, autoSunkenRoomTypes } = state.projectSettings.slabSettings
+    const floorId = state.currentFloorId ?? DEFAULT_FLOOR_ID
 
     const sunkenRoomIds = validIds.filter(id => {
       const room = state.rooms[id]
@@ -491,12 +553,12 @@ export const createStructuralSlice = (set, get, uid) => ({
 
     if (mainRoomIds.length > 0) {
       const mainId = uid()
-      newSlabs[mainId] = { id: mainId, type: 'MAIN', roomIds: mainRoomIds, thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20' }
+      newSlabs[mainId] = { id: mainId, type: 'MAIN', roomIds: mainRoomIds, thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20', floorId, meta: null }
     }
 
     for (const roomId of sunkenRoomIds) {
       const sunkenId = uid()
-      newSlabs[sunkenId] = { id: sunkenId, type: 'SUNKEN', roomIds: [roomId], thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20' }
+      newSlabs[sunkenId] = { id: sunkenId, type: 'SUNKEN', roomIds: [roomId], thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20', floorId, meta: null }
     }
 
     set({ slabs: newSlabs })
