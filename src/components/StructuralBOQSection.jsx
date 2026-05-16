@@ -6,6 +6,8 @@ import {
   explainStaircaseRCC, explainSteelByElement, explainConcreteGrade,
 } from '../formulas'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import { computeBBSQuantities } from '../quantities/bbs'
+import { humanizeAssignmentSource } from '../specs/resolution'
 
 const COL = '1fr 68px 88px 70px'
 const GAP = 3
@@ -59,13 +61,15 @@ function SectionHeader({ title }) {
   )
 }
 
+// `bbsKey` matches `computeBBSQuantities().groupedBySpec[bbsKey]`. null = no BBS pipeline
+// for this category (staircase + civil always run on kg/m³).
 const STEEL_DEFS = [
-  { key: 'footing',    label: 'Footings',   rk: 'steel_footing',   et: 'FOOTING' },
-  { key: 'column',     label: 'Columns',    rk: 'steel_column',    et: 'COLUMN' },
-  { key: 'beam',       label: 'Beams',      rk: 'steel_beam',      et: 'BEAM' },
-  { key: 'slab',       label: 'Slabs',      rk: 'steel_slab',      et: 'SLAB' },
-  { key: 'staircase',  label: 'Staircases', rk: 'steel_staircase', et: 'STAIRCASE' },
-  { key: 'civilStamp', label: 'Civil',      rk: 'steel_civil',     et: 'CIVIL_STAMP' },
+  { key: 'footing',    label: 'Footings',   rk: 'steel_footing',   et: 'FOOTING',    bbsKey: 'footing' },
+  { key: 'column',     label: 'Columns',    rk: 'steel_column',    et: 'COLUMN',     bbsKey: 'column'  },
+  { key: 'beam',       label: 'Beams',      rk: 'steel_beam',      et: 'BEAM',       bbsKey: 'beam'    },
+  { key: 'slab',       label: 'Slabs',      rk: 'steel_slab',      et: 'SLAB',       bbsKey: 'slab'    },
+  { key: 'staircase',  label: 'Staircases', rk: 'steel_staircase', et: 'STAIRCASE',  bbsKey: null      },
+  { key: 'civilStamp', label: 'Civil',      rk: 'steel_civil',     et: 'CIVIL_STAMP', bbsKey: null     },
 ]
 
 export default function StructuralBOQSection({ rates, onRateChange, openId, onInfoClick, onLinesReady, formulaState }) {
@@ -80,6 +84,18 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
   const getParapetQuantities   = useStore(s => s.getParapetQuantities)
   const getSteelQuantities     = useStore(s => s.getSteelQuantities)
   const getConcreteByGrade     = useStore(s => s.getConcreteByGrade)
+  // Subscribe to spec catalog + per-class defaults so BBS resolution re-renders
+  // when the user edits a spec or changes a default. Without these, the
+  // grouped-by-spec rows below would be stale.
+  const reinforcementSpecs = useStore(s => s.projectSettings?.reinforcementSpecs)
+  const bbsDefaults        = useStore(s => s.projectSettings?.bbsDefaults)
+  // Also subscribe to entity maps that carry per-instance reinforcementSpecId.
+  const subColumns     = useStore(s => s.columns)
+  const subBeams       = useStore(s => s.beams)
+  const subSlabs       = useStore(s => s.slabs)
+  const subFoundations = useStore(s => s.foundations)
+  void reinforcementSpecs; void bbsDefaults
+  void subColumns; void subBeams; void subSlabs; void subFoundations
 
   const colQtys      = getColumnQuantities()
   const fotQtys      = getFootingQuantities()
@@ -88,15 +104,34 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
   const staircases   = getStaircaseQuantities()
   const sunshadeQ    = getSunshadeQuantities()
   const parapetQ     = getParapetQuantities()
-  const steelQtys    = getSteelQuantities()
   const conc         = getConcreteByGrade()
 
+  // Phase 1.7+ — BBS pipeline. Per-instance resolution lives in
+  // src/specs/resolution.js; this component never inspects spec ids directly.
+  // Excluded ids are fed to getSteelQuantities so the residual kg/m³
+  // estimate only covers entities NOT already represented by a BBS row.
+  const bbs = computeBBSQuantities(useStore.getState())
+  const steelQtys = getSteelQuantities({
+    excludeColumnIds:            bbs.excludeIds.columns,
+    excludeBeamIds:              bbs.excludeIds.beams,
+    excludeSlabIds:              bbs.excludeIds.slabs,
+    excludeFoundationIds:        bbs.excludeIds.foundations,
+    excludeColumnTypeFootingIds: bbs.excludeIds.columnTypeFootings,
+  })
+
   const totalStairRcc = staircases.reduce((s, sc) => s + sc.totalRccFt3, 0)
+
+  // BBS-covered kg + residual estimate kg = visible category total.
+  const steelCategoryTotal = (key) => (bbs.bbsCoveredKg[key] ?? 0) + (steelQtys[key] ?? 0)
+  const totalSteelKg =
+    steelCategoryTotal('footing') + steelCategoryTotal('column') +
+    steelCategoryTotal('beam') + steelCategoryTotal('slab') +
+    (steelQtys.staircase ?? 0) + (steelQtys.civilStamp ?? 0)
 
   const hasRCC = Object.keys(colQtys).length > 0 || Object.keys(fotQtys).length > 0 ||
     BEAM_LEVEL_REGISTRY.some(l => beamQtys[l.id]) || slabQ.mainVolFt3 > 0 ||
     (sunshadeQ?.count > 0) || (parapetQ?.totalLenFt > 0)
-  const hasSteel = (steelQtys?.total ?? 0) > 0
+  const hasSteel = totalSteelKg > 0
   const hasConcrete = (conc.M7_5?.volM3 > 0) || (conc.M20?.volM3 > 0)
   const hasStaircase = staircases.length > 0
 
@@ -121,9 +156,21 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
     if (sunshadeQ?.count > 0)    add(`Sunshades ×${sunshadeQ.count}`, r2(sunshadeQ.totalVolFt3), 'ft³', 'sunshade_rcc')
     if (parapetQ?.totalLenFt > 0) add('Parapet', r2(parapetQ.totalVolFt3), 'ft³', 'parapet_rcc')
 
-    for (const { key, label, rk } of STEEL_DEFS) {
-      const kg = steelQtys?.[key] ?? 0
-      if (kg > 0) add(`Steel – ${label}`, r2(kg), 'kg', rk)
+    // Phase 1.7+ — emit one row per resolved-spec group (BBS) + at most one
+    // residual estimate row per category. Mirrors boq/lines.js so on-screen
+    // and canonical line lists stay in lockstep.
+    for (const { key, label, rk, bbsKey } of STEEL_DEFS) {
+      if (bbsKey) {
+        for (const grp of (bbs.groupedBySpec[bbsKey] ?? [])) {
+          if (grp.totalKg <= 0) continue
+          add(
+            `Steel – ${label} — ${grp.specLabel} (${humanizeAssignmentSource(grp.source)})`,
+            r2(grp.totalKg), 'kg', rk
+          )
+        }
+      }
+      const estKg = steelQtys?.[key] ?? 0
+      if (estKg > 0) add(`Steel – ${label} (Estimate, kg/m³)`, r2(estKg), 'kg', rk)
     }
 
     if (conc.M7_5?.volM3 > 0) {
@@ -150,8 +197,11 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
   })
 
   const sh = { rates, onRateChange, openId, onInfoClick }
+  // React `key` uses infoId when provided — required because Phase 1.7+ steel
+  // rows share the same rateKey across multiple grouped-by-spec rows in one
+  // category, so rateKey alone is not unique.
   const row = (label, qty, unit, rk, infoId) => (
-    <PricedSubRow key={rk} label={label} qtyDisplay={`${qty} ${unit}`} unitLabel={`₹/${unit}`}
+    <PricedSubRow key={infoId ?? rk} label={label} qtyDisplay={`${qty} ${unit}`} unitLabel={`₹/${unit}`}
       rateKey={rk} cost={calcCost(qty, rates[rk])} infoId={infoId ?? rk} {...sh} />
   )
 
@@ -181,13 +231,33 @@ export default function StructuralBOQSection({ rates, onRateChange, openId, onIn
       {hasSteel && (
         <div style={{ marginBottom: 12 }}>
           <SectionHeader title="Structural Steel" />
-          {STEEL_DEFS.map(({ key, label, rk, et }) => {
-            const kg = steelQtys[key] ?? 0
-            return kg > 0 ? row(label, r2(kg), 'kg', rk, `steel_${et}`) : null
+          {STEEL_DEFS.flatMap(({ key, label, rk, et, bbsKey }) => {
+            const rows = []
+            // One row per resolved-spec group. Same rateKey across all rows
+            // in a category so the user only enters one rate per element type.
+            if (bbsKey) {
+              for (const grp of (bbs.groupedBySpec[bbsKey] ?? [])) {
+                if (grp.totalKg <= 0) continue
+                rows.push(row(
+                  `${label} — ${grp.specLabel} (${humanizeAssignmentSource(grp.source)})`,
+                  r2(grp.totalKg), 'kg', rk,
+                  `steel_${et}_spec_${grp.specId}`,
+                ))
+              }
+            }
+            const estKg = steelQtys[key] ?? 0
+            if (estKg > 0) {
+              rows.push(row(
+                `${label} (Estimate, kg/m³)`,
+                r2(estKg), 'kg', rk,
+                `steel_${et}`,
+              ))
+            }
+            return rows
           })}
           <div style={{ display: 'grid', gridTemplateColumns: COL, gap: GAP, marginBottom: 4, paddingLeft: 10, alignItems: 'center' }}>
             <span style={{ color: '#888', fontSize: 11 }}>Total steel</span>
-            <span style={{ fontWeight: 500, textAlign: 'right', fontSize: 11 }}>{r2(steelQtys.total)} kg</span>
+            <span style={{ fontWeight: 500, textAlign: 'right', fontSize: 11 }}>{r2(totalSteelKg)} kg</span>
             <span /><span />
           </div>
         </div>
