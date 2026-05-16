@@ -124,6 +124,7 @@ export default function Canvas() {
   const selectedColumnId = useStore(s => s.selectedColumnId)
   const projectSettings  = useStore(s => s.projectSettings)
   const currentFloorId   = useStore(s => s.currentFloorId)
+  const getColumnsOnFloor = useStore(s => s.getColumnsOnFloor)
   const getAllBeams       = useStore(s => s.getAllBeams)
   const addColumn    = useStore(s => s.addColumn)
   const deleteColumn = useStore(s => s.deleteColumn)
@@ -380,6 +381,21 @@ export default function Canvas() {
   const wallHitCursor = ['select', 'split', 'room'].includes(activeTool) ? 'pointer' : 'default'
   const zoomPct       = Math.round(zoom * 100)
 
+  // Phase 1.9 — per-floor visibility. Single-floor projects auto-match (everything tagged 'F1').
+  // Multi-floor: entities on the current floor render full opacity; others render as ghost
+  // (opacity 0.15, no pointer events) so the user retains spatial context.
+  const floorsList     = projectSettings?.floors ?? []
+  const multiFloor     = floorsList.length > 1
+  const floorOf        = (e) => e?.floorId ?? 'F1'
+  const ghostStyle     = { opacity: 0.15, pointerEvents: 'none' }
+  const activeStyle    = { opacity: 1 }
+  const entityStyle    = (entity) => !multiFloor || floorOf(entity) === currentFloorId ? activeStyle : ghostStyle
+  // Column visibility honours span [baseFloorId, topFloorId].
+  const columnIdsOnCurrentFloor = new Set(
+    multiFloor ? getColumnsOnFloor(currentFloorId).map(c => c.id) : Object.keys(columns)
+  )
+  const columnStyle = (col) => !multiFloor || columnIdsOnCurrentFloor.has(col.id) ? activeStyle : ghostStyle
+
   return (
     <>
     {/* Beam level picker overlay */}
@@ -494,10 +510,11 @@ export default function Canvas() {
         {layerVisibility.roomFills && (<>
         {/* Room fills */}
         {Object.values(rooms).map((room, idx) => {
+          const fStyle = entityStyle(room)
           if (!isRoomValid(room.id)) {
             // Draw dashed red segments for each wall that still exists — broken outline shows corrupt state
             return (
-              <g key={room.id}>
+              <g key={room.id} style={fStyle}>
                 {room.wallIds.map(wid => {
                   const w = walls[wid]; if (!w) return null
                   const a = nodes[w.n1], b = nodes[w.n2]; if (!a || !b) return null
@@ -515,13 +532,15 @@ export default function Canvas() {
           const color = ROOM_COLORS[idx % ROOM_COLORS.length]
           const isSel = room.id === selectedRoomId
           return (
-            <polygon key={room.id} points={pts}
-              fill={color} fillOpacity={isSel ? 0.25 : 0.12}
-              stroke={color} strokeOpacity={isSel ? 0.8 : 0.3}
-              strokeWidth={isSel ? 2 : 1}
-              style={{ cursor: activeTool === 'select' ? 'pointer' : 'default' }}
-              onClick={activeTool === 'select' ? e => { e.stopPropagation(); selectRoom(room.id) } : undefined}
-            />
+            <g key={room.id} style={fStyle}>
+              <polygon points={pts}
+                fill={color} fillOpacity={isSel ? 0.25 : 0.12}
+                stroke={color} strokeOpacity={isSel ? 0.8 : 0.3}
+                strokeWidth={isSel ? 2 : 1}
+                style={{ cursor: activeTool === 'select' ? 'pointer' : 'default' }}
+                onClick={activeTool === 'select' ? e => { e.stopPropagation(); selectRoom(room.id) } : undefined}
+              />
+            </g>
           )
         })}
         </>)}
@@ -539,11 +558,16 @@ export default function Canvas() {
           const rh = stamp.h * PX_PER_INCH
           const cx = sx(stamp.x + stamp.w / 2)
           const cy = sy(stamp.y + stamp.h / 2)
+          const fStamp = entityStyle(stamp)
           return (
             <g key={stamp.id}
               onClick={e => handleStampClick(e, stamp.id)}
               onMouseDown={e => handleStampMouseDown(e, stamp)}
-              style={{ cursor: activeTool === 'select' ? (isDragging ? 'grabbing' : 'grab') : 'default' }}>
+              style={{
+                cursor: activeTool === 'select' ? (isDragging ? 'grabbing' : 'grab') : 'default',
+                opacity: fStamp.opacity,
+                pointerEvents: fStamp.pointerEvents ?? 'auto',
+              }}>
               {stamp.type === 'stairs' ? (
                 <>
                   <rect x={rx} y={ry} width={rw} height={rh}
@@ -650,10 +674,12 @@ export default function Canvas() {
           const totalPx = Math.hypot(bx - ax, by - ay)
           const ux = totalPx > 0 ? (bx - ax) / totalPx : 0
           const uy = totalPx > 0 ? (by - ay) / totalPx : 0
+          const fWall = entityStyle(wall)
           return (
             <g key={wall.id} onClick={e => handleWallClick(e, wall.id)}
               onMouseEnter={() => setHoveredWallId(wall.id)}
-              onMouseLeave={() => setHoveredWallId(null)}>
+              onMouseLeave={() => setHoveredWallId(null)}
+              style={{ opacity: fWall.opacity, pointerEvents: fWall.pointerEvents ?? 'auto' }}>
               <line x1={ax} y1={ay} x2={bx} y2={by}
                 stroke="transparent" strokeWidth={hitW} style={{ cursor: wallHitCursor }}/>
               {(() => {
@@ -728,10 +754,15 @@ export default function Canvas() {
           if (!fromPos || !toPos) return null
           const color = BEAM_LEVEL_REGISTRY.find(l => l.id === beam.level)?.color ?? '#888'
           const dash  = beam.source === 'WALL_DERIVED' ? '6 3' : undefined
+          // Wall-derived beams inherit floor from their source wall; explicit beams carry floorId.
+          const beamFloorId = beam.source === 'WALL_DERIVED'
+            ? walls[beam.sourceWallId]?.floorId
+            : beam.floorId
+          const fBeam = entityStyle({ floorId: beamFloorId })
           return (
             <line key={beam.id}
               x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
-              stroke={color} strokeWidth={3} strokeOpacity={0.7}
+              stroke={color} strokeWidth={3} strokeOpacity={0.7 * (fBeam.opacity ?? 1)}
               strokeDasharray={dash}
               style={{ pointerEvents: 'none' }}
             />
@@ -781,6 +812,7 @@ export default function Canvas() {
           const strokeColor = isSelected ? '#e74c3c' : col.attachedNodeId ? '#2471a3' : '#555'
           const fillColor   = isSelected ? '#fde8e8' : col.attachedNodeId ? '#d6eaf8' : '#ecf0f1'
           const strokeW     = isSelected ? 2 : 1.5
+          const fCol = columnStyle(col)
 
           const dims = getColumnSvgDims(ct, PX_PER_INCH)
           if (dims.r !== undefined) {
@@ -788,7 +820,11 @@ export default function Canvas() {
               <circle key={col.id}
                 cx={sx(pos.x)} cy={sy(pos.y)} r={dims.r}
                 fill={fillColor} stroke={strokeColor} strokeWidth={strokeW}
-                style={{ cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default' }}
+                opacity={fCol.opacity}
+                style={{
+                  cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default',
+                  pointerEvents: fCol.pointerEvents ?? 'auto',
+                }}
                 onClick={e => handleColumnClick(e, col.id)}
               />
             )
@@ -797,7 +833,11 @@ export default function Canvas() {
             <rect key={col.id}
               x={sx(pos.x) - dims.w/2} y={sy(pos.y) - dims.h/2} width={dims.w} height={dims.h}
               fill={fillColor} stroke={strokeColor} strokeWidth={strokeW}
-              style={{ cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default' }}
+              opacity={fCol.opacity}
+              style={{
+                cursor: activeTool === 'column' || activeTool === 'select' ? 'pointer' : 'default',
+                pointerEvents: fCol.pointerEvents ?? 'auto',
+              }}
               onClick={e => handleColumnClick(e, col.id)}
             />
           )
@@ -919,12 +959,16 @@ export default function Canvas() {
           const cx = sx(wx), cy = sy(wy)
           const invalid = !isRoomValid(room.id)
           const isSel   = room.id === selectedRoomId
+          const fRoom   = entityStyle(room)
           return (
             <text key={room.id} x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
               fontSize={13} fontWeight="600"
               fill={invalid ? '#e74c3c' : isSel ? '#1a6e3a' : '#27ae60'}
+              opacity={fRoom.opacity}
               style={{
-                pointerEvents: activeTool === 'select' ? 'auto' : 'none',
+                pointerEvents: (fRoom.pointerEvents ?? 'auto') === 'none'
+                  ? 'none'
+                  : (activeTool === 'select' ? 'auto' : 'none'),
                 userSelect: 'none',
                 cursor: activeTool === 'select' ? 'pointer' : 'default',
               }}

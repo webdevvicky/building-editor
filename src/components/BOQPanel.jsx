@@ -483,11 +483,11 @@ export default function BOQPanel() {
   // Canonical aggregator (Stage 0 T4) — single source of truth for cost-total + CSV export.
   // Section components still render their own rows independently; the per-section onLinesReady
   // path is preserved for any future opt-in consumers but no longer drives totals.
-  const allLines       = getBoqLines(useStore.getState(), rates)
-  // Phase 1.9 — apply floor scope. Lines with floorId=null pass through both scopes.
+  // Phase 1.9 — floor scope is enforced inside getBoqLines (scopeStateToFloor).
+  // "current" → only entities on currentFloorId contribute; "all" → cumulative.
   const canonicalLines = floorScope === 'all'
-    ? allLines
-    : allLines.filter(l => l.floorId == null || l.floorId === currentFloorId)
+    ? getBoqLines(useStore.getState(), rates)
+    : getBoqLines(useStore.getState(), rates, { floorId: currentFloorId })
   const totalCost      = totalBoqCost(canonicalLines)
   const validation     = runValidation(useStore.getState())
   // Suppress unused-var warnings on the legacy section state slots (kept for forward-compat).

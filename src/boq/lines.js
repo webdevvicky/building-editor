@@ -31,6 +31,7 @@ import { computePlasterQuantities }    from '../quantities/plaster'
 import { computeFoundationQuantities } from '../quantities/foundations'
 import { computeBBSQuantities }        from '../quantities/bbs'
 import { PLASTER_KIND }                from '../specs/plasterSystems'
+import { scopeStateToFloor }           from './scope'
 
 const DEFAULT_FLOOR = 'F1'
 
@@ -42,15 +43,22 @@ function calcCost(qty, rateStr, isPer1000 = false) {
   return isPer1000 ? (qty / 1000) * r : qty * r
 }
 
-export function getBoqLines(state, rates) {
+// opts: { floorId?: string }  — when floorId is set, state is replaced with
+// a floor-scoped view (see ../boq/scope.js). All quantity selectors run on
+// the scoped collections so per-line numbers reflect only that floor.
+export function getBoqLines(state, rates, opts = {}) {
+  const scopedFloorId = opts.floorId ?? null
+  if (scopedFloorId) state = scopeStateToFloor(state, scopedFloorId)
+
   const lines = []
+  const lineFloorId = scopedFloorId ?? DEFAULT_FLOOR
 
   // Helper to push with default fields + auto-cost.
   const push = (line) => {
     const cost = calcCost(line.qty, rates[line.rateKey], line.isPer1000)
     lines.push({
       sourceEntityIds: [],
-      floorId:         DEFAULT_FLOOR,
+      floorId:         lineFloorId,
       meta:            null,
       ...line,
       cost,
