@@ -9,8 +9,6 @@ import { computeShutteringQuantities } from '../../quantities/shuttering'
 const COL = '1fr 68px 88px 70px'
 const GAP = 3
 
-function r2(n) { return Math.round(n * 100) / 100 }
-
 function calcCost(qty, rateStr) {
   const r = parseFloat(rateStr)
   if (!rateStr || isNaN(r) || r <= 0) return null
@@ -61,8 +59,6 @@ export default function ShutteringSection({ rates, onRateChange, onLinesReady })
   const state = useStore.getState()
   const q     = computeShutteringQuantities(state)
 
-  if (q.totalAreaFt2 === 0) return null
-
   // Emit lines for parent cost-total + CSV export.
   useEffect(() => {
     const lines = []
@@ -79,6 +75,8 @@ export default function ShutteringSection({ rates, onRateChange, onLinesReady })
       onLinesReady(lines)
     }
   })
+
+  if (q.totalAreaFt2 === 0) return null
 
   return (
     <div style={{ marginBottom: 12 }}>

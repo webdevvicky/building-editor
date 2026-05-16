@@ -737,7 +737,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     // Inline auto-isolated path: columns where foundationId is null.
     const defaultPlumDepthFt = projectSettings.foundationDefaults?.plumDepthFt ?? 0
     const byColumnTypeInline = {}
-    for (const [ctId, colData] of Object.entries(colQ)) {
+    for (const ctId of Object.keys(colQ)) {
       const ct = columnTypes.find(t => t.id === ctId)
       if (!ct) continue
       const { footingLengthFt: lFt, footingWidthFt: wFt, footingDepthFt: dFt } = ct

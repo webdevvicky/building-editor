@@ -55,8 +55,6 @@ export default function ExcavationSection({ rates, onRateChange, onLinesReady })
   const state = useStore.getState()
   const q     = computeExcavationQuantities(state)
 
-  if (q.totalVolFt3 === 0) return null
-
   useEffect(() => {
     const lines = []
     const add = (label, qty, rateKey) =>
@@ -70,6 +68,8 @@ export default function ExcavationSection({ rates, onRateChange, onLinesReady })
       onLinesReady(lines)
     }
   })
+
+  if (q.totalVolFt3 === 0) return null
 
   return (
     <div style={{ marginBottom: 12 }}>

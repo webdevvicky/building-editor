@@ -2,7 +2,43 @@
 
 ## Current Phase Status
 
-Phase 1a–1c-4 + Phase 1.5 complete and on `main`. Phase 1d not started.
+Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 complete on `main`.
+Phase 1.8 (foundation type UI), Phase 1.9 (multi-floor UI), Phase 1.7 (BBS),
+Phase 2.0 (PDF/Excel/ERP) not started.
+
+---
+
+## Stage 0 — foundational refactor (2026-05-15/16)
+
+**UUID migration.** `uid()` returns `crypto.randomUUID()`. Removes ID-collision risk after `loadProject` (the old `nextId` counter was never reset).
+
+**T1 — floor-aware data model.** `projectSettings.floors[]` array (single `'F1'` default that mirrors legacy `heights{}`). `currentFloorId` UI state. Every per-floor entity (walls, rooms, stamps, columns, beams, slabs, staircases, foundations) carries `floorId`, `classification: null` (Phase 1.7+ override slot), `meta: null` (forward-compat envelope). Staircases additionally have `fromFloorId` and `toFloorId`. Selectors continue iterating full maps — Phase 1.9 will add floor-scope filters.
+
+**T2 — material system registries.** `src/specs/masonrySystems.js` groups `MATERIAL_LIBRARY` units by construction system (`CLAY_BRICK`, `AAC_BLOCK_THIN`, `CLC_BLOCK_THIN`, `CONCRETE_BLOCK`). `src/specs/plasterSystems.js` defines `CEMENT_SAND_INTERNAL/EXTERNAL/CEILING`, `GYPSUM`, `POP`. `projectSettings.defaultPlasterSystemId` + per-room `room.plasterSystemId` override. Resolution helper `resolveRoomPlasterSystem(room, projectSettings)`.
+
+**T3 — foundation entity slot.** New `foundations:{}` state map; entity shape `{id, type ('ISOLATED'|'COMBINED'|'RAFT'|'STRIP'|'PILE'), columnIds[], wallIds[], geometry, grade, pccDepthFt, plumDepthFt, floorId, label, meta}`. `column.foundationId` nullable pointer. New selector `getFoundationQuantities() → {byFoundation, byColumnTypeInline}`. `getFootingQuantities()` retained as thin wrapper returning the inline subset. Behavior identical when `foundations:{}` is empty (default).
+
+**T4 — canonical `getBoqLines` aggregator.** `src/boq/lines.js` exports `getBoqLines(state, rates) → BoqLine[]`. Stable schema `{id, category, label, qty, unit, rateKey, isPer1000?, cost, formulaId, sourceEntityIds, floorId, meta}`. Categories: `finishes | masonry | rcc | civil | shuttering | excavation | concreteMix | steel | plaster | plumConcrete | staircase`. BOQPanel cost-total + CSV export both consume this; Phase 2.0 PDF / Excel / ERP target this single source. Helpers `groupBoqLinesByCategory` and `totalBoqCost` also exported.
+
+**T5 — COLUMN_SHAPES extensions.** `getColumnPerimeterFt` (used by shuttering), `getColumnBarLayoutZones` (Phase 1.7 BBS stub), `getColumnStirrupLengthFt(ct, coverIn?)` (Phase 1.7 BBS stub). Adding a new column shape still means one entry in `COLUMN_SHAPES`.
+
+## Phase 1.6 — complete basic BOQ (2026-05-16)
+
+**1.6a Shuttering** — `src/quantities/shuttering.js`, `src/components/boq/ShutteringSection.jsx`. Per-column-type, per-beam-level, per-footing, slab, staircase surface areas. Formulas: column = perimeter × height (4 sides); beam = length × (width + 2·depth)/12 (bottom + 2 sides); footing = perimeter × depth (4 sides); slab = bottom area + external perimeter × thickness; staircase ≈ totalRcc / waistSlab.
+
+**1.6b Excavation** — `src/quantities/excavation.js`, `src/components/boq/ExcavationSection.jsx`. Three layers: `bulk` = building footprint × bulk depth (default plinth); `perFoundation` = (pitDepth − bulkDepth) × envelope-with-margin (only counts excess below bulk); `civilStamps` = sump/septic with working margin. `projectSettings.excavationSettings.workingMarginFt` (default 0.5 ft) + `bulkDepthFt` overrides.
+
+**1.6c AAC/CLC system regrouping** — wall material picker in `OpeningPanel.jsx` uses `<optgroup>` from `MASONRY_SYSTEMS`.
+
+**1.6d Dog-legged staircase** — `StaircasePanel.jsx` shows From/To floor pickers when `floors.length > 1`, plus derived metric readout (total steps, total rise, total run). Formula in `getStaircaseQuantities` verified correct (waist slab spans hypotenuse, `landingCount = flightCount` gives mid-landing + top for `flightCount=2`).
+
+**1.6e Plum concrete** — `projectSettings.foundationDefaults.plumDepthFt` (default 0). Foundation selector emits `plumVolFt3` per inline footing using this default; foundation entities use their own `plumDepthFt`. `src/components/boq/PlumConcreteRow.jsx` sums total. Set via `setFoundationDefaults`.
+
+**1.6f Gypsum/POP/cement-sand plaster** — `src/quantities/plaster.js` groups rooms by their resolved plaster system; per-system totals split into walls + ceiling, then materials (cement+sand for cement-sand, bag count for gypsum/POP). `src/components/boq/PlasterSection.jsx` renders one block per active system. RoomDetailPanel exposes per-room override; ProjectSettingsPanel exposes the project default.
+
+## Verification
+
+`scripts/verify-boq.mjs` runs the store outside React, builds a deterministic 2-room sample project, then asserts BOQ invariants (entity shapes, selector outputs, foundation backward-compat, `getBoqLines` line count, UUID format). Run via `node --import "..." scripts/verify-boq.mjs` (loader hook in `scripts/resolver-hook.mjs` patches extension-less ESM specifiers for plain-Node execution).
 
 ---
 

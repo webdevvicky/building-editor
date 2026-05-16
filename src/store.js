@@ -6,7 +6,7 @@ import {
 } from './geometry'
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
-import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS, DEFAULT_FLOOR_ID, DEFAULT_FLOORS } from './structuralSlice'
+import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS, DEFAULT_FLOOR_ID } from './structuralSlice'
 import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
 
 const uid = () => crypto.randomUUID()
@@ -615,11 +615,10 @@ export const useStore = create((set, get) => ({
     for (const [id, room] of Object.entries(data.rooms || {})) {
       const safeType = ROOM_PRESETS[room.type] ? room.type : 'OTHER'
       migratedRooms[id] = {
-        type:             safeType,
         customType:       null,
         plasterSystemId:  null,   // null = inherit projectSettings.defaultPlasterSystemId
         ...room,
-        type:             safeType,    // re-assert after spread in case room.type was invalid
+        type:             safeType,    // safeType always wins — validated against ROOM_PRESETS
         finishes:         room.finishes
           ? { ...ALL_FINISHES, ...room.finishes }   // fill any missing flag keys
           : getPresetFinishes(safeType),             // v1/v2 rooms: use type preset (OTHER=ALL_FINISHES)

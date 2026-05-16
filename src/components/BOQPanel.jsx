@@ -350,7 +350,6 @@ export default function BOQPanel() {
   const getStampsByType             = useStore(s => s.getStampsByType)
   const getSumpCivilQty             = useStore(s => s.getSumpCivilQty)
   const getSepticCivilQty           = useStore(s => s.getSepticCivilQty)
-  const getMaterialQuantities       = useStore(s => s.getMaterialQuantities)
   // Extra subscriptions for formula state (stable function refs, no re-render cost)
   const nodes           = useStore(s => s.nodes)
   const getWallArea     = useStore(s => s.getWallArea)
@@ -457,10 +456,10 @@ export default function BOQPanel() {
   }
 
   const mainLines     = getPriceableLines(rates, quantities)
-  const materialLines = buildMaterialLines(matQty, rates)
   const sumpLines     = getCivilLinesForStamp('Sump', sumpQty, rates)
   const septicLines   = getCivilLinesForStamp('Septic Tank', septicQty, rates)
   const hasMasonry    = Object.keys(matQty).length > 0
+  void mainLines; void sumpLines; void septicLines   // rendering still uses them; cost total uses canonicalLines
 
   const formulaState = {
     walls, nodes, rooms, stamps, getWallArea, getValidRoomIds, getRoomArea, getRoomWallArea,

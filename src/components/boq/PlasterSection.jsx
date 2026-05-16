@@ -54,7 +54,6 @@ export default function PlasterSection({ rates, onRateChange, onLinesReady }) {
 
   const state = useStore.getState()
   const q     = computePlasterQuantities(state)
-
   const systems = Object.values(q.bySystem)
 
   useEffect(() => {
@@ -77,6 +76,7 @@ export default function PlasterSection({ rates, onRateChange, onLinesReady }) {
   })
 
   if (systems.length === 0) return null
+  // The useEffect above always runs (no conditional hooks); early return is after.
 
   return (
     <div style={{ marginBottom: 12 }}>
