@@ -222,14 +222,24 @@ check('Sump excavation > 0', s().getSumpCivilQty().excavFt3 > 0)
 // getBoqLines emits lines
 check('getBoqLines returned lines > 0', lines.length > 0, `${lines.length} lines`)
 
-// All entities have floorId='F1' (Stage 0 T1)
+// Architectural Fix 1: column.foundationId should no longer exist on new columns.
+check('Fix 1: no column.foundationId field',
+      Object.values(s().columns).every(c => c.foundationId === undefined),
+      `first column keys: ${Object.keys(Object.values(s().columns)[0] ?? {}).join(',')}`)
+
+// Architectural Fix 2: column has baseFloorId + topFloorId (default both = F1).
+check('Fix 2: column.baseFloorId = F1',
+      Object.values(s().columns).every(c => c.baseFloorId === 'F1'))
+check('Fix 2: column.topFloorId = F1',
+      Object.values(s().columns).every(c => c.topFloorId === 'F1'))
+
+// All entities still have floorId='F1' (walls/rooms/stamps unchanged; columns now use baseFloorId)
 const allHaveFloorId = [
   ...Object.values(s().walls),
   ...Object.values(s().rooms),
   ...Object.values(s().stamps),
-  ...Object.values(s().columns),
 ].every(e => e.floorId === 'F1')
-check('Every entity has floorId=F1', allHaveFloorId)
+check('Every wall/room/stamp has floorId=F1', allHaveFloorId)
 
 // All entities have meta slot (Stage 0 T1)
 const allHaveMeta = [
@@ -239,6 +249,63 @@ const allHaveMeta = [
   ...Object.values(s().columns),
 ].every(e => e.meta === null)
 check('Every entity has meta=null', allHaveMeta)
+
+// Fix 1: selector discipline — getFoundationForColumn returns null when no foundation attached
+check('Selector: getFoundationForColumn null for unattached',
+      s().getFoundationForColumn(Object.keys(s().columns)[0]) === null)
+
+// Fix 1: foundation owns columnIds; test by creating a foundation and attaching
+const testFdnId = s().addFoundation('COMBINED', { geometry: { lengthFt: 5, widthFt: 5, depthFt: 1 } })
+const firstColId = Object.keys(s().columns)[0]
+s().attachColumnToFoundation(firstColId, testFdnId)
+check('attachColumnToFoundation populates foundation.columnIds',
+      s().foundations[testFdnId].columnIds.includes(firstColId))
+check('getFoundationForColumn returns attached foundation',
+      s().getFoundationForColumn(firstColId)?.id === testFdnId)
+check('getColumnsByFoundation returns the attached column',
+      s().getColumnsByFoundation(testFdnId).some(c => c.id === firstColId))
+
+// After attaching, inline footing count for C1 should drop from 2 to 1 (other col still inline).
+const fdnAfterAttach = s().getFoundationQuantities()
+check('Inline footing count adjusts when columns attached to foundation',
+      fdnAfterAttach.byColumnTypeInline.C1?.count === 1,
+      `got ${fdnAfterAttach.byColumnTypeInline.C1?.count}`)
+check('Foundation entity now visible in byFoundation',
+      Object.keys(fdnAfterAttach.byFoundation).length === 1)
+
+// Detach and verify
+s().detachColumnFromFoundation(firstColId)
+check('detachColumnFromFoundation clears the link',
+      s().foundations[testFdnId].columnIds.length === 0)
+// Clean up
+s().deleteFoundation(testFdnId)
+
+// Fix 2: column height = single-floor (plinth + floor + slab thickness)
+const firstCol = Object.values(s().columns)[0]
+const colH = s().getColumnHeightFt(firstCol)
+const ps = s().projectSettings
+const expectedH = ps.heights.plinthHeightFt + ps.heights.floorHeightFt + ps.slabSettings.mainThicknessIn / 12
+check('Fix 2: single-floor column height matches plinth + floor + slabThk',
+      Math.abs(colH - expectedH) < 0.01,
+      `got ${colH}, expected ${expectedH}`)
+
+// Selector discipline: floor-scope selectors
+check('getColumnsOnFloor(F1) returns both columns',
+      s().getColumnsOnFloor('F1').length === 2)
+check('getWallsOnFloor(F1) returns all walls',
+      s().getWallsOnFloor('F1').length === Object.keys(s().walls).length)
+const ents = s().getEntitiesOnFloor('F1')
+check('getEntitiesOnFloor returns all collection keys',
+      ['walls','rooms','stamps','columns','beams','slabs','staircases'].every(k => Array.isArray(ents[k])))
+
+// Fix 4: validation engine runs and returns a counts object
+const { runValidation } = await import('../src/validation/engine.js')
+const valid = runValidation(s())
+check('Validation engine returns issues array', Array.isArray(valid.issues))
+check('Validation engine returns counts object',
+      typeof valid.counts.total === 'number' &&
+      typeof valid.counts.errors === 'number' &&
+      typeof valid.counts.warnings === 'number')
 
 // Plaster system default exists
 check('Default plaster system set', s().projectSettings.defaultPlasterSystemId === 'CEMENT_SAND_INTERNAL',

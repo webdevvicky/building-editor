@@ -20,6 +20,7 @@ import ExcavationSection   from './boq/ExcavationSection'
 import PlumConcreteRow     from './boq/PlumConcreteRow'
 import PlasterSection      from './boq/PlasterSection'
 import { getBoqLines, totalBoqCost } from '../boq/lines'
+import { runValidation } from '../validation/engine'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -477,6 +478,7 @@ export default function BOQPanel() {
   // path is preserved for any future opt-in consumers but no longer drives totals.
   const canonicalLines = getBoqLines(useStore.getState(), rates)
   const totalCost      = totalBoqCost(canonicalLines)
+  const validation     = runValidation(useStore.getState())
   // Suppress unused-var warnings on the legacy section state slots (kept for forward-compat).
   void structuralLines; void shutteringLines; void excavationLines; void plumLines; void plasterLines
 
@@ -735,6 +737,29 @@ export default function BOQPanel() {
         <span style={{ color: '#333' }}>Total cost estimate</span>
         <span style={{ color: totalCost !== null ? '#222' : '#aaa' }}>{fmtCost(totalCost)}</span>
       </div>
+
+      {/* Validation footer */}
+      {validation.counts.total > 0 && (
+        <div style={{
+          marginTop: 10, padding: '6px 8px', borderRadius: 4,
+          background: validation.counts.errors > 0 ? '#fff0f0' : '#fff8e6',
+          border: `1px solid ${validation.counts.errors > 0 ? '#e74c3c' : '#e0b020'}`,
+          fontSize: 11, color: '#555', lineHeight: 1.5,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4, color: validation.counts.errors > 0 ? '#c0392b' : '#a07000' }}>
+            ⚠ {validation.counts.total} validation {validation.counts.total === 1 ? 'issue' : 'issues'}
+            {validation.counts.errors > 0 ? ` (${validation.counts.errors} error${validation.counts.errors > 1 ? 's' : ''})` : ''}
+          </div>
+          {validation.issues.slice(0, 5).map((iss, i) => (
+            <div key={i} style={{ fontSize: 10, color: '#666' }}>
+              · [{iss.severity}] {iss.message}
+            </div>
+          ))}
+          {validation.issues.length > 5 && (
+            <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>… +{validation.issues.length - 5} more</div>
+          )}
+        </div>
+      )}
 
       {/* CSV export */}
       <button

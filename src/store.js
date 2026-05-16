@@ -702,34 +702,47 @@ export const useStore = create((set, get) => ({
         : { ...base, ...stamp }
     }
 
-    // ── Migrate columns: inject floor/classification/meta ──
-    const migratedColumns = Object.fromEntries(
-      Object.entries(data.columns ?? {}).map(([id, col]) => [id, {
-        foundationId:   null,
-        floorId:        DEFAULT_FLOOR_ID,
-        classification: null,
-        meta:           null,
-        ...col,
-      }])
-    )
+    // ── Migrate columns ──
+    // Fix 1: drop legacy column.foundationId (foundation owns columnIds[] only).
+    // Fix 2: rename legacy floorId → baseFloorId; mirror topFloorId for single-span.
+    const migratedColumns = {}
+    for (const [id, col] of Object.entries(data.columns ?? {})) {
+      const { foundationId: _drop, floorId: legacyFloorId, ...rest } = col
+      const baseFloorId = rest.baseFloorId ?? legacyFloorId ?? DEFAULT_FLOOR_ID
+      migratedColumns[id] = {
+        classification:      null,
+        reinforcementSpecId: null,
+        meta:                null,
+        ...rest,
+        baseFloorId,
+        topFloorId: rest.topFloorId ?? baseFloorId,
+      }
+    }
 
     // ── Migrate beams: inject floor + meta ──
     const migratedBeams = Object.fromEntries(
       Object.entries(data.beams ?? {}).map(([id, beam]) => [id, {
         floorId: DEFAULT_FLOOR_ID,
+        reinforcementSpecId: null,
         meta:    null,
         ...beam,
       }])
     )
 
-    // ── Migrate slabs: inject floor + meta ──
-    const migratedSlabs = Object.fromEntries(
-      Object.entries(data.slabs ?? {}).map(([id, slab]) => [id, {
-        floorId: DEFAULT_FLOOR_ID,
-        meta:    null,
+    // ── Migrate slabs ──
+    // Fix 3: populate classification/role on saved slabs that lack it.
+    const migratedSlabs = {}
+    for (const [id, slab] of Object.entries(data.slabs ?? {})) {
+      const role = slab.role ?? slab.classification ?? (slab.type === 'SUNKEN' ? 'SUNKEN' : 'ROOF')
+      migratedSlabs[id] = {
+        floorId:             DEFAULT_FLOOR_ID,
+        reinforcementSpecId: null,
+        meta:                null,
         ...slab,
-      }])
-    )
+        classification: role,
+        role,
+      }
+    }
 
     // ── Migrate staircases: inject floor/fromFloor/toFloor + meta ──
     const migratedStaircases = Object.fromEntries(
@@ -745,9 +758,10 @@ export const useStore = create((set, get) => ({
     // ── Migrate foundations: inject classification + meta + ensure floor ──
     const migratedFoundations = Object.fromEntries(
       Object.entries(data.foundations ?? {}).map(([id, f]) => [id, {
-        floorId:        DEFAULT_FLOOR_ID,
-        classification: null,
-        meta:           null,
+        floorId:             DEFAULT_FLOOR_ID,
+        classification:      null,
+        reinforcementSpecId: null,
+        meta:                null,
         ...f,
       }])
     )

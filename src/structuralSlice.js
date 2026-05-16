@@ -20,6 +20,16 @@ const FT3_TO_M3 = 0.0283168
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
+// Fix 3: a slab's structural role is derived from its position in the floor stack.
+// Top floor → ROOF, intermediate → FLOOR. Sunken/staircase callers override the role.
+function inferSlabRole(state, floorId) {
+  const floors = state.projectSettings?.floors ?? []
+  if (floors.length <= 1) return 'ROOF'
+  const sorted = [...floors].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  const idx = sorted.findIndex(f => f.id === floorId)
+  return idx === sorted.length - 1 ? 'ROOF' : 'FLOOR'
+}
+
 // Module-level memoization caches (reference-equality keyed).
 // Safe for single-store apps — one store instance per app lifetime.
 let _wallAdjCache    = { rooms: null, result: null }
@@ -298,7 +308,15 @@ export const createStructuralSlice = (set, get, uid) => ({
     set(state => ({
       columns: {
         ...state.columns,
-        [id]: { id, x, y, columnTypeId, attachedNodeId, foundationId: null, floorId, classification: null, meta: null },
+        // Fix 2: baseFloorId + topFloorId (default = current floor — single-floor column).
+        // Column height = sum of floor heights from baseFloorId through topFloorId.
+        [id]: {
+          id, x, y, columnTypeId, attachedNodeId,
+          baseFloorId: floorId, topFloorId: floorId,
+          classification: null,
+          reinforcementSpecId: null,
+          meta: null,
+        },
       },
     }))
     return id
@@ -307,7 +325,6 @@ export const createStructuralSlice = (set, get, uid) => ({
   deleteColumn: (id) => {
     get()._save()
     set(state => {
-      const col = state.columns[id]
       const nextColumns = { ...state.columns }
       delete nextColumns[id]
       // Delete all EXPLICIT beams that reference this column
@@ -319,17 +336,28 @@ export const createStructuralSlice = (set, get, uid) => ({
         const toHit   = toRef.type   === 'COLUMN' && toRef.columnId   === id
         if (!fromHit && !toHit) nextBeams[bid] = beam
       }
-      // Detach from foundation if attached
-      const nextFoundations = { ...state.foundations }
-      if (col?.foundationId && nextFoundations[col.foundationId]) {
-        const f = nextFoundations[col.foundationId]
-        nextFoundations[col.foundationId] = {
-          ...f,
-          columnIds: (f.columnIds || []).filter(cid => cid !== id),
-        }
+      // Fix 1: foundation owns columnIds[]. Removing a column scrubs it from every foundation.
+      const nextFoundations = {}
+      for (const [fid, f] of Object.entries(state.foundations)) {
+        const cids = (f.columnIds || []).filter(cid => cid !== id)
+        nextFoundations[fid] = cids.length === (f.columnIds || []).length ? f : { ...f, columnIds: cids }
       }
       return { columns: nextColumns, beams: nextBeams, foundations: nextFoundations }
     })
+  },
+
+  setColumnFloorSpan: (id, baseFloorId, topFloorId) => {
+    get()._save()
+    set(state => ({
+      columns: { ...state.columns, [id]: { ...state.columns[id], baseFloorId, topFloorId } },
+    }))
+  },
+
+  setColumnReinforcementSpec: (id, reinforcementSpecId) => {
+    get()._save()
+    set(state => ({
+      columns: { ...state.columns, [id]: { ...state.columns[id], reinforcementSpecId } },
+    }))
   },
 
   setColumnType: (id, columnTypeId) => {
@@ -414,47 +442,69 @@ export const createStructuralSlice = (set, get, uid) => ({
     })
   },
 
+  // Fix 1: Foundation owns the relationship. No column.foundationId field.
+  // Move column between foundations by editing only the foundations map.
   attachColumnToFoundation: (columnId, foundationId) => {
     get()._save()
     set(state => {
-      const f = state.foundations[foundationId]
-      const col = state.columns[columnId]
-      if (!f || !col) return {}
-      const columnIds = [...new Set([...(f.columnIds || []), columnId])]
-      const prevFid = col.foundationId
-      const next = {
-        foundations: { ...state.foundations, [foundationId]: { ...f, columnIds } },
-        columns: { ...state.columns, [columnId]: { ...col, foundationId } },
-      }
-      // Remove from previous foundation if any
-      if (prevFid && prevFid !== foundationId && state.foundations[prevFid]) {
-        const prev = state.foundations[prevFid]
-        next.foundations[prevFid] = {
-          ...prev,
-          columnIds: (prev.columnIds || []).filter(cid => cid !== columnId),
+      if (!state.foundations[foundationId] || !state.columns[columnId]) return {}
+      const nextFoundations = {}
+      for (const [fid, f] of Object.entries(state.foundations)) {
+        const had  = (f.columnIds || []).includes(columnId)
+        const want = fid === foundationId
+        if (want && !had) {
+          nextFoundations[fid] = { ...f, columnIds: [...(f.columnIds || []), columnId] }
+        } else if (!want && had) {
+          nextFoundations[fid] = { ...f, columnIds: (f.columnIds || []).filter(cid => cid !== columnId) }
+        } else {
+          nextFoundations[fid] = f
         }
       }
-      return next
+      return { foundations: nextFoundations }
     })
   },
 
   detachColumnFromFoundation: (columnId) => {
     get()._save()
     set(state => {
-      const col = state.columns[columnId]
-      if (!col || !col.foundationId) return {}
-      const fid = col.foundationId
-      const f = state.foundations[fid]
-      const next = {
-        columns: { ...state.columns, [columnId]: { ...col, foundationId: null } },
+      const nextFoundations = {}
+      for (const [fid, f] of Object.entries(state.foundations)) {
+        const cids = (f.columnIds || []).filter(cid => cid !== columnId)
+        nextFoundations[fid] = cids.length === (f.columnIds || []).length ? f : { ...f, columnIds: cids }
       }
-      if (f) {
-        next.foundations = {
-          ...state.foundations,
-          [fid]: { ...f, columnIds: (f.columnIds || []).filter(cid => cid !== columnId) },
+      return { foundations: nextFoundations }
+    })
+  },
+
+  attachWallToFoundation: (wallId, foundationId) => {
+    get()._save()
+    set(state => {
+      if (!state.foundations[foundationId] || !state.walls[wallId]) return {}
+      const nextFoundations = {}
+      for (const [fid, f] of Object.entries(state.foundations)) {
+        const had  = (f.wallIds || []).includes(wallId)
+        const want = fid === foundationId
+        if (want && !had) {
+          nextFoundations[fid] = { ...f, wallIds: [...(f.wallIds || []), wallId] }
+        } else if (!want && had) {
+          nextFoundations[fid] = { ...f, wallIds: (f.wallIds || []).filter(wid => wid !== wallId) }
+        } else {
+          nextFoundations[fid] = f
         }
       }
-      return next
+      return { foundations: nextFoundations }
+    })
+  },
+
+  detachWallFromFoundation: (wallId) => {
+    get()._save()
+    set(state => {
+      const nextFoundations = {}
+      for (const [fid, f] of Object.entries(state.foundations)) {
+        const wids = (f.wallIds || []).filter(wid => wid !== wallId)
+        nextFoundations[fid] = wids.length === (f.wallIds || []).length ? f : { ...f, wallIds: wids }
+      }
+      return { foundations: nextFoundations }
     })
   },
 
@@ -500,14 +550,24 @@ export const createStructuralSlice = (set, get, uid) => ({
 
   // ── Slab actions ───────────────────────────────────────────────────────────
 
-  addSlab: (type, roomIds, thicknessIn, sinkDepthIn = 0) => {
+  // Fix 3: slab.classification + slab.role (alias) populated on creation.
+  // 'SUNKEN' → toilet/balcony, 'ROOF' → top floor, 'FLOOR' → intermediate, 'STAIR_LANDING' → custom.
+  addSlab: (type, roomIds, thicknessIn, sinkDepthIn = 0, options = {}) => {
     const id = uid()
-    const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
+    const floorId = options.floorId ?? get().currentFloorId ?? DEFAULT_FLOOR_ID
+    const role    = options.role ?? (type === 'SUNKEN' ? 'SUNKEN' : inferSlabRole(get(), floorId))
     get()._save()
     set(state => ({
       slabs: {
         ...state.slabs,
-        [id]: { id, type, roomIds: [...roomIds], thicknessIn, sinkDepthIn, grade: 'M20', floorId, meta: null },
+        [id]: {
+          id, type, roomIds: [...roomIds], thicknessIn, sinkDepthIn, grade: 'M20',
+          floorId,
+          classification: role,
+          role,
+          reinforcementSpecId: null,
+          meta: null,
+        },
       },
     }))
     return id
@@ -563,18 +623,45 @@ export const createStructuralSlice = (set, get, uid) => ({
     const mainRoomIds = validIds.filter(id => !sunkenRoomIds.includes(id))
 
     const newSlabs = {}
+    const mainRole = inferSlabRole(state, floorId)
 
     if (mainRoomIds.length > 0) {
       const mainId = uid()
-      newSlabs[mainId] = { id: mainId, type: 'MAIN', roomIds: mainRoomIds, thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20', floorId, meta: null }
+      newSlabs[mainId] = {
+        id: mainId, type: 'MAIN', roomIds: mainRoomIds,
+        thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20',
+        floorId, classification: mainRole, role: mainRole,
+        reinforcementSpecId: null, meta: null,
+      }
     }
 
     for (const roomId of sunkenRoomIds) {
       const sunkenId = uid()
-      newSlabs[sunkenId] = { id: sunkenId, type: 'SUNKEN', roomIds: [roomId], thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20', floorId, meta: null }
+      newSlabs[sunkenId] = {
+        id: sunkenId, type: 'SUNKEN', roomIds: [roomId],
+        thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20',
+        floorId, classification: 'SUNKEN', role: 'SUNKEN',
+        reinforcementSpecId: null, meta: null,
+      }
     }
 
     set({ slabs: newSlabs })
+  },
+
+  setSlabRole: (slabId, role) => {
+    get()._save()
+    set(state => {
+      const slab = state.slabs[slabId]
+      if (!slab) return {}
+      return { slabs: { ...state.slabs, [slabId]: { ...slab, role, classification: role } } }
+    })
+  },
+
+  setSlabReinforcementSpec: (slabId, reinforcementSpecId) => {
+    get()._save()
+    set(state => ({
+      slabs: { ...state.slabs, [slabId]: { ...state.slabs[slabId], reinforcementSpecId } },
+    }))
   },
 
   // ── Staircase actions ──────────────────────────────────────────────────────
@@ -697,23 +784,145 @@ export const createStructuralSlice = (set, get, uid) => ({
     return result
   },
 
+  // Fix 2: Column height = sum of floor heights from baseFloorId through topFloorId,
+  // plus plinth height on the base floor and slab thickness on the top floor.
+  // Single-floor column (base === top): plinth + floor + slab thickness (unchanged behavior).
+  getColumnHeightFt: (column) => {
+    const { projectSettings } = get()
+    const { floors = [], slabSettings } = projectSettings
+    if (floors.length === 0) {
+      // Pre-Stage 0 projects: fall back to legacy heights only.
+      const h = projectSettings.heights
+      return h.plinthHeightFt + h.floorHeightFt + (slabSettings.mainThicknessIn / 12)
+    }
+    const sorted = [...floors].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    const baseId = column.baseFloorId ?? sorted[0].id
+    const topId  = column.topFloorId  ?? baseId
+    const baseIdx = sorted.findIndex(f => f.id === baseId)
+    const topIdx  = sorted.findIndex(f => f.id === topId)
+    if (baseIdx === -1 || topIdx === -1) {
+      const h = projectSettings.heights
+      return h.plinthHeightFt + h.floorHeightFt + (slabSettings.mainThicknessIn / 12)
+    }
+    const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
+    let h = sorted[lo].plinthHeightFt || 0
+    for (let i = lo; i <= hi; i++) h += sorted[i].floorHeightFt || 0
+    h += slabSettings.mainThicknessIn / 12
+    return h
+  },
+
   // Returns { [columnTypeId]: { count, columnHeightFt, sectionFt2, volFt3, label } }
+  // Per-column height (Fix 2) — multi-span columns contribute their full span height.
   getColumnQuantities: () => {
     const { columns, projectSettings } = get()
-    const { columnTypes, heights, slabSettings } = projectSettings
-    const columnHeightFt = heights.plinthHeightFt + heights.floorHeightFt + slabSettings.mainThicknessIn / 12
+    const { columnTypes } = projectSettings
     const result = {}
     for (const col of Object.values(columns)) {
       const ct = columnTypes.find(t => t.id === col.columnTypeId)
       if (!ct) continue
-      const sectionFt2 = getColumnAreaFt2(ct)
-      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt, sectionFt2, volFt3: 0, label: ct.label }
+      const sectionFt2  = getColumnAreaFt2(ct)
+      const colHeightFt = get().getColumnHeightFt(col)
+      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt: colHeightFt, sectionFt2, volFt3: 0, label: ct.label }
       result[ct.id].count  += 1
-      result[ct.id].volFt3 += sectionFt2 * columnHeightFt
+      result[ct.id].volFt3 += sectionFt2 * colHeightFt
     }
     for (const k of Object.keys(result)) result[k].volFt3 = r2(result[k].volFt3)
     return result
   },
+
+  // ── Selector discipline (mandatory per task brief) ────────────────────────
+  // Centralized relationship/floor selectors. All components and quantity
+  // functions go through these — never traverse foundations/columns/walls inline.
+
+  getFoundationForColumn: (columnId) => {
+    const { foundations } = get()
+    for (const f of Object.values(foundations)) {
+      if ((f.columnIds || []).includes(columnId)) return f
+    }
+    return null
+  },
+
+  // A wall can attach to at most one strip foundation in practice, but the data
+  // model permits more. Returns the first match (or null) plus a plural variant.
+  getFoundationForWall: (wallId) => {
+    const { foundations } = get()
+    for (const f of Object.values(foundations)) {
+      if ((f.wallIds || []).includes(wallId)) return f
+    }
+    return null
+  },
+
+  getFoundationsForWall: (wallId) => {
+    const { foundations } = get()
+    return Object.values(foundations).filter(f => (f.wallIds || []).includes(wallId))
+  },
+
+  getColumnsByFoundation: (foundationId) => {
+    const { foundations, columns } = get()
+    const f = foundations[foundationId]
+    if (!f) return []
+    return (f.columnIds || []).map(cid => columns[cid]).filter(Boolean)
+  },
+
+  getColumnsOnFloor: (floorId) => {
+    // A column belongs to a floor if floorId ∈ [baseFloorId, topFloorId] in sequence order.
+    const { columns, projectSettings } = get()
+    const floors = [...(projectSettings.floors ?? [])].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    const idx = floors.findIndex(f => f.id === floorId)
+    if (idx === -1) return Object.values(columns).filter(c => c.baseFloorId === floorId)
+    return Object.values(columns).filter(col => {
+      const baseIdx = floors.findIndex(f => f.id === (col.baseFloorId ?? floorId))
+      const topIdx  = floors.findIndex(f => f.id === (col.topFloorId  ?? col.baseFloorId ?? floorId))
+      if (baseIdx === -1 || topIdx === -1) return col.baseFloorId === floorId
+      const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
+      return idx >= lo && idx <= hi
+    })
+  },
+
+  getWallsOnFloor: (floorId) => {
+    const { walls } = get()
+    return Object.values(walls).filter(w => (w.floorId ?? DEFAULT_FLOOR_ID) === floorId)
+  },
+
+  getSlabsOnFloor: (floorId) => {
+    const { slabs } = get()
+    return Object.values(slabs).filter(s => (s.floorId ?? DEFAULT_FLOOR_ID) === floorId)
+  },
+
+  getRoomsOnFloor: (floorId) => {
+    const { rooms } = get()
+    return Object.values(rooms).filter(r => (r.floorId ?? DEFAULT_FLOOR_ID) === floorId)
+  },
+
+  getStampsOnFloor: (floorId) => {
+    const { stamps } = get()
+    return Object.values(stamps).filter(s => (s.floorId ?? DEFAULT_FLOOR_ID) === floorId)
+  },
+
+  getBeamsOnFloor: (floorId) => {
+    const { beams } = get()
+    return Object.values(beams).filter(b => (b.floorId ?? DEFAULT_FLOOR_ID) === floorId)
+  },
+
+  getStaircasesOnFloor: (floorId) => {
+    // A staircase belongs to its fromFloor and toFloor (visible on both ends).
+    const { staircases } = get()
+    return Object.values(staircases).filter(sc =>
+      (sc.fromFloorId ?? DEFAULT_FLOOR_ID) === floorId ||
+      (sc.toFloorId   ?? DEFAULT_FLOOR_ID) === floorId
+    )
+  },
+
+  // Convenience aggregate — every entity visible on a given floor.
+  getEntitiesOnFloor: (floorId) => ({
+    walls:      get().getWallsOnFloor(floorId),
+    rooms:      get().getRoomsOnFloor(floorId),
+    stamps:     get().getStampsOnFloor(floorId),
+    columns:    get().getColumnsOnFloor(floorId),
+    beams:      get().getBeamsOnFloor(floorId),
+    slabs:      get().getSlabsOnFloor(floorId),
+    staircases: get().getStaircasesOnFloor(floorId),
+  }),
 
   // Returns { byFoundation, byColumnTypeInline } — combined foundation view.
   //
@@ -734,7 +943,12 @@ export const createStructuralSlice = (set, get, uid) => ({
     if (c.columns === columns && c.foundations === foundations && c.projectSettings === projectSettings && c.colQ === colQ)
       return c.result
 
-    // Inline auto-isolated path: columns where foundationId is null.
+    // Fix 1: a column is "attached to a foundation" iff its id appears in some
+    // foundation.columnIds[]. Inline auto-isolated path covers everything else.
+    const attachedSet = new Set()
+    for (const f of Object.values(foundations)) {
+      for (const cid of (f.columnIds || [])) attachedSet.add(cid)
+    }
     const defaultPlumDepthFt = projectSettings.foundationDefaults?.plumDepthFt ?? 0
     const byColumnTypeInline = {}
     for (const ctId of Object.keys(colQ)) {
@@ -742,7 +956,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       if (!ct) continue
       const { footingLengthFt: lFt, footingWidthFt: wFt, footingDepthFt: dFt } = ct
       if (!lFt || !wFt || !dFt) continue
-      const count = Object.values(columns).filter(col => col.columnTypeId === ctId && !col.foundationId).length
+      const count = Object.values(columns).filter(col => col.columnTypeId === ctId && !attachedSet.has(col.id)).length
       if (count === 0) continue
       const footprintFt2 = lFt * wFt
       byColumnTypeInline[ctId] = {
