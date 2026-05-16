@@ -96,6 +96,12 @@ export const DEFAULT_PROJECT_SETTINGS = {
       FOOTING: 70, COLUMN: 130, BEAM: 110, SLAB: 90, STAIRCASE: 100, CIVIL_STAMP: 80,
     },
   },
+
+  // Foundation defaults — applied to inline auto-isolated foundations (Phase 1.6e).
+  // Foundation entities override these via their own plumDepthFt field.
+  foundationDefaults: {
+    plumDepthFt: 0,    // 0 = no plum concrete; user can enable per project.
+  },
 }
 
 // Beam endpoint — discriminated union:
@@ -273,6 +279,13 @@ export const createStructuralSlice = (set, get, uid) => ({
           steelKgPerM3: { ...state.projectSettings.rccSpecs.steelKgPerM3, ...partial.steelKgPerM3 },
         } : {}),
       },
+    },
+  })),
+
+  setFoundationDefaults: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      foundationDefaults: { ...state.projectSettings.foundationDefaults, ...partial },
     },
   })),
 
@@ -722,6 +735,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       return c.result
 
     // Inline auto-isolated path: columns where foundationId is null.
+    const defaultPlumDepthFt = projectSettings.foundationDefaults?.plumDepthFt ?? 0
     const byColumnTypeInline = {}
     for (const [ctId, colData] of Object.entries(colQ)) {
       const ct = columnTypes.find(t => t.id === ctId)
@@ -730,12 +744,13 @@ export const createStructuralSlice = (set, get, uid) => ({
       if (!lFt || !wFt || !dFt) continue
       const count = Object.values(columns).filter(col => col.columnTypeId === ctId && !col.foundationId).length
       if (count === 0) continue
+      const footprintFt2 = lFt * wFt
       byColumnTypeInline[ctId] = {
         count,
-        concreteVolFt3:  r2(lFt * wFt * dFt * count),
-        pccVolFt3:       r2(lFt * wFt * PCC_BEDDING_THICKNESS_FT * count),
-        plumVolFt3:      0,                             // Phase 1.6e sets plum on foundation entities (Phase 1.8 UI)
-        footprintFt2:    r2(lFt * wFt * count),
+        concreteVolFt3:  r2(footprintFt2 * dFt * count),
+        pccVolFt3:       r2(footprintFt2 * PCC_BEDDING_THICKNESS_FT * count),
+        plumVolFt3:      r2(footprintFt2 * defaultPlumDepthFt * count),  // Phase 1.6e
+        footprintFt2:    r2(footprintFt2 * count),
         label:           ct.label,
         lengthFt:        lFt,
         widthFt:         wFt,
