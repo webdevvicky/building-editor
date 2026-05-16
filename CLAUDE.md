@@ -117,15 +117,46 @@ beams/slabs/staircases live on the floor.
 appear (Base floor / Top floor) calling `setColumnFloorSpan`. Single-floor
 projects render unchanged.
 
-**BOQ scope toggle.** `BOQPanel` header shows "This floor | All floors" when
-multi-floor. Filters `getBoqLines()` output by `line.floorId === currentFloorId`
-(or pass-through for lines with `floorId == null`, which are project-wide
-totals like masonry or floor-area finishes).
+**BOQ scope (`src/boq/scope.js`, commit `6fa5fc1`).** `BOQPanel` header shows
+"This floor | All floors" when multi-floor. `getBoqLines(state, rates, {
+floorId })` enforces scope by passing through `scopeStateToFloor(state,
+floorId)` — a state wrapper that filters every collection map and
+**re-implements every aggregator** (`getMaterialQuantities`,
+`getMasonryWithBeamDeduction`, `getColumnQuantities`,
+`getFoundationQuantities`, `getBeamQuantities`, `getSlabQuantities`,
+`getStaircaseQuantities`, `getSunshadeQuantities`, `getParapetQuantities`,
+`getSteelQuantities`, `getConcreteByGrade`, `getSumpCivilQty`,
+`getSepticCivilQty`, `getTotal*Area`, `classifyWallBeamFlags`,
+`getDerivedWallBeams`, `getAllBeams`). Per-entity helpers like `getWallArea`
+delegate to the live store (they're pure on their input id). Pure-function
+quantities (`computeShuttering`, `computeExcavation`, `computePlaster`,
+`computeFoundation`, `computeBBS`) auto-scope because they invoke
+`state.getXxx()` via method dispatch.
 
-**Known follow-up.** Canvas ghost-rendering of non-active floors at
-`opacity: 0.15` is deferred — `currentFloorId` subscription is in place but
-the per-floor render-grouping refactor of Canvas.jsx is not. Single-floor
-projects are visually unaffected.
+**Why a wrapper, not just a line-level filter?** Store selectors are
+closures bound to Zustand's live `get()`. Passing them a scoped state
+object as an argument is ignored — they still read `get().walls`. The
+initial naive `lines.filter(l => l.floorId === currentFloorId)` shipped
+broken: every line was tagged `'F1'` because the underlying selectors
+aggregated across every floor. The wrapper substitutes for `get()` by
+exposing scoped collections + re-implemented selectors at method-dispatch
+sites.
+
+**Canvas ghost rendering (commit `6fa5fc1`).** Per-entity opacity styling.
+Rooms / walls / stamps / room labels: ghost when `floorOf(e) !== currentFloorId`.
+Columns: ghost when not in `getColumnsOnFloor(currentFloorId)` (span-aware).
+Beams: explicit beams use `beam.floorId`; wall-derived beams inherit from
+`walls[sourceWallId].floorId`. Ghost = `opacity: 0.15` + `pointerEvents:
+'none'`. Single-floor projects auto-render at full opacity because
+`floorsList.length <= 1` short-circuits `multiFloor`.
+
+**Verification.** `scripts/verify-multifloor.mjs` builds a 2-floor project
+(F1: 20×15 Living + 2 columns; F2: 10×12 Bedroom + 1 column) and asserts:
+F1 flooring = 300 ft², F2 = 120 ft², All = 420 ft²; F1 masonry < All,
+F2 masonry < All, F1+F2 ≈ All; per-line `floorId` tagging is correct;
+`getColumnsOnFloor` / `getWallsOnFloor` / `getRoomsOnFloor` return correct
+counts. All 15 multi-floor assertions pass; `verify-boq.mjs` (single-floor)
+still 39/39 green.
 
 ## Phase 1.7 — Professional Steel BBS (2026-05-16, commit `1096667`)
 
@@ -433,9 +464,7 @@ under the cost total.
 
 - **Canvas.jsx SVG render stack** — layer order (bottom to top): grid → room fills → stamps → walls → beams → ghost line → nodes → columns → UI overlays → room labels. Changing this order has visual consequences. Document in source.
 
-- **Multi-floor structural** — Phase 1.9 added per-floor data plumbing; selectors honor `floorId`. Still pending: per-floor slab thickness override stored on `floor.meta.slabThicknessIn` is not yet consumed by `getSlabQuantities()`. Wire-through is a small follow-up.
-
-- **Canvas ghost rendering** — Phase 1.9 wired `currentFloorId` into Canvas but the per-floor render-grouping refactor that dims non-active floors at `opacity: 0.15` is deferred. Single-floor projects unaffected. Multi-floor projects will see all floors stacked at full opacity until this lands.
+- **Multi-floor structural** — Phase 1.9 added per-floor data plumbing; selectors honor `floorId`; canvas ghost rendering + BOQ scope are live (commit `6fa5fc1`). Still pending: per-floor slab thickness override stored on `floor.meta.slabThicknessIn` is not yet consumed by `getSlabQuantities()`. Wire-through is a small follow-up.
 
 - **Combined/raft footings, L/T columns, two-way slab steel, BBS** — done in Phase 1.7/1.8.
 
@@ -578,6 +607,7 @@ under the cost total.
 - **Selector discipline.** Phase 1.7+ code uses `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor / getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor / getEntitiesOnFloor` for floor scoping. No inline `.filter(e => e.floorId === ...)` in components or quantity functions.
 - **Foundation BOQ pipeline.** `computeFoundationQuantities(state)` is the per-type geometry source. `getFoundationQuantities()` keeps the inline `byColumnTypeInline` path for legacy columns with no foundation attached. `boq/lines.js`, `excavation.js`, `shuttering.js` all read from `computeFoundationQuantities`.
 - **Steel BBS vs Est.** When `reinforcementSpecId` is set on an element, BBS replaces the kg/m³ estimate for that element's category. `boq/lines.js` emits at most one steel line per category, labeled `(BBS)` when `computeBBSQuantities` produced kg, else `(Est.)`.
+- **Floor scope in BOQ.** Never compute per-floor BOQ via `lines.filter(...)` after `getBoqLines()`. Store selectors are bound to live `get()` and ignore any scoped state passed as argument. Use `getBoqLines(state, rates, { floorId })` which routes through `scopeStateToFloor` in `src/boq/scope.js`. When adding a new aggregator that needs floor scoping, add its re-implementation to `scope.js` alongside the others; pure-function quantities in `src/quantities/` auto-scope and need no change.
 - **Project manager snapshot caching.** `listProjects()` and `getCurrentProjectId()` MUST keep stable references between calls. `notify()` invalidates the in-module caches before fanning out. Required by `useSyncExternalStore` in `ProjectsPanel`.
 - **PDF currency.** Default jsPDF helvetica lacks `U+20B9`. Use the ASCII `Rs. ` prefix in `src/export/pdf.js`. Excel uses formulas (`=C*D`) so the column header carries the currency note instead.
 - **No new libraries without asking** — but `jspdf`, `jspdf-autotable`, and `xlsx` were explicitly approved for Phase 2.0.
