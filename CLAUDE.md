@@ -11,6 +11,29 @@ the next major work item; foundation for it is in place via the canonical
 
 ---
 
+## MCP-First Rule (MANDATORY)
+Query Context7 before writing any code that uses:
+- React 19 hooks or new APIs
+- Vite 8 configuration
+- Zustand 5 store patterns
+- jsPDF / jspdf-autotable
+- SheetJS (xlsx)
+Training data for these versions is outdated.
+
+## Verification Commands
+node scripts/verify-boq.mjs        # 39 single-floor checks
+node scripts/verify-multifloor.mjs # 15 multi-floor checks
+Both must pass green before any commit.
+
+## Planned Features (do not implement yet)
+- DXF import (Phase 2.1) — parse AutoCAD floor plans into walls/rooms
+- Canvas ghost rendering per-floor (deferred — data wired, render not done)
+- BBS per-beam overrides (currently per beam level only)
+- Slab BBS span (currently sqrt(area) approximation)
+- Constraint/conflict detection engine (src/validation/ stub exists)
+
+---
+
 ## Architectural Fixes (2026-05-16, commit `275472f`)
 
 Foundational refactor applied before Phase 1.7/1.8/1.9/2.0 to keep ownership
