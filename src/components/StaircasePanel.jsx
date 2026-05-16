@@ -33,6 +33,7 @@ export default function StaircasePanel() {
   const stamps          = useStore(s => s.stamps)
   const staircases      = useStore(s => s.staircases)
   const updateStaircase = useStore(s => s.updateStaircase)
+  const projectSettings = useStore(s => s.projectSettings)
 
   if (!selectedStampId) return null
   if (stamps[selectedStampId]?.type !== 'stairs') return null
@@ -52,7 +53,11 @@ export default function StaircasePanel() {
     updateStaircase(selectedStampId, patch)
   }
 
-  const totalSteps = sc.flightCount * sc.stepsPerFlight
+  const totalSteps   = sc.flightCount * sc.stepsPerFlight
+  const totalRiseFt  = (totalSteps * sc.riserIn) / 12
+  const totalRunFt   = (totalSteps * sc.treadIn) / 12
+  const floors       = projectSettings?.floors ?? []
+  const isMultiFloor = floors.length > 1
 
   return (
     <div style={panelStyle}>
@@ -66,10 +71,38 @@ export default function StaircasePanel() {
           onKeyDown={e => e.stopPropagation()}
           onChange={e => update({ type: e.target.value })}
         >
-          <option value="DOG_LEGGED">Dog-Legged</option>
+          <option value="DOG_LEGGED">Dog-Legged (2 flights + landing)</option>
           <option value="STRAIGHT">Straight</option>
         </select>
       </div>
+
+      {/* From / To floor pickers — Phase 1.6d schema slot; UI only renders meaningfully when multi-floor. */}
+      {isMultiFloor && (
+        <>
+          <div style={fieldRow}>
+            <div style={label}>From floor</div>
+            <select
+              value={sc.fromFloorId ?? floors[0]?.id}
+              style={{ width: '100%', fontSize: 13 }}
+              onKeyDown={e => e.stopPropagation()}
+              onChange={e => update({ fromFloorId: e.target.value })}
+            >
+              {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+            </select>
+          </div>
+          <div style={fieldRow}>
+            <div style={label}>To floor</div>
+            <select
+              value={sc.toFloorId ?? floors[0]?.id}
+              style={{ width: '100%', fontSize: 13 }}
+              onKeyDown={e => e.stopPropagation()}
+              onChange={e => update({ toFloorId: e.target.value })}
+            >
+              {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+            </select>
+          </div>
+        </>
+      )}
 
       <NumField fieldLabel="Flights"          fieldKey="flightCount"     value={sc.flightCount}     min={1}   onUpdate={update} />
       <NumField fieldLabel="Steps / flight"   fieldKey="stepsPerFlight"  value={sc.stepsPerFlight}  min={1}   onUpdate={update} />
@@ -80,9 +113,16 @@ export default function StaircasePanel() {
       <NumField fieldLabel="Landing length (ft)" fieldKey="landingFtLength" value={sc.landingFtLength} min={1}   onUpdate={update} />
       <NumField fieldLabel="Flight width (ft)"   fieldKey="flightWidthFt"   value={sc.flightWidthFt}   min={1}   onUpdate={update} />
 
-      <div style={{ ...fieldRow, color: '#555' }}>
-        <span style={{ color: '#888', fontSize: 11 }}>Total steps: </span>
-        {totalSteps}
+      {/* Derived metrics — verifies dog-legged formula at a glance */}
+      <div style={{ ...fieldRow, padding: '8px', background: '#f8f8f8', borderRadius: 4, fontSize: 11 }}>
+        <div style={{ color: '#555' }}>Total steps: <strong>{totalSteps}</strong></div>
+        <div style={{ color: '#555' }}>Total rise: <strong>{Math.round(totalRiseFt * 100) / 100} ft</strong></div>
+        <div style={{ color: '#555' }}>Total run: <strong>{Math.round(totalRunFt * 100) / 100} ft</strong></div>
+        {sc.type === 'DOG_LEGGED' && (
+          <div style={{ color: '#888', marginTop: 4, fontSize: 10 }}>
+            Dog-legged: 2 flights with mid-landing; volume = waist slab (inclined) + landings.
+          </div>
+        )}
       </div>
     </div>
   )
