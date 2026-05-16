@@ -105,13 +105,21 @@ function fdnResBadge(source) {
            background: c.bg, color: c.fg, display: 'inline-block', lineHeight: 1.3 }
 }
 
-function NumField({ label, value, onChange, min = 0, step = 0.5 }) {
+// When `decimals` is set, the displayed value is rounded for visual
+// cleanliness — useful for stored constants like PCC bedding (2/12 ft =
+// 0.16666…) so the input shows "0.17" not the full float. Stored value
+// is unchanged; the round only affects the input's value attribute.
+function NumField({ label, value, onChange, min = 0, step = 0.5, decimals }) {
+  const raw = value ?? 0
+  const shown = typeof decimals === 'number'
+    ? Number(raw.toFixed(decimals))
+    : raw
   return (
     <div style={fieldRow}>
       <span style={lbl}>{label}</span>
       <input
         type="number" min={min} step={step}
-        style={numInput} value={value ?? 0}
+        style={numInput} value={shown}
         onKeyDown={e => e.stopPropagation()}
         onChange={e => onChange(parseFloat(e.target.value) || 0)}
       />
@@ -273,9 +281,9 @@ export default function FoundationPanel() {
               onChange={v => patchGeometry(f.id, { widthFt: v })} />
             <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} value={f.pccDepthFt}
+            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
-            <NumField label="Plum concrete depth (ft)" step={0.25} value={f.plumDepthFt}
+            <NumField label="Plum concrete depth (ft)" step={0.25} decimals={2} value={f.plumDepthFt}
               onChange={v => updateFoundation(f.id, { plumDepthFt: v })} />
           </>
         )}
@@ -292,7 +300,7 @@ export default function FoundationPanel() {
             </div>
             <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} value={f.pccDepthFt}
+            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
           </>
         )}
@@ -303,7 +311,7 @@ export default function FoundationPanel() {
               onChange={v => patchGeometry(f.id, { widthFt: v })} />
             <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} value={f.pccDepthFt}
+            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
           </>
         )}
@@ -322,7 +330,7 @@ export default function FoundationPanel() {
               onChange={v => patchGeometry(f.id, { capWidthFt: v })} />
             <NumField label="Cap depth (ft)" step={0.25} value={g.capDepthFt}
               onChange={v => patchGeometry(f.id, { capDepthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} value={f.pccDepthFt}
+            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
           </>
         )}

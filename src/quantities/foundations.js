@@ -114,6 +114,23 @@ export function computeFoundationQuantities(state) {
       const capFootprint = capLFt * capWFt
       const capConcreteFt3 = capFootprint * capDFt
 
+      // BOQ requires shaft + cap as separate lines (different concrete pours
+      // in practice). Aggregator consumers (steel, concrete-mix) still read
+      // the combined concreteVolFt3 below — the split fields are additive
+      // metadata, never replacing the sum.
+      var pileSplit = {
+        shaftVolFt3: r2(pileShaftFt3),
+        capVolFt3:   r2(capConcreteFt3),
+        pileGeometry: {
+          pilesCount,
+          pileDiamIn,
+          pileLengthFt,
+          capLengthFt: capLFt,
+          capWidthFt:  capWFt,
+          capDepthFt:  capDFt,
+        },
+      }
+
       concreteVolFt3 = pileShaftFt3 + capConcreteFt3
       pccVolFt3      = capFootprint * pccDepthFt
       plumVolFt3     = capFootprint * plumDepthFt
@@ -132,6 +149,7 @@ export function computeFoundationQuantities(state) {
       plumVolFt3:      r2(plumVolFt3),
       excavVolFt3:     r2(excavVolFt3),
       shutterAreaFt2:  r2(shutterAreaFt2),
+      ...(f.type === 'PILE' ? pileSplit : {}),
     }
     perFoundation.push(entry)
 

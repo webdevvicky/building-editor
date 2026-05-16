@@ -498,6 +498,60 @@ if (plinthBeam) {
         `got source=${beamRes.source}, id=${beamRes.specId}`)
 }
 
+// ── PILE foundation — shaft + cap split into two BOQ lines ───────────────
+const { computeFoundationQuantities } = await import('../src/quantities/foundations.js')
+const pileId = s().addFoundation('PILE', {
+  geometry: {
+    pilesCount: 4, pileDiamIn: 12, pileLengthFt: 15,
+    capLengthFt: 4, capWidthFt: 4, capDepthFt: 1.5,
+  },
+})
+const pilePer = computeFoundationQuantities(s()).perFoundation.find(e => e.id === pileId)
+check('PILE: perFoundation entry has shaftVolFt3', typeof pilePer.shaftVolFt3 === 'number' && pilePer.shaftVolFt3 > 0,
+      `got shaftVolFt3=${pilePer?.shaftVolFt3}`)
+check('PILE: perFoundation entry has capVolFt3', typeof pilePer.capVolFt3 === 'number' && pilePer.capVolFt3 > 0,
+      `got capVolFt3=${pilePer?.capVolFt3}`)
+check('PILE: concreteVolFt3 = shaft + cap', Math.abs(pilePer.concreteVolFt3 - (pilePer.shaftVolFt3 + pilePer.capVolFt3)) < 0.05,
+      `concrete=${pilePer.concreteVolFt3}, shaft+cap=${pilePer.shaftVolFt3 + pilePer.capVolFt3}`)
+check('PILE: pileGeometry is preserved on perFoundation entry',
+      pilePer.pileGeometry?.pilesCount === 4 && pilePer.pileGeometry?.pileDiamIn === 12,
+      `got ${JSON.stringify(pilePer.pileGeometry)}`)
+
+// BOQ lines — PILE should emit two RCC lines (shaft + cap), labeled with geometry.
+const pileLines = getBoqLines(s(), {})
+const shaftLine = pileLines.find(l => l.id === `fdn_${pileId}_rcc_shaft`)
+const capLine   = pileLines.find(l => l.id === `fdn_${pileId}_rcc_cap`)
+const combinedLine = pileLines.find(l => l.id === `fdn_${pileId}_rcc`)
+check('BOQ: PILE emits a shaft RCC line', !!shaftLine,
+      `expected fdn_${pileId}_rcc_shaft`)
+check('BOQ: PILE emits a cap RCC line', !!capLine,
+      `expected fdn_${pileId}_rcc_cap`)
+check('BOQ: PILE does NOT emit a combined RCC line', !combinedLine,
+      `unexpected fdn_${pileId}_rcc`)
+check('BOQ: shaft line label includes pile geometry',
+      shaftLine?.label?.includes('Ø') && shaftLine?.label?.includes('Shaft'),
+      `got "${shaftLine?.label}"`)
+check('BOQ: cap line label includes cap dimensions',
+      capLine?.label?.includes('Cap') && capLine?.label?.includes('×'),
+      `got "${capLine?.label}"`)
+check('BOQ: shaft and cap rateKeys are distinct',
+      shaftLine?.rateKey !== capLine?.rateKey,
+      `shaft=${shaftLine?.rateKey}, cap=${capLine?.rateKey}`)
+check('BOQ: PCC line under PILE still emitted',
+      pileLines.some(l => l.id === `fdn_${pileId}_pcc`))
+
+// Non-PILE foundation regression — single combined line remains.
+const isoId = s().addFoundation('ISOLATED', { geometry: { lengthFt: 4, widthFt: 4, depthFt: 1 } })
+const isoLines = getBoqLines(s(), {})
+check('BOQ: non-PILE foundation still emits a single combined RCC line',
+      isoLines.some(l => l.id === `fdn_${isoId}_rcc`) &&
+      !isoLines.some(l => l.id === `fdn_${isoId}_rcc_shaft`),
+      `lines: ${isoLines.filter(l => l.id.startsWith(`fdn_${isoId}`)).map(l => l.id).join(', ')}`)
+
+// Clean up test foundations.
+s().deleteFoundation(pileId)
+s().deleteFoundation(isoId)
+
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)
 if (failed.length > 0) {

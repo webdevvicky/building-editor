@@ -130,10 +130,39 @@ export function getBoqLines(state, rates, opts = {}) {
     push({ id: `fot_${ctId}_pcc`, category: 'rcc', label: `PCC under ${q.label}`,            qty: r2(q.pccVolFt3),      unit: 'ft³', rateKey: `fot_${ctId}_pcc`, formulaId: `fot_${ctId}_pcc`, meta: { columnTypeId: ctId } })
   }
   // Phase 1.8 — use computeFoundationQuantities for richer per-type geometry.
+  // PILE foundations emit two RCC lines (shaft + cap) instead of one combined
+  // line — they are distinct concrete pours with separate procurement.
   const fdnDetail = computeFoundationQuantities(state).perFoundation
   for (const f of fdnDetail) {
-    if (f.concreteVolFt3 > 0)
+    if (f.type === 'PILE') {
+      const pg = f.pileGeometry || {}
+      if ((f.shaftVolFt3 ?? 0) > 0) {
+        push({
+          id:        `fdn_${f.id}_rcc_shaft`,
+          category:  'rcc',
+          label:     `${f.label} — Shaft (${pg.pilesCount}× Ø${pg.pileDiamIn}″ × ${pg.pileLengthFt}ft)`,
+          qty:       r2(f.shaftVolFt3),
+          unit:      'ft³',
+          rateKey:   `fdn_${f.id}_rcc_shaft`,
+          formulaId: `fdn_${f.id}_rcc_shaft`,
+          meta:      { foundationId: f.id, type: f.type, part: 'shaft' },
+        })
+      }
+      if ((f.capVolFt3 ?? 0) > 0) {
+        push({
+          id:        `fdn_${f.id}_rcc_cap`,
+          category:  'rcc',
+          label:     `${f.label} — Cap (${pg.capLengthFt}×${pg.capWidthFt}×${pg.capDepthFt}ft)`,
+          qty:       r2(f.capVolFt3),
+          unit:      'ft³',
+          rateKey:   `fdn_${f.id}_rcc_cap`,
+          formulaId: `fdn_${f.id}_rcc_cap`,
+          meta:      { foundationId: f.id, type: f.type, part: 'cap' },
+        })
+      }
+    } else if (f.concreteVolFt3 > 0) {
       push({ id: `fdn_${f.id}_rcc`, category: 'rcc', label: `Foundation ${f.label}`, qty: r2(f.concreteVolFt3), unit: 'ft³', rateKey: `fdn_${f.id}_rcc`, formulaId: `fdn_${f.id}_rcc`, meta: { foundationId: f.id, type: f.type } })
+    }
     if (f.pccVolFt3 > 0)
       push({ id: `fdn_${f.id}_pcc`, category: 'rcc', label: `PCC under ${f.label}`, qty: r2(f.pccVolFt3), unit: 'ft³', rateKey: `fdn_${f.id}_pcc`, formulaId: `fdn_${f.id}_pcc`, meta: { foundationId: f.id } })
   }
