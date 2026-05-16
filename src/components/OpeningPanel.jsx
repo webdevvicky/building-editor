@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
 import { MATERIAL_LIBRARY } from '../materials'
+import { MASONRY_SYSTEMS } from '../specs/masonrySystems'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -143,7 +144,7 @@ export default function OpeningPanel() {
         <span style={{ color: '#999', fontSize: 11 }}>ft</span>
       </div>
 
-      {/* Material picker */}
+      {/* Material picker — grouped by masonry system (Phase 1.6c) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <label style={{ color: '#555', flex: 1 }}>Material</label>
         <select
@@ -152,8 +153,14 @@ export default function OpeningPanel() {
           onKeyDown={e => e.stopPropagation()}
           style={{ fontSize: 11, padding: '3px 4px', border: '1px solid #ccc', borderRadius: 4, maxWidth: 140 }}
         >
-          {Object.entries(MATERIAL_LIBRARY).map(([key, mat]) => (
-            <option key={key} value={key}>{mat.name}</option>
+          {Object.values(MASONRY_SYSTEMS).map(sys => (
+            <optgroup key={sys.id} label={sys.label}>
+              {sys.units.map(unitKey => {
+                const mat = MATERIAL_LIBRARY[unitKey]
+                if (!mat) return null
+                return <option key={unitKey} value={unitKey}>{mat.name}</option>
+              })}
+            </optgroup>
           ))}
         </select>
       </div>
