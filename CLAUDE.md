@@ -11,6 +11,36 @@ the next major work item; foundation for it is in place via the canonical
 
 ---
 
+## Greenfield Development (MANDATORY MINDSET)
+
+**This is a greenfield project. No migrations needed for anything.**
+
+Implications for every design decision:
+- **No backward-compatibility shims** — break old save formats freely.
+  loadProject normalizes missing fields with sensible defaults, never
+  preserves "legacy" branches.
+- **No `legacy_*` field names, no `version` bumps for schema additions,
+  no parallel "old path / new path" code.** Pick the right structure
+  and ship it.
+- **No temporary patches** — every fix is the permanent enterprise-level
+  solution. If a quick patch is tempting, stop and design the scalable
+  version first. (Examples: per-instance BBS resolution lives in ONE
+  module; node ownership uses `floorIds: string[]` from day one to
+  support future vertical shafts without re-architecting.)
+- **Schema changes are free.** Add a required field on an entity, drop
+  a field that's been superseded — no migration scripts, no version
+  gates. `loadProject` normalizes on read.
+- **Design for the phases we know are coming.** DXF import (Phase 2.1),
+  floor cloning, BIM export, AI auto-layout, ERP integration — every
+  data model decision must support these without rework. Don't bake in
+  shortcuts that block them.
+- **MCP-first verification** still applies — check Context7 before
+  using library APIs, since we're targeting current versions.
+
+When tempted by a quick fix, ask: "Is this the structure I'd want if
+this codebase had 50 engineers and 1000 customer projects on it?" If
+no, redesign.
+
 ## MCP-First Rule (MANDATORY)
 Query Context7 before writing any code that uses:
 - React 19 hooks or new APIs
