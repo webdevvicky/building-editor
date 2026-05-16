@@ -19,7 +19,14 @@ const CURRENT_KEY = 'boq_current_project_id'
 
 // ── pub/sub ──────────────────────────────────────────────────────────────────
 const listeners = new Set()
+// Cached snapshot for useSyncExternalStore — must keep the same reference
+// across consecutive getSnapshot() calls when nothing changed, or React
+// infinite-loops with "The result of getSnapshot should be cached".
+let _projectsCache = null
+let _currentIdCache = undefined   // undefined = unread; null = explicitly absent
+function invalidateCache() { _projectsCache = null; _currentIdCache = undefined }
 function notify() {
+  invalidateCache()
   for (const fn of listeners) {
     try { fn() } catch { /* swallow listener errors */ }
   }
@@ -77,8 +84,10 @@ function emptyProjectData() {
 // ── public API ───────────────────────────────────────────────────────────────
 
 export function listProjects() {
+  if (_projectsCache !== null) return _projectsCache
   const map = readAll()
-  return Object.values(map).sort((a, b) => (b.updated || 0) - (a.updated || 0))
+  _projectsCache = Object.values(map).sort((a, b) => (b.updated || 0) - (a.updated || 0))
+  return _projectsCache
 }
 
 export function createProject(name, type = 'Residential') {
@@ -146,12 +155,14 @@ export function deleteProject(id) {
 }
 
 export function getCurrentProjectId() {
+  if (_currentIdCache !== undefined) return _currentIdCache
   try {
     const id = localStorage.getItem(CURRENT_KEY)
-    return id || null
+    _currentIdCache = id || null
   } catch {
-    return null
+    _currentIdCache = null
   }
+  return _currentIdCache
 }
 
 export function setCurrentProjectId(id) {
