@@ -21,6 +21,8 @@ import PlumConcreteRow     from './boq/PlumConcreteRow'
 import PlasterSection      from './boq/PlasterSection'
 import { getBoqLines, totalBoqCost } from '../boq/lines'
 import { runValidation } from '../validation/engine'
+import { exportBoqPdf } from '../export/pdf'
+import { exportBoqExcel } from '../export/excel'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -409,6 +411,11 @@ export default function BOQPanel() {
   const [popoverPos,    setPopoverPos]    = useState(null)
   const popoverRef = useRef(null)
 
+  // Phase 1.9 — floor scope toggle: 'current' | 'all'. Only meaningful when multi-floor.
+  const [floorScope, setFloorScope] = useState('current')
+  const currentFloorId = useStore(s => s.currentFloorId)
+  const floors         = projectSettings?.floors ?? []
+
   // Lines sent up from section components (each manages its own row outputs).
   const [structuralLines, setStructuralLines] = useState([])
   const [shutteringLines, setShutteringLines] = useState([])
@@ -476,7 +483,11 @@ export default function BOQPanel() {
   // Canonical aggregator (Stage 0 T4) — single source of truth for cost-total + CSV export.
   // Section components still render their own rows independently; the per-section onLinesReady
   // path is preserved for any future opt-in consumers but no longer drives totals.
-  const canonicalLines = getBoqLines(useStore.getState(), rates)
+  const allLines       = getBoqLines(useStore.getState(), rates)
+  // Phase 1.9 — apply floor scope. Lines with floorId=null pass through both scopes.
+  const canonicalLines = floorScope === 'all'
+    ? allLines
+    : allLines.filter(l => l.floorId == null || l.floorId === currentFloorId)
   const totalCost      = totalBoqCost(canonicalLines)
   const validation     = runValidation(useStore.getState())
   // Suppress unused-var warnings on the legacy section state slots (kept for forward-compat).
@@ -536,7 +547,32 @@ export default function BOQPanel() {
         maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: 6, color: '#333' }}>BOQ Summary</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontWeight: 700, color: '#333' }}>BOQ Summary</div>
+        {/* Phase 1.9 — floor scope toggle */}
+        {floors.length > 1 && (
+          <div style={{ display: 'flex', gap: 2, fontSize: 10 }}>
+            <button
+              onClick={() => setFloorScope('current')}
+              style={{
+                padding: '2px 8px', border: '1px solid #ccc', borderRadius: 4,
+                background: floorScope === 'current' ? '#333' : '#fff',
+                color:      floorScope === 'current' ? '#fff' : '#555',
+                cursor: 'pointer', fontWeight: 500,
+              }}
+            >This floor</button>
+            <button
+              onClick={() => setFloorScope('all')}
+              style={{
+                padding: '2px 8px', border: '1px solid #ccc', borderRadius: 4,
+                background: floorScope === 'all' ? '#333' : '#fff',
+                color:      floorScope === 'all' ? '#fff' : '#555',
+                cursor: 'pointer', fontWeight: 500,
+              }}
+            >All floors</button>
+          </div>
+        )}
+      </div>
       <div style={{ fontSize: 11, fontStyle: 'italic', color: '#aaa', marginBottom: 10 }}>
         Preview pricing — for estimation only. Final rates from ERP product catalog.
       </div>
@@ -761,18 +797,34 @@ export default function BOQPanel() {
         </div>
       )}
 
-      {/* CSV export */}
-      <button
-        onClick={handleExportCSV}
-        style={{
-          marginTop: 10, width: '100%', padding: '6px 0',
-          fontSize: 12, cursor: 'pointer',
-          background: '#f5f5f5', border: '1px solid #ccc', borderRadius: 4,
-          color: '#333',
-        }}
-      >
-        Export BOQ (CSV)
-      </button>
+      {/* Phase 2.0 — Export buttons */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+        <button
+          onClick={handleExportCSV}
+          style={{
+            flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
+            background: '#f5f5f5', border: '1px solid #ccc', borderRadius: 4, color: '#333',
+          }}
+        >CSV</button>
+        <button
+          onClick={() => exportBoqPdf(useStore.getState(), rates, {
+            projectName: 'Layout', preparedBy: '-', unitSystem: unit === 'm' ? 'metric' : 'ft (Indian)',
+          })}
+          style={{
+            flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
+            background: '#fff8e6', border: '1px solid #e0b020', borderRadius: 4, color: '#7a5400',
+            fontWeight: 600,
+          }}
+        >📄 PDF</button>
+        <button
+          onClick={() => exportBoqExcel(useStore.getState(), rates, { projectName: 'Layout' })}
+          style={{
+            flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
+            background: '#e8f5e9', border: '1px solid #81c784', borderRadius: 4, color: '#2e7d32',
+            fontWeight: 600,
+          }}
+        >📊 Excel</button>
+      </div>
 
       <FormulaPopover data={formulaData} pos={popoverPos} popoverRef={popoverRef} />
     </div>

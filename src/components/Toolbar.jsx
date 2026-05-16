@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { useStore } from '../store'
+import { getCurrentProjectId, saveCurrent } from '../projects/manager'
 
 const TOOLS = [
   { id: 'draw',   label: '✏ Draw' },
@@ -14,6 +15,9 @@ const TOOLS = [
   { id: 'column',        label: '⬛ Column' },
   { id: 'beam',          label: '— Beam' },
   { id: 'slabs',         label: '▦ Slabs' },
+  { id: 'foundations',   label: '▭ Foundations' },
+  { id: 'floors',        label: '▤ Floors' },
+  { id: 'bbs',           label: '∥ BBS' },
   { id: 'settings',      label: '⚙ Settings' },
 ]
 
@@ -144,9 +148,24 @@ export default function Toolbar() {
 
       {divider}
 
-      {/* Save / Load */}
-      <button style={actionBtn} onClick={handleSave} title="Download project as JSON">💾 Save</button>
-      <button style={actionBtn} onClick={() => fileInputRef.current.click()} title="Load project from JSON">📂 Load</button>
+      {/* Projects (Phase 2.0) — multi-project localStorage with autosave */}
+      <button style={actionBtn} onClick={() => setTool('projects')} title="Open project list">📁 Projects</button>
+      <button style={actionBtn} title="Save current project (autosaved every 30s)"
+        onClick={() => {
+          const id = getCurrentProjectId()
+          if (!id) { setTool('projects'); return }
+          const s = useStore.getState()
+          saveCurrent(id, {
+            version: 7, nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
+            columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
+            foundations: s.foundations, projectSettings: s.projectSettings,
+          })
+        }}
+      >💾 Save</button>
+
+      {/* Legacy JSON Save / Load — retained for portability */}
+      <button style={actionBtn} onClick={handleSave} title="Download project as JSON">⇩ JSON</button>
+      <button style={actionBtn} onClick={() => fileInputRef.current.click()} title="Load project from JSON">⇪ JSON</button>
       <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleLoadFile}/>
     </div>
   )

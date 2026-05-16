@@ -11,11 +11,17 @@ import StaircasePanel from './components/StaircasePanel'
 import SlabPanel from './components/SlabPanel'
 import ProjectSettingsPanel from './components/ProjectSettingsPanel'
 import LayersPanel from './components/LayersPanel'
+import FoundationPanel from './components/FoundationPanel'
+import FloorSwitcher from './components/FloorSwitcher'
+import FloorsManagerPanel from './components/FloorsManagerPanel'
+import BBSSpecPanel from './components/BBSSpecPanel'
+import ProjectsPanel from './components/ProjectsPanel'
 
 export default function App() {
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
       <Toolbar />
+      <FloorSwitcher />
       <RoomPanel />
       <OpeningPanel />
       <StampPanel />
@@ -24,7 +30,11 @@ export default function App() {
       <ColumnPanel />
       <StaircasePanel />
       <SlabPanel />
+      <FoundationPanel />
+      <FloorsManagerPanel />
+      <BBSSpecPanel />
       <ProjectSettingsPanel />
+      <ProjectsPanel />
       <LayersPanel />
       <BOQPanel />
       <Canvas />
