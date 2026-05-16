@@ -810,15 +810,36 @@ export default function Canvas() {
         })()}
 
         {layerVisibility.nodes && (<>
-        {/* Nodes */}
-        {Object.values(nodes).map(node => {
-          const isStart = node.id === drawStartId
-          return (
-            <circle key={node.id} cx={sx(node.x)} cy={sy(node.y)}
-              r={isStart ? 7 : 5} fill={isStart ? '#e74c3c' : '#4a90e2'}
-              stroke="#fff" strokeWidth={2} style={{ pointerEvents: 'none' }}/>
-          )
-        })}
+        {/* Nodes — floor-aware: a node is "on" the current floor if ANY wall
+         * referencing it lives on currentFloorId. Shared-junction nodes (used
+         * by walls on both the current floor and another) count as active.
+         * Nodes used only by ghost-floor walls render at 0.15 opacity with
+         * pointerEvents disabled. Single-floor projects skip the filter. */}
+        {(() => {
+          const activeNodeIds = new Set()
+          if (multiFloor) {
+            for (const w of Object.values(walls)) {
+              if (floorOf(w) === currentFloorId) {
+                activeNodeIds.add(w.n1)
+                activeNodeIds.add(w.n2)
+              }
+            }
+          }
+          return Object.values(nodes).map(node => {
+            const isStart      = node.id === drawStartId
+            const onActiveFloor = !multiFloor || activeNodeIds.has(node.id)
+            return (
+              <circle key={node.id} cx={sx(node.x)} cy={sy(node.y)}
+                r={isStart ? 7 : 5} fill={isStart ? '#e74c3c' : '#4a90e2'}
+                stroke="#fff" strokeWidth={2}
+                opacity={onActiveFloor ? 1 : 0.15}
+                style={{
+                  pointerEvents: onActiveFloor ? 'auto' : 'none',
+                  cursor: 'default',
+                }}/>
+            )
+          })
+        })()}
         </>)}
 
         {layerVisibility.columns && (<>

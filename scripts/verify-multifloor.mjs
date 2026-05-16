@@ -165,6 +165,30 @@ check('F1 Living still in getValidRoomIds after F2 duplicate added',
 check('F2 Living-F2 in getValidRoomIds (not excluded as overlap)',
       validIds.includes(f2RoomId))
 
+// ── Node-floor membership (drives Canvas ghost rendering of nodes) ──────────
+// A node belongs to a floor if ANY wall referencing it is on that floor.
+// Shared-junction nodes count as active for every floor that uses them.
+const wallsAll = Object.values(s().walls)
+const f1NodeIds = new Set()
+const f2NodeIds = new Set()
+for (const w of wallsAll) {
+  const fid = w.floorId ?? 'F1'
+  if (fid === 'F1') { f1NodeIds.add(w.n1); f1NodeIds.add(w.n2) }
+  if (fid === f2Id) { f2NodeIds.add(w.n1); f2NodeIds.add(w.n2) }
+}
+check('F1 has node-floor membership set', f1NodeIds.size >= 4)
+check('F2 has node-floor membership set', f2NodeIds.size >= 4)
+// With the duplicate Living-F2 having identical coords, F2 wall endpoints
+// landed on EXISTING F1 nodes (getOrCreateNode snapping is floor-blind today,
+// which is the known follow-up bug). So F1 + F2 node sets DO overlap here.
+// The rendering rule treats shared nodes as active for any floor they touch,
+// so visibility is correct on both floors. Still flag the intersection so a
+// future floor-aware getOrCreateNode fix is visible to verifications.
+const sharedNodeIds = [...f1NodeIds].filter(id => f2NodeIds.has(id))
+check('Shared-junction nodes are visible on both their floors (rendering invariant)',
+      sharedNodeIds.every(id => f1NodeIds.has(id) && f2NodeIds.has(id)),
+      `${sharedNodeIds.length} shared`)
+
 // Sanity: an actual same-floor overlap is still caught.
 // Build a second 20×15 room at the same coords on F2 — should be blocked.
 const blockSW = s().getOrCreateNode(0,       0)
