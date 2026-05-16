@@ -28,6 +28,8 @@ import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { computeShutteringQuantities } from '../quantities/shuttering'
 import { computeExcavationQuantities } from '../quantities/excavation'
 import { computePlasterQuantities }    from '../quantities/plaster'
+import { computeFoundationQuantities } from '../quantities/foundations'
+import { computeBBSQuantities }        from '../quantities/bbs'
 import { PLASTER_KIND }                from '../specs/plasterSystems'
 
 const DEFAULT_FLOOR = 'F1'
@@ -118,10 +120,13 @@ export function getBoqLines(state, rates) {
     push({ id: `fot_${ctId}_rcc`, category: 'rcc', label: `Footing ${q.label} ×${q.count}`, qty: r2(q.concreteVolFt3), unit: 'ft³', rateKey: `fot_${ctId}_rcc`, formulaId: `fot_${ctId}_rcc`, meta: { columnTypeId: ctId } })
     push({ id: `fot_${ctId}_pcc`, category: 'rcc', label: `PCC under ${q.label}`,            qty: r2(q.pccVolFt3),      unit: 'ft³', rateKey: `fot_${ctId}_pcc`, formulaId: `fot_${ctId}_pcc`, meta: { columnTypeId: ctId } })
   }
-  for (const [fid, q] of Object.entries(fdnQ.byFoundation)) {
-    push({ id: `fdn_${fid}_rcc`, category: 'rcc', label: `Foundation ${q.label}`, qty: r2(q.concreteVolFt3), unit: 'ft³', rateKey: `fdn_${fid}_rcc`, formulaId: `fdn_${fid}_rcc`, meta: { foundationId: fid, type: q.type } })
-    if (q.pccVolFt3 > 0)
-      push({ id: `fdn_${fid}_pcc`, category: 'rcc', label: `PCC under ${q.label}`, qty: r2(q.pccVolFt3), unit: 'ft³', rateKey: `fdn_${fid}_pcc`, formulaId: `fdn_${fid}_pcc`, meta: { foundationId: fid } })
+  // Phase 1.8 — use computeFoundationQuantities for richer per-type geometry.
+  const fdnDetail = computeFoundationQuantities(state).perFoundation
+  for (const f of fdnDetail) {
+    if (f.concreteVolFt3 > 0)
+      push({ id: `fdn_${f.id}_rcc`, category: 'rcc', label: `Foundation ${f.label}`, qty: r2(f.concreteVolFt3), unit: 'ft³', rateKey: `fdn_${f.id}_rcc`, formulaId: `fdn_${f.id}_rcc`, meta: { foundationId: f.id, type: f.type } })
+    if (f.pccVolFt3 > 0)
+      push({ id: `fdn_${f.id}_pcc`, category: 'rcc', label: `PCC under ${f.label}`, qty: r2(f.pccVolFt3), unit: 'ft³', rateKey: `fdn_${f.id}_pcc`, formulaId: `fdn_${f.id}_pcc`, meta: { foundationId: f.id } })
   }
 
   for (const lvl of BEAM_LEVEL_REGISTRY) {
@@ -139,7 +144,10 @@ export function getBoqLines(state, rates) {
   if (totalStairRcc > 0) push({ id: 'stair_rcc', category: 'staircase', label: 'Staircase RCC', qty: r2(totalStairRcc), unit: 'ft³', rateKey: 'stair_rcc', formulaId: 'stair_rcc' })
 
   // ── 5. Structural Steel ───────────────────────────────────────────────
+  // Phase 1.7: when reinforcement specs exist for an element, prefer BBS over kg/m³ estimate.
+  // Estimate path remains the default when no spec is attached.
   const steelQ = state.getSteelQuantities()
+  const bbs    = computeBBSQuantities(state)
   const STEEL_DEFS = [
     { key: 'footing',    label: 'Footings',   rk: 'steel_footing',    et: 'FOOTING' },
     { key: 'column',     label: 'Columns',    rk: 'steel_column',     et: 'COLUMN' },
@@ -148,9 +156,22 @@ export function getBoqLines(state, rates) {
     { key: 'staircase',  label: 'Staircases', rk: 'steel_staircase',  et: 'STAIRCASE' },
     { key: 'civilStamp', label: 'Civil',      rk: 'steel_civil',      et: 'CIVIL_STAMP' },
   ]
+  // BBS contribution per category (entity-driven). Lines marked "(BBS)" carry meta.bbs=true.
+  const bbsCategoryKg = {
+    column:  bbs.byColumn.reduce((s, c) => s + (c.totalKg || 0), 0),
+    beam:    Object.values(bbs.byBeamLevel || {}).reduce((s, b) => s + (b?.totalKg || 0), 0),
+    footing: bbs.byFooting.reduce((s, f) => s + (f.totalKg || 0), 0),
+    slab:    bbs.bySlab.reduce((s, sl) => s + (sl.totalKg || 0), 0),
+  }
   for (const { key, label, rk, et } of STEEL_DEFS) {
-    const kg = steelQ?.[key] ?? 0
-    if (kg > 0) push({ id: rk, category: 'steel', label: `Steel – ${label}`, qty: r2(kg), unit: 'kg', rateKey: rk, formulaId: `steel_${et}` })
+    const estKg = steelQ?.[key] ?? 0
+    const bbsKg = bbsCategoryKg[key] ?? 0
+    if (bbsKg > 0) {
+      push({ id: `${rk}_bbs`, category: 'steel', label: `Steel – ${label} (BBS)`, qty: r2(bbsKg), unit: 'kg', rateKey: rk, formulaId: `steel_${et}`, meta: { bbs: true } })
+    }
+    if (estKg > 0 && bbsKg === 0) {
+      push({ id: rk, category: 'steel', label: `Steel – ${label} (Est.)`, qty: r2(estKg), unit: 'kg', rateKey: rk, formulaId: `steel_${et}`, meta: { bbs: false } })
+    }
   }
 
   // ── 6. Concrete mix (M20 + M7.5) ──────────────────────────────────────

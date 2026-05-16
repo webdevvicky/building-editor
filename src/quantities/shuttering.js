@@ -16,6 +16,7 @@
 // refine with explicit step shuttering tally.
 
 import { getColumnPerimeterFt } from '../lib/columnShapes'
+import { computeFoundationQuantities } from './foundations'
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
@@ -77,20 +78,17 @@ export function computeShutteringQuantities(state) {
       areaFt2:     r2(areaPerFooting * q.count),
     })
   }
-  // Foundation entities (combined/raft/strip/pile via Phase 1.8)
-  for (const [fid, q] of Object.entries(fdnQ.byFoundation)) {
-    if (!q.footprintFt2) continue
-    const sqrtFootprint = Math.sqrt(q.footprintFt2)
-    // Approx perimeter = 4 × sqrt(area) for square; replace with real geometry when Phase 1.8 lands.
-    const perimeterFt = 4 * sqrtFootprint
-    const depthFt = q.concreteVolFt3 && q.footprintFt2 ? (q.concreteVolFt3 / q.footprintFt2) : 0
+  // Foundation entities (combined/raft/strip/pile via Phase 1.8 — proper geometry per type)
+  const fdnEntities = computeFoundationQuantities(state).perFoundation
+  for (const f of fdnEntities) {
+    if (!f.shutterAreaFt2) continue
     footings.push({
-      key:         `fdn_${fid}`,
-      label:       q.label,
+      key:         `fdn_${f.id}`,
+      label:       f.label,
       count:       1,
-      perimeterFt: r2(perimeterFt),
-      depthFt:     r2(depthFt),
-      areaFt2:     r2(perimeterFt * depthFt),
+      perimeterFt: 0,                // perimeter is type-dependent; full area is what matters
+      depthFt:     0,
+      areaFt2:     f.shutterAreaFt2,
     })
   }
   const footingTotal = footings.reduce((s, f) => s + f.areaFt2, 0)

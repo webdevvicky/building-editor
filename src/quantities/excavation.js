@@ -28,6 +28,7 @@
 // With any column / foundation / civil stamp present, the section is shown.
 
 import { PCC_BEDDING_THICKNESS_FT } from '../constants/structural'
+import { computeFoundationQuantities } from './foundations'
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
@@ -77,24 +78,18 @@ export function computeExcavationQuantities(state) {
       volFt3:   r2(volTotal),
     })
   }
-  for (const [fid, q] of Object.entries(fdnQ.byFoundation)) {
-    if (!q.footprintFt2) continue
-    const footingThicknessFt = q.concreteVolFt3 && q.footprintFt2
-      ? q.concreteVolFt3 / q.footprintFt2
-      : 0
-    if (footingThicknessFt === 0) continue
-    const pitExtraDepthFt = footingThicknessFt + PCC_BEDDING_THICKNESS_FT
-    // Working margin approximation: envelope = (√A + 2·margin)² for rectangular pits.
-    const sqrtA       = Math.sqrt(q.footprintFt2)
-    const envelopeFt2 = Math.pow(sqrtA + 2 * marginFt, 2)
-    const volTotal    = envelopeFt2 * pitExtraDepthFt
-    foundationVolFt3 += volTotal
+  // Phase 1.8: foundation-entity excavation uses computeFoundationQuantities
+  // which knows the proper geometry per type (ISOLATED/COMBINED/RAFT/STRIP/PILE).
+  const fdnEntities = computeFoundationQuantities(state).perFoundation
+  for (const f of fdnEntities) {
+    if (!f.excavVolFt3) continue
+    foundationVolFt3 += f.excavVolFt3
     perFoundation.push({
-      key:      `fdn_${fid}`,
-      label:    q.label,
+      key:      `fdn_${f.id}`,
+      label:    f.label,
       count:    1,
-      pitDimFt: `${r2(sqrtA + 2 * marginFt)}²×${r2(pitExtraDepthFt)}`,
-      volFt3:   r2(volTotal),
+      pitDimFt: `${f.type}`,
+      volFt3:   r2(f.excavVolFt3),
     })
   }
 
