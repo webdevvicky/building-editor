@@ -2,9 +2,217 @@
 
 ## Current Phase Status
 
-Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 complete on `main`.
-Phase 1.8 (foundation type UI), Phase 1.9 (multi-floor UI), Phase 1.7 (BBS),
-Phase 2.0 (PDF/Excel/ERP) not started.
+Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +
+Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 complete on `main` (2026-05-16).
+
+ERP integration (replace static MATERIAL_LIBRARY + add live rate catalog) is
+the next major work item; foundation for it is in place via the canonical
+`getBoqLines()` pipeline.
+
+---
+
+## Architectural Fixes (2026-05-16, commit `275472f`)
+
+Foundational refactor applied before Phase 1.7/1.8/1.9/2.0 to keep ownership
+relationships single-sourced and floor topology unambiguous.
+
+**Fix 1 — Foundation ownership.** `column.foundationId` is removed.
+`foundation.columnIds[]` and `foundation.wallIds[]` are the single source of
+truth. Centralized selectors: `getFoundationForColumn(state, columnId)`,
+`getFoundationForWall(state, wallId)`, `getFoundationsForWall`,
+`getColumnsByFoundation(state, foundationId)`. `attachColumnToFoundation`,
+`detachColumnFromFoundation`, `attachWallToFoundation`, and
+`detachWallFromFoundation` mutate only the `foundations` map. The inline
+auto-isolated path in `getFoundationQuantities()` filters via
+`foundation.columnIds[]` union — columns absent from any foundation fall
+back to inline column-type footing.
+
+**Fix 2 — Column floor spanning.** `column.baseFloorId` + `column.topFloorId`
+(default both = `currentFloorId`). New `state.getColumnHeightFt(col)` sums
+floor heights from base through top + plinth on the base floor + slab
+thickness on the top floor. `getColumnQuantities()` is now per-column so
+multi-span columns contribute their full height. `loadProject` migration
+renames legacy `column.floorId → baseFloorId` and mirrors `topFloorId`.
+Action: `setColumnFloorSpan(id, baseFloorId, topFloorId)`.
+
+**Fix 3 — Slab role / classification.** Every slab carries
+`slab.classification` and `slab.role` (alias). Auto-populated on creation:
+TOILET/BALCONY → `'SUNKEN'`, top floor → `'ROOF'`, intermediate → `'FLOOR'`.
+`autoInitSlabs` + `addSlab(options.role?)` + `loadProject` migration all
+populate it. Action: `setSlabRole(slabId, role)`. Helper `inferSlabRole(state,
+floorId)` is the canonical derivation — never branch on slab type directly
+for role logic.
+
+**Fix 4 — Validation engine.** `src/validation/engine.js` + 5 rules in
+`src/validation/rules/`. `runValidation(state) → { issues, byRule, byCategory,
+counts }`. Issue shape `{ ruleId, severity, category, entityType, entityId,
+message }`. Severities: `info | warning | error`. Rules: `floating_column`
+(column with no nearby wall nodes), `slab_no_enclosure` (slab references
+invalid room), `beam_no_support` (explicit beam endpoint not a column),
+`staircase_disconnected` (fromFloorId === toFloorId when multi-floor),
+`footing_no_column` (foundation with empty columnIds AND wallIds; RAFT/PILE
+exempt). BOQPanel footer surfaces top 5 issues with severity color.
+No hard-blocking — warnings only.
+
+**Selector discipline.** Required for all Phase 1.7+ code:
+`getColumnsOnFloor`, `getWallsOnFloor`, `getSlabsOnFloor`, `getStampsOnFloor`,
+`getRoomsOnFloor`, `getBeamsOnFloor`, `getStaircasesOnFloor`,
+`getEntitiesOnFloor` (returns all keyed arrays). Never traverse
+`foundations`/`columns`/`walls` inline. The selectors are the only sanctioned
+way to scope entities by floor or follow a column→foundation relationship.
+
+---
+
+## Phase 1.8 — Foundation Types (2026-05-16, commit `1921652`)
+
+Five foundation types with proper per-type geometry, integrated through the
+canonical BOQ pipeline.
+
+**Quantities (`src/quantities/foundations.js`).** Pure function
+`computeFoundationQuantities(state) → { perFoundation, totals }` where each
+entry has `{ id, type, label, columnCount, wallCount, concreteVolFt3,
+pccVolFt3, plumVolFt3, excavVolFt3, shutterAreaFt2 }`. Geometry rules:
+- **ISOLATED / COMBINED:** `footprint = L×W`; `excav = (L+2m)×(W+2m)×(D+pcc)`;
+  `shutter = 2(L+W)×D`.
+- **RAFT:** `footprint = geometry.areaFt2` (no margin — raft IS the footprint);
+  `shutter = 4√A × D`.
+- **STRIP:** attaches to `wallIds[]`; `totalLenFt = Σ getWallLength(wid)`;
+  `excav = totalLenFt × (W+2m) × (D+pcc)`; `shutter = 2 × totalLenFt × D`.
+- **PILE:** `shaftFt3 = pilesCount · π·(d/2)² · L`; cap = `capL×capW×capD`;
+  `excav = capFootprint × (capD+pcc)` (pile shafts displace ground — not
+  counted in dig volume).
+
+`marginFt = projectSettings.excavationSettings?.workingMarginFt ?? 0.5`.
+
+**Panel (`src/components/FoundationPanel.jsx`).** Modal opened by
+`activeTool='foundations'` (toolbar `▭ Foundations` button). Type-conditional
+geometry inputs; column-attachment multi-select for COMBINED; wall-attachment
+multi-select for STRIP. Foundation badge appears in `ColumnPanel` when a
+column is attached.
+
+**Integration.** `boq/lines.js` emits one `rcc` + one `pcc` line per foundation
+entity from `computeFoundationQuantities().perFoundation` (the inline
+`byColumnTypeInline` path is unchanged for columns with no foundation).
+`quantities/excavation.js` and `quantities/shuttering.js` consume the same
+aggregator instead of the previous square-root approximations.
+
+## Phase 1.9 — Multi-Floor UI (2026-05-16, commit `af1c34b`)
+
+Multi-floor management UI built on Stage 0's `projectSettings.floors[]`
+plumbing.
+
+**FloorSwitcher (`src/components/FloorSwitcher.jsx`).** Horizontal pill tabs at
+top of canvas, sorted by `floor.sequence`. Only renders when `floors.length >
+1`. Active floor highlighted; clicking calls `setCurrentFloorId(id)`.
+
+**FloorsManagerPanel (`src/components/FloorsManagerPanel.jsx`).** Modal opened
+by `activeTool='floors'` (toolbar `▤ Floors` button). Per-floor editor for
+`label`, `plinthHeightFt`, `floorHeightFt`. Per-floor slab-thickness override
+stored on `floor.meta.slabThicknessIn` (consumer-side selectors still read the
+project default — wire-through is a follow-up). Delete guard via
+`getEntitiesOnFloor(floorId)` — disabled when any walls/rooms/stamps/columns/
+beams/slabs/staircases live on the floor.
+
+**ColumnPanel — span pickers.** When `floors.length > 1`, two dropdowns
+appear (Base floor / Top floor) calling `setColumnFloorSpan`. Single-floor
+projects render unchanged.
+
+**BOQ scope toggle.** `BOQPanel` header shows "This floor | All floors" when
+multi-floor. Filters `getBoqLines()` output by `line.floorId === currentFloorId`
+(or pass-through for lines with `floorId == null`, which are project-wide
+totals like masonry or floor-area finishes).
+
+**Known follow-up.** Canvas ghost-rendering of non-active floors at
+`opacity: 0.15` is deferred — `currentFloorId` subscription is in place but
+the per-floor render-grouping refactor of Canvas.jsx is not. Single-floor
+projects are visually unaffected.
+
+## Phase 1.7 — Professional Steel BBS (2026-05-16, commit `1096667`)
+
+Bar Bending Schedule replaces the kg/m³ steel estimate for any element that
+carries a `reinforcementSpecId`.
+
+**Specs (`src/specs/reinforcementSpecs.js`).** Constants:
+- `STEEL_UNIT_WEIGHT_KG_PER_M` for 8/10/12/16/20/25/32 mm bars.
+- `DEFAULT_COVER_MM_BY_ELEMENT` (FOOTING 40, COLUMN 25, BEAM 25, SLAB 20).
+- `DEFAULT_HOOK_LENGTH_FT = 0.5`, `DEFAULT_LAP_LENGTH_MULTIPLIER = 50`.
+- `REINFORCEMENT_SPEC_PRESETS` for COLUMN/BEAM/FOOTING/SLAB.
+
+Compute helpers (pure): `computeColumnBBS(spec, columnHeightFt,
+columnTypeDef)`, `computeBeamBBS(spec, lengthFt, widthIn, depthIn)`,
+`computeFootingBBS(spec, lengthFt, widthFt)`, `computeSlabBBS(spec, areaFt2,
+spanFt, widthFt)`. Each returns `{ longitudinalKg, stirrupKg, totalKg }` or
+similar per-element shape.
+
+**Aggregator (`src/quantities/bbs.js`).** `computeBBSQuantities(state) → {
+byColumn[], byBeamLevel{}, byFooting[], bySlab[], totalKg }`. Resolution per
+entity: `entity.reinforcementSpecId → projectSettings.bbsDefaults[elementType]
+→ null` (null = skip; kg/m³ estimate covers the entity).
+
+**Panel (`src/components/BBSSpecPanel.jsx`).** Modal opened by
+`activeTool='bbs'` (toolbar `∥ BBS` button). Spec CRUD + preset import +
+per-element-type project defaults via `setProjectSettings({ bbsDefaults: ...
+})`.
+
+**Element panels.** `ColumnPanel` and `SlabPanel` each show a spec dropdown
+filtered to the element type, calling `setColumnReinforcementSpec` or
+`setSlabReinforcementSpec` (null clears → estimate fallback).
+
+**BOQ labels.** `boq/lines.js` emits each steel line as `Steel – Footings
+(BBS)` when BBS data exists for that category, else `Steel – Footings
+(Est.)`. Both labels share the same `rateKey` so rate input doesn't fork.
+Estimate is suppressed for a category when BBS produces a non-zero kg total
+(no double-counting). Per-beam overrides (`byBeam[]`) are not implemented —
+beam BBS is per-level only.
+
+## Phase 2.0 — Professional Deliverables (2026-05-16, commits `991f1d0`, `2f331fb`)
+
+PDF + Excel exports, plus multi-project localStorage with debounced
+autosave.
+
+**PDF (`src/export/pdf.js`).** `exportBoqPdf(state, rates, { projectName,
+preparedBy, unitSystem })` triggers download of `boq-${projectName}-${date}.pdf`.
+Built on `jsPDF` + `jspdf-autotable`. Cover page → per-category tables →
+summary page. Footer disclaimer "Preliminary estimate — for budgeting only"
++ page number via `didDrawPage` hook. Uses ASCII `Rs. ` prefix because the
+default helvetica font lacks the `U+20B9` INR glyph.
+
+**Excel (`src/export/excel.js`).** `exportBoqExcel(state, rates, { projectName
+})` downloads `boq-${projectName}-${date}.xlsx`. Built on SheetJS (`xlsx`).
+Sheets: Summary, one per non-empty category, Raw Data. Amount cells are
+**live formulas** (`=C*D`, or `=(C/1000)*D` for `isPer1000` brick rows) so
+users can adjust rates in-sheet.
+
+**Project manager (`src/projects/manager.js`).** localStorage-backed under key
+`boq_projects` with current-id under `boq_current_project_id`. API:
+`listProjects` / `createProject(name, type)` / `openProject(id)` /
+`saveCurrent(id, data)` / `renameProject` / `deleteProject` /
+`getCurrentProjectId` / `setCurrentProjectId` / `subscribe(fn)`. Quota
+overflow returns `false` from `saveCurrent`. **Critical:** `listProjects()`
+and `getCurrentProjectId()` memoize at module scope; `notify()` invalidates
+caches before fanning out — required because `ProjectsPanel` uses
+`useSyncExternalStore` and React infinite-loops if `getSnapshot()` returns a
+new reference each call.
+
+**Autosave (`src/projects/autosave.js`).** `installAutosave(store,
+getProjectId)` returns an uninstaller. Subscribes to the Zustand store and
+debounces persistence writes by 30 s via `setTimeout`. Flushes on
+`beforeunload`. Snapshot format `version: 7` with all entity maps +
+`projectSettings`.
+
+**ProjectsPanel (`src/components/ProjectsPanel.jsx`).** Modal opened by
+`activeTool='projects'` OR forced open on mount when `getCurrentProjectId()`
+is null (gate ensures fresh installs land on the picker). Recent-5 list +
+Open/Rename/Delete + "+ New project" with type dropdown
+(Residential/Commercial/Industrial).
+
+**Toolbar.** New `📁 Projects` opens the picker; `💾 Save` persists to the
+current project; legacy `⇩ JSON` / `⇪ JSON` retained for file portability.
+
+**BOQPanel export buttons.** CSV (existing) + 📄 PDF + 📊 Excel side-by-side
+under the cost total.
+
+**New dependencies.** `jspdf ^3`, `jspdf-autotable ^5`, `xlsx ^0.18`.
 
 ---
 
@@ -225,9 +433,15 @@ Phase 2.0 (PDF/Excel/ERP) not started.
 
 - **Canvas.jsx SVG render stack** — layer order (bottom to top): grid → room fills → stamps → walls → beams → ghost line → nodes → columns → UI overlays → room labels. Changing this order has visual consequences. Document in source.
 
-- **Multi-floor structural** — all structural selectors assume single floor. Phase 2: multiply column/beam/slab quantities per floor count.
+- **Multi-floor structural** — Phase 1.9 added per-floor data plumbing; selectors honor `floorId`. Still pending: per-floor slab thickness override stored on `floor.meta.slabThicknessIn` is not yet consumed by `getSlabQuantities()`. Wire-through is a small follow-up.
 
-- **Combined/raft footings, L/T columns, two-way slab steel, BBS** — deferred Phase 2.
+- **Canvas ghost rendering** — Phase 1.9 wired `currentFloorId` into Canvas but the per-floor render-grouping refactor that dims non-active floors at `opacity: 0.15` is deferred. Single-floor projects unaffected. Multi-floor projects will see all floors stacked at full opacity until this lands.
+
+- **Combined/raft footings, L/T columns, two-way slab steel, BBS** — done in Phase 1.7/1.8.
+
+- **BBS per-beam overrides** — `byBeamLevel` only; per-beam `byBeam[]` will need a separate aggregation in `computeBBSQuantities`.
+
+- **Slab BBS span approximation** — uses `√area` for span/width. Fine for square rooms; loose for long thin slabs. Phase 2.x should expose `slab.geometry.spanFt` when a real one-way/two-way distinction needs precision.
 
 ---
 
@@ -292,9 +506,12 @@ Phase 2.0 (PDF/Excel/ERP) not started.
 ### `projectSettings` — full shape
 ```
 {
-  heights:           { plinthHeightFt, floorHeightFt }
+  heights:           { plinthHeightFt, floorHeightFt }       // legacy single-floor mirror
+  floors:            [{ id, label, sequence, plinthHeightFt, floorHeightFt, meta }]
+  defaultPlasterSystemId: 'CEMENT_SAND_INTERNAL'
   columnTypes:       [{ id, label, shape, widthIn?, depthIn?, diamIn?,
-                        footingLengthFt, footingWidthFt, footingDepthFt }]
+                        footingLengthFt, footingWidthFt, footingDepthFt,
+                        reinforcementSpecId? }]
   beamDimensions:    { [levelId]: { widthIn, depthIn } }  ← keyed by BEAM_LEVEL_REGISTRY id
   slabSettings:      { mainThicknessIn, sunkenDepthIn, autoSunkenRoomTypes }
   sunshadeSettings:  { enabled, projectionFt, thicknessIn }
@@ -302,6 +519,10 @@ Phase 2.0 (PDF/Excel/ERP) not started.
   staircaseDefaults: { type, treadIn, riserIn, waistSlabIn, landingFtWidth, landingFtLength, flightWidthFt }
   rccSpecs:          { concreteGrade: { FOOTING,COLUMN,BEAM,SLAB,STAIRCASE,PCC },
                        steelKgPerM3:  { FOOTING,COLUMN,BEAM,SLAB,STAIRCASE,CIVIL_STAMP } }
+  foundationDefaults:{ plumDepthFt }                         // Phase 1.6e
+  excavationSettings:{ workingMarginFt?, bulkDepthFt? }      // Phase 1.6b
+  reinforcementSpecs:{ [specId]: { id, label, elementType, ... } }  // Phase 1.7
+  bbsDefaults:       { COLUMN?, BEAM?, FOOTING?, SLAB? }     // Phase 1.7 — specId per element
 }
 ```
 - `footingTypes` key **does not exist** in the current model. `loadProject` strips it during migration.
@@ -326,10 +547,13 @@ Phase 2.0 (PDF/Excel/ERP) not started.
 - Only `MAIN` and `SUNKEN` slab types are active. `BALCONY` and `TERRACE` were removed (no quantity calculation pipeline; would produce silent zero output).
 
 ### `loadProject` migrations (cumulative)
-- **Wall**: inject `materialKey: 'IS_MODULAR_BRICK'` default.
-- **Stamp (v1–v3→v4)**: inject `depth`/`name` defaults for civil stamp types.
+- **Wall**: inject `materialKey: 'IS_MODULAR_BRICK'` + `floorId/classification/meta` defaults.
+- **Stamp (v1–v3→v4)**: inject `depth`/`name` defaults for civil stamp types; `floorId`/`meta`.
 - **Column type (Layer 4)**: if `footingTypeId` present and no inline dims, resolve from saved `footingTypes` array and inline.
 - **rccSpecs (Layer 5)**: if `rccSpecs` absent, inject `DEFAULT_PROJECT_SETTINGS.rccSpecs`.
+- **Column (Fix 1+2)**: drop legacy `foundationId`; rename legacy `floorId → baseFloorId`; mirror `topFloorId` from base.
+- **Slab (Fix 3)**: derive `classification` + `role` from saved `role`/`classification`/`type` (SUNKEN if type=='SUNKEN', else fallback 'ROOF').
+- **Foundations / floors / plaster default**: inject DEFAULT keys when absent.
 
 ---
 
@@ -348,4 +572,12 @@ Phase 2.0 (PDF/Excel/ERP) not started.
 - Column shape logic lives in `src/lib/columnShapes.js`. Never branch on `ct.shape` outside that file.
 - `getFootingQuantities()` is keyed by column type id, not footing type id. `footingTypeId` does not exist on column types in the current model.
 - Canvas SVG layer order (bottom→top): room fills → stamps → walls → beams → ghost → nodes → columns → UI overlays → room labels. `layerVisibility` guards each section.
-- No new libraries without asking.
+- **Fix 1 — foundation ownership.** `column.foundationId` does not exist. Read attachment via `getFoundationForColumn(state, columnId)` or `getColumnsByFoundation(state, foundationId)`. Mutate via `attachColumnToFoundation` / `detachColumnFromFoundation` (and the wall equivalents). Never traverse `state.foundations` inline to find a column's parent.
+- **Fix 2 — column height.** Always use `state.getColumnHeightFt(col)`. Never recompute via `plinth + floor + slabThk` because multi-span columns will be wrong. The helper spans `[baseFloorId, topFloorId]` in the sequence-ordered floor stack.
+- **Fix 3 — slab role.** A slab's structural role is `slab.role` / `slab.classification`. Derive via `inferSlabRole(state, floorId)` (`'ROOF' | 'FLOOR' | 'SUNKEN' | 'STAIR_LANDING'`). Never branch on `slab.type` for role logic — type is layout (MAIN/SUNKEN), role is structural.
+- **Selector discipline.** Phase 1.7+ code uses `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor / getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor / getEntitiesOnFloor` for floor scoping. No inline `.filter(e => e.floorId === ...)` in components or quantity functions.
+- **Foundation BOQ pipeline.** `computeFoundationQuantities(state)` is the per-type geometry source. `getFoundationQuantities()` keeps the inline `byColumnTypeInline` path for legacy columns with no foundation attached. `boq/lines.js`, `excavation.js`, `shuttering.js` all read from `computeFoundationQuantities`.
+- **Steel BBS vs Est.** When `reinforcementSpecId` is set on an element, BBS replaces the kg/m³ estimate for that element's category. `boq/lines.js` emits at most one steel line per category, labeled `(BBS)` when `computeBBSQuantities` produced kg, else `(Est.)`.
+- **Project manager snapshot caching.** `listProjects()` and `getCurrentProjectId()` MUST keep stable references between calls. `notify()` invalidates the in-module caches before fanning out. Required by `useSyncExternalStore` in `ProjectsPanel`.
+- **PDF currency.** Default jsPDF helvetica lacks `U+20B9`. Use the ASCII `Rs. ` prefix in `src/export/pdf.js`. Excel uses formulas (`=C*D`) so the column header carries the currency note instead.
+- **No new libraries without asking** — but `jspdf`, `jspdf-autotable`, and `xlsx` were explicitly approved for Phase 2.0.
