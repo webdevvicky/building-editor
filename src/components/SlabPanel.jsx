@@ -73,6 +73,8 @@ export default function SlabPanel() {
   const updateSlab      = useStore(s => s.updateSlab)
   const deleteSlab      = useStore(s => s.deleteSlab)
   const assignRoomToSlab = useStore(s => s.assignRoomToSlab)
+  const setSlabReinforcementSpec = useStore(s => s.setSlabReinforcementSpec)
+  const projectSettings = useStore(s => s.projectSettings)
 
   if (activeTool !== 'slabs') return null
 
@@ -133,6 +135,33 @@ export default function SlabPanel() {
                   </>
                 )}
               </div>
+
+              {/* Phase 1.7 — per-slab reinforcement spec */}
+              {(() => {
+                const specs = projectSettings?.reinforcementSpecs ?? {}
+                const slabSpecs = Object.values(specs).filter(sp => sp.elementType === 'SLAB')
+                return (
+                  <div style={inlineRow}>
+                    <label style={{ fontSize: 11, color: '#888' }}>Steel spec</label>
+                    <select
+                      value={slab.reinforcementSpecId ?? ''}
+                      onKeyDown={e => e.stopPropagation()}
+                      onChange={e => setSlabReinforcementSpec(slab.id, e.target.value || null)}
+                      style={{ fontSize: 12 }}
+                    >
+                      <option value="">— Estimate —</option>
+                      {slabSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
+                    </select>
+                  </div>
+                )
+              })()}
+
+              {/* Role badge — Fix 3 */}
+              {slab.role && (
+                <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>
+                  Role: <strong style={{ color: '#555' }}>{slab.role}</strong>
+                </div>
+              )}
 
               {slab.roomIds.length > 0 && (
                 <div style={{ marginTop: 4 }}>

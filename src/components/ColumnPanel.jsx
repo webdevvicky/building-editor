@@ -41,6 +41,9 @@ export default function ColumnPanel() {
   const setColumnType    = useStore(s => s.setColumnType)
   const detachColumn     = useStore(s => s.detachColumn)
   const deleteColumn     = useStore(s => s.deleteColumn)
+  const setColumnFloorSpan = useStore(s => s.setColumnFloorSpan)
+  const setColumnReinforcementSpec = useStore(s => s.setColumnReinforcementSpec)
+  const getFoundationForColumn = useStore(s => s.getFoundationForColumn)
 
   if (!selectedColumnId) return null
   const column = columns[selectedColumnId]
@@ -99,6 +102,76 @@ export default function ColumnPanel() {
         <div style={label}>Dimensions</div>
         <div>{dimLabel}</div>
       </div>
+
+      {/* Phase 1.9 — base / top floor pickers (multi-floor only) */}
+      {(() => {
+        const floors = [...(projectSettings.floors ?? [])].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+        if (floors.length <= 1) return null
+        const baseId = column.baseFloorId ?? floors[0].id
+        const topId  = column.topFloorId  ?? baseId
+        return (
+          <>
+            <div style={fieldRow}>
+              <div style={label}>Base floor</div>
+              <select
+                value={baseId}
+                onChange={e => setColumnFloorSpan(selectedColumnId, e.target.value, topId)}
+                onKeyDown={e => e.stopPropagation()}
+                style={{ width: '100%', fontSize: 13 }}
+              >
+                {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+            </div>
+            <div style={fieldRow}>
+              <div style={label}>Top floor</div>
+              <select
+                value={topId}
+                onChange={e => setColumnFloorSpan(selectedColumnId, baseId, e.target.value)}
+                onKeyDown={e => e.stopPropagation()}
+                style={{ width: '100%', fontSize: 13 }}
+              >
+                {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+            </div>
+          </>
+        )
+      })()}
+
+      {/* Phase 1.7 — Reinforcement spec (BBS) */}
+      {(() => {
+        const specs = projectSettings.reinforcementSpecs ?? {}
+        const colSpecs = Object.values(specs).filter(s => s.elementType === 'COLUMN')
+        return (
+          <div style={fieldRow}>
+            <div style={label}>Steel spec (BBS)</div>
+            <select
+              value={column.reinforcementSpecId ?? ''}
+              onChange={e => setColumnReinforcementSpec(selectedColumnId, e.target.value || null)}
+              onKeyDown={e => e.stopPropagation()}
+              style={{ width: '100%', fontSize: 13 }}
+            >
+              <option value="">— Estimate (kg/m³) —</option>
+              {colSpecs.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+            {colSpecs.length === 0 && (
+              <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>
+                Open BBS panel to define column specs.
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* Phase 1.8 — Foundation attachment indicator */}
+      {(() => {
+        const fdn = getFoundationForColumn(selectedColumnId)
+        if (!fdn) return null
+        return (
+          <div style={{ ...fieldRow, padding: '6px 8px', background: '#f0f7ff', borderRadius: 4, fontSize: 11, color: '#2471a3' }}>
+            Attached to foundation: <strong>{fdn.label ?? fdn.type}</strong>
+          </div>
+        )
+      })()}
     </div>
   )
 }
