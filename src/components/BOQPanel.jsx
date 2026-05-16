@@ -15,6 +15,11 @@ import {
   explainStaircaseRCC, explainSteelByElement, explainConcreteGrade,
 } from '../formulas'
 import StructuralBOQSection from './StructuralBOQSection'
+import ShutteringSection   from './boq/ShutteringSection'
+import ExcavationSection   from './boq/ExcavationSection'
+import PlumConcreteRow     from './boq/PlumConcreteRow'
+import PlasterSection      from './boq/PlasterSection'
+import { getBoqLines, totalBoqCost } from '../boq/lines'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -404,8 +409,12 @@ export default function BOQPanel() {
   const [popoverPos,    setPopoverPos]    = useState(null)
   const popoverRef = useRef(null)
 
-  // Structural lines sent up from StructuralBOQSection
+  // Lines sent up from section components (each manages its own row outputs).
   const [structuralLines, setStructuralLines] = useState([])
+  const [shutteringLines, setShutteringLines] = useState([])
+  const [excavationLines, setExcavationLines] = useState([])
+  const [plumLines,       setPlumLines]       = useState([])
+  const [plasterLines,    setPlasterLines]    = useState([])
 
   const wallCount     = Object.values(walls).filter(w => !w.isVirtual).length
   const totalLenFt    = Math.round(getAllWallsLength() * 100) / 100
@@ -464,10 +473,13 @@ export default function BOQPanel() {
   }
   const formulaData  = openPopoverId ? getFormulaData(openPopoverId, formulaState) : null
 
-  const allCosts  = [...mainLines, ...materialLines, ...sumpLines, ...septicLines, ...structuralLines].map(l => l.cost)
-  const totalCost = allCosts.some(c => c !== null)
-    ? allCosts.reduce((sum, c) => sum + (c ?? 0), 0)
-    : null
+  // Canonical aggregator (Stage 0 T4) — single source of truth for cost-total + CSV export.
+  // Section components still render their own rows independently; the per-section onLinesReady
+  // path is preserved for any future opt-in consumers but no longer drives totals.
+  const canonicalLines = getBoqLines(useStore.getState(), rates)
+  const totalCost      = totalBoqCost(canonicalLines)
+  // Suppress unused-var warnings on the legacy section state slots (kept for forward-compat).
+  void structuralLines; void shutteringLines; void excavationLines; void plumLines; void plasterLines
 
   function handleInfoClick(id, e) {
     e.stopPropagation()
@@ -494,12 +506,12 @@ export default function BOQPanel() {
   }, [openPopoverId])
 
   function handleExportCSV() {
-    const allLines = [...mainLines.slice(0, 1), ...materialLines, ...mainLines.slice(1), ...sumpLines, ...septicLines, ...structuralLines]
-    const rows = [['Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
-    for (const line of allLines) {
+    // CSV uses the canonical aggregator — same source as cost total + future PDF/Excel/ERP.
+    const rows = [['Category', 'Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
+    for (const line of canonicalLines) {
       const rateVal = parseFloat(rates[line.rateKey]) || ''
       const costVal = line.cost !== null ? Math.round(line.cost) : ''
-      rows.push([line.label, line.qty, line.unit, rateVal, costVal])
+      rows.push([line.category, line.label, line.qty, line.unit, rateVal, costVal])
     }
     const csv = rows
       .map(r => r.map(cell => (typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell)).join(','))
@@ -609,6 +621,34 @@ export default function BOQPanel() {
         onInfoClick={handleInfoClick}
         onLinesReady={setStructuralLines}
         formulaState={formulaState}
+      />
+
+      {/* Phase 1.6e — Plum concrete (under footings) */}
+      <PlumConcreteRow
+        rates={rates}
+        onRateChange={setRate}
+        onLinesReady={setPlumLines}
+      />
+
+      {/* Phase 1.6a — Shuttering */}
+      <ShutteringSection
+        rates={rates}
+        onRateChange={setRate}
+        onLinesReady={setShutteringLines}
+      />
+
+      {/* Phase 1.6b — Excavation */}
+      <ExcavationSection
+        rates={rates}
+        onRateChange={setRate}
+        onLinesReady={setExcavationLines}
+      />
+
+      {/* Phase 1.6f — Plaster materials by system */}
+      <PlasterSection
+        rates={rates}
+        onRateChange={setRate}
+        onLinesReady={setPlasterLines}
       />
 
       {/* Plaster, Paint, Waterproofing, Roofing */}
