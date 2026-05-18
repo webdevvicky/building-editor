@@ -1842,10 +1842,215 @@ header('46. Phase 2.5 — clash detection: validation rule surfaces clashes via 
 }
 
 // ─────────────────────────────────────────────────────────────────────
+header('47. Phase 2.6 — HUNTER strategy: small branch (1 wash basin FU=2)')
+{
+  const { selectStrategy } = await import('../src/mep/shared/sizingStrategy.js')
+  const { FIXTURE_UNITS } = await import('../src/mep/catalogs/loads/fixtureUnits.js')
+  const { listCpvcDiameters } = await import('../src/mep/catalogs/pipeStandards/cpvc.js')
+  const hunter = selectStrategy('HUNTER')
+  ok('HUNTER strategy is implemented (not a Phase-2 stub)', typeof hunter === 'function')
+  const res = hunter(
+    { systemId: 'COLD_SUPPLY', leaves: [{ type: 'WASH_BASIN' }] },
+    { fixtureUnits: FIXTURE_UNITS, pipeCatalog: listCpvcDiameters() },
+  )
+  ok('1 basin (FU=2) → 15mm CPVC (carries 4 FU)',
+    res.diameterMm === 15, `got ${res.diameterMm}mm, reason: ${res.reason}`)
+  ok('HUNTER reason string echoes FU + diameter',
+    /HUNTER FU=2/.test(res.reason ?? ''), `reason: ${res.reason}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('48. Phase 2.6 — HUNTER strategy: large trunk (3 WC + 2 basin, FU=22)')
+{
+  const { selectStrategy } = await import('../src/mep/shared/sizingStrategy.js')
+  const { FIXTURE_UNITS } = await import('../src/mep/catalogs/loads/fixtureUnits.js')
+  const { listCpvcDiameters } = await import('../src/mep/catalogs/pipeStandards/cpvc.js')
+  const hunter = selectStrategy('HUNTER')
+  // FU = 3×6 + 2×2 = 22 → smallest CPVC with fixtureUnitsCarried >= 22 is 32mm (carries 40).
+  const res = hunter(
+    { systemId: 'COLD_SUPPLY', leaves: [
+      { type: 'WC' }, { type: 'WC' }, { type: 'WC' },
+      { type: 'WASH_BASIN' }, { type: 'WASH_BASIN' },
+    ]},
+    { fixtureUnits: FIXTURE_UNITS, pipeCatalog: listCpvcDiameters() },
+  )
+  ok('3 WC + 2 basin (FU=22) → 32mm CPVC (smallest carrying >=22 FU)',
+    res.diameterMm === 32, `got ${res.diameterMm}mm, reason: ${res.reason}`)
+  // Also confirm a mid-range 16-FU branch picks 25mm (carries 20).
+  const mid = hunter(
+    { systemId: 'COLD_SUPPLY', fixtureUnits: 16 },
+    { fixtureUnits: FIXTURE_UNITS, pipeCatalog: listCpvcDiameters() },
+  )
+  ok('FU=16 → 25mm CPVC (carries 20 FU)',
+    mid.diameterMm === 25, `got ${mid.diameterMm}mm, reason: ${mid.reason}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('49. Phase 2.6 — LOAD_BASED: 3 lights (45W) passes VD on 1.5sqmm-or-smaller')
+{
+  const { selectStrategy } = await import('../src/mep/shared/sizingStrategy.js')
+  const { POINT_LOADS_W } = await import('../src/mep/catalogs/loads/pointLoads.js')
+  const { listWireGauges } = await import('../src/mep/catalogs/wireGauges.js')
+  const { getDiversityFactor } = await import('../src/mep/catalogs/loads/diversityFactors.js')
+  const loadBased = selectStrategy('LOAD_BASED')
+  ok('LOAD_BASED strategy is implemented (not a Phase-2 stub)', typeof loadBased === 'function')
+  const res = loadBased(
+    { systemId: 'LIGHTING', diversityClass: 'LIGHTING',
+      leaves: [{ type: 'LIGHT' }, { type: 'LIGHT' }, { type: 'LIGHT' }],
+      lengthM: 10 },
+    { pointLoads: POINT_LOADS_W, wireGauges: listWireGauges(),
+      diversityFactor: getDiversityFactor('LIGHTING') },
+  )
+  // 45W / (230 × 0.85) = 0.23A — every gauge passes ampacity AND VD.
+  // LOAD_BASED returns the SMALLEST passing, so 1.0sqmm is correct.
+  ok('45W lighting → gauge <= 1.5sqmm (smallest VD-compliant)',
+    res.gaugeMm2 <= 1.5, `got ${res.gaugeMm2}sqmm, reason: ${res.reason}`)
+  ok('LOAD_BASED reason string includes VD percent',
+    /VD=\d+\.\d+%/.test(res.reason ?? ''), `reason: ${res.reason}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('50. Phase 2.6 — LOAD_BASED: 9000W AC load requires 6sqmm or higher')
+{
+  const { selectStrategy } = await import('../src/mep/shared/sizingStrategy.js')
+  const { POINT_LOADS_W } = await import('../src/mep/catalogs/loads/pointLoads.js')
+  const { listWireGauges } = await import('../src/mep/catalogs/wireGauges.js')
+  const { getDiversityFactor } = await import('../src/mep/catalogs/loads/diversityFactors.js')
+  const loadBased = selectStrategy('LOAD_BASED')
+  // 6 AC points × 1500W = 9000W raw. Diversity AC = 0.8 → designW = 7200W.
+  // I = 7200/(230×0.85) = 36.83A. 1.5sqmm ampacity 10.4A → fail.
+  // 6sqmm ampacity 31.7A → still fail. 10sqmm ampacity 45.6A → pass.
+  const res = loadBased(
+    { systemId: 'AC', diversityClass: 'AC',
+      leaves: new Array(6).fill({ type: 'AC_INDOOR_POINT' }),
+      lengthM: 10 },
+    { pointLoads: POINT_LOADS_W, wireGauges: listWireGauges(),
+      diversityFactor: getDiversityFactor('AC') },
+  )
+  ok('9000W AC load → gauge >= 6sqmm',
+    res.gaugeMm2 >= 6, `got ${res.gaugeMm2}sqmm, reason: ${res.reason}`)
+  ok('LOAD_BASED diversity factor 0.8 applied (designW <= 7200W in reason)',
+    /W=72\d\d/.test(res.reason ?? '') || /W=7200/.test(res.reason ?? ''),
+    `reason: ${res.reason}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('51. Phase 2.6 — GRADIENT_DRAIN: soil branch records 1:80 gradient')
+{
+  const { selectStrategy } = await import('../src/mep/shared/sizingStrategy.js')
+  const { FIXTURE_UNITS } = await import('../src/mep/catalogs/loads/fixtureUnits.js')
+  const { listUpvcDiameters } = await import('../src/mep/catalogs/pipeStandards/upvc.js')
+  const grad = selectStrategy('GRADIENT_DRAIN')
+  ok('GRADIENT_DRAIN strategy is implemented (not a Phase-2 stub)', typeof grad === 'function')
+  const res = grad(
+    { systemId: 'SOIL_DRAIN', leaves: [{ type: 'WC' }] },
+    { fixtureUnits: FIXTURE_UNITS, pipeCatalog: listUpvcDiameters() },
+  )
+  // WC FU=6 → smallest UPVC with FU>=6 is 75mm (carries 14).
+  // WC FU=6. UPVC catalog: 32(2), 40(4), 50(8), 75(14). Smallest with FU>=6 is 50mm.
+  ok('soil branch with WC (FU=6) → UPVC 50mm (smallest carrying >=6 FU)',
+    res.diameterMm === 50, `got ${res.diameterMm}mm, reason: ${res.reason}`)
+  ok('GRADIENT_DRAIN gradient field === 1/80 for SOIL_DRAIN',
+    Math.abs(res.gradient - 1/80) < 1e-9, `got ${res.gradient}`)
+  ok('GRADIENT_DRAIN reason mentions 1:80',
+    /1:80/.test(res.reason ?? ''), `reason: ${res.reason}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('52. Phase 2.6 — setMepSizingStrategy persists in projectSettings.mepSizing')
+{
+  reset()
+  s().setMepSizingStrategy('PLUMBING', 'HUNTER')
+  s().setMepSizingStrategy('ELECTRICAL', 'LOAD_BASED')
+  const ps = s().projectSettings
+  ok('projectSettings.mepSizing.PLUMBING === HUNTER',
+    ps.mepSizing?.PLUMBING === 'HUNTER', `got ${ps.mepSizing?.PLUMBING}`)
+  ok('projectSettings.mepSizing.ELECTRICAL === LOAD_BASED',
+    ps.mepSizing?.ELECTRICAL === 'LOAD_BASED', `got ${ps.mepSizing?.ELECTRICAL}`)
+  // Reset back to defaults so later tests aren't poisoned.
+  s().setMepSizingStrategy('PLUMBING', 'CATALOG')
+  s().setMepSizingStrategy('ELECTRICAL', 'CATALOG')
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('53. Phase 2.6 — switching strategy CATALOG→HUNTER changes pipe sizing')
+{
+  const { buildPlumbingSystemGraph } = await import('../src/mep/plumbing/network.js')
+  const { sizePlumbingBranches } = await import('../src/mep/plumbing/sizing.js')
+  reset()
+  // 1 floor, 1 wet room with 3 WC + 2 wash basins (FU=22). Place fixtures.
+  const FT = 12
+  // Wet room rectangle 10×10 with 4 walls so pointInRoom can resolve fixtures.
+  const n1 = s().getOrCreateNode(0, 0)
+  const n2 = s().getOrCreateNode(10*FT, 0)
+  const n3 = s().getOrCreateNode(10*FT, 10*FT)
+  const n4 = s().getOrCreateNode(0, 10*FT)
+  s().addWall(n1, n2); s().addWall(n2, n3); s().addWall(n3, n4); s().addWall(n4, n1)
+  s().saveRoom('TOILET', [n1, n2, n3, n4])
+  // 3 WC + 2 WASH_BASIN spread inside the room.
+  s().addPlumbingFixture('WC',         24, 24)
+  s().addPlumbingFixture('WC',         60, 24)
+  s().addPlumbingFixture('WC',         96, 24)
+  s().addPlumbingFixture('WASH_BASIN', 24, 60)
+  s().addPlumbingFixture('WASH_BASIN', 60, 60)
+  // OHT as supply root.
+  s().addPlumbingFixture('OHT',        60, 96)
+
+  const graph = buildPlumbingSystemGraph(s())
+  // CATALOG sizing: branchCount=1 supply trunk → 20mm.
+  s().setMepSizingStrategy('PLUMBING', 'CATALOG')
+  const sizedCatalog = sizePlumbingBranches(graph, { state: s(), projectSettings: s().projectSettings })
+  const catalogDiams = Object.values(sizedCatalog.edges)
+    .filter(e => e.systemId === 'COLD_SUPPLY')
+    .map(e => e.diameterMm)
+  const maxCatalog = catalogDiams.length ? Math.max(...catalogDiams) : 0
+
+  // HUNTER sizing: 5 consumers (3 WC + 2 basin) FU=22 → 32mm trunk.
+  s().setMepSizingStrategy('PLUMBING', 'HUNTER')
+  const sizedHunter = sizePlumbingBranches(graph, { state: s(), projectSettings: s().projectSettings })
+  const hunterDiams = Object.values(sizedHunter.edges)
+    .filter(e => e.systemId === 'COLD_SUPPLY')
+    .map(e => e.diameterMm)
+  const maxHunter = hunterDiams.length ? Math.max(...hunterDiams) : 0
+
+  // CATALOG trunk pick is 20mm (branchCount=1), but OHT root carries 25mm
+  // (catalog default for OHT supply diameter), and never-reduce keeps 25mm.
+  ok('CATALOG cold-supply max diameter is 25mm (OHT root catalog default)',
+    maxCatalog === 25, `got ${maxCatalog}mm`)
+  ok('HUNTER cold-supply trunk upgrades to 32mm under FU=22 load',
+    maxHunter === 32, `got ${maxHunter}mm`)
+  ok('HUNTER produces a strictly LARGER trunk than CATALOG for this fixture mix',
+    maxHunter > maxCatalog, `hunter=${maxHunter}, catalog=${maxCatalog}`)
+  // Reset to default.
+  s().setMepSizingStrategy('PLUMBING', 'CATALOG')
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('54. Phase 2.6 — strategy registry exposes all four strategies')
+{
+  const { listStrategies, SIZING_STRATEGIES } = await import('../src/mep/shared/sizingStrategy.js')
+  const ids = listStrategies().map(s => s.id)
+  ok('listStrategies() returns all four ids in sorted order',
+    ids.join(',') === 'CATALOG,GRADIENT_DRAIN,HUNTER,LOAD_BASED',
+    `got [${ids.join(',')}]`)
+  for (const id of ['CATALOG', 'HUNTER', 'LOAD_BASED', 'GRADIENT_DRAIN']) {
+    ok(`SIZING_STRATEGIES.${id}.impl is a real function`,
+      typeof SIZING_STRATEGIES[id].impl === 'function')
+  }
+  // Phase markers — the three new ones leave PHASE_2 stub status behind.
+  ok('HUNTER shipPhase === PHASE_2_6',
+    SIZING_STRATEGIES.HUNTER.shipPhase === 'PHASE_2_6')
+  ok('LOAD_BASED shipPhase === PHASE_2_6',
+    SIZING_STRATEGIES.LOAD_BASED.shipPhase === 'PHASE_2_6')
+  ok('GRADIENT_DRAIN shipPhase === PHASE_2_6',
+    SIZING_STRATEGIES.GRADIENT_DRAIN.shipPhase === 'PHASE_2_6')
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
-console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical + Phase 1.3 HVAC + Phase 1.4 Fire + Phase 1.5 ELV + Phase 2.5 Clash Detection: ${pass} pass, ${fail} fail, ${skipped} skipped`)
+console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical + Phase 1.3 HVAC + Phase 1.4 Fire + Phase 1.5 ELV + Phase 2.5 Clash Detection + Phase 2.6 Sizing Strategies: ${pass} pass, ${fail} fail, ${skipped} skipped`)
 if (skipped > 0) {
   console.log(`  (${skipped} engine-dependent assertions skipped — sibling subagent owns)`)
 }
