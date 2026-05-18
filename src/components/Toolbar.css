@@ -1,3 +1,6 @@
+/* Toolbar — 5 cluster dropdown buttons in a single row.
+   The dropdown flyout escapes this container via position: absolute. */
+
 .toolbar {
   position: absolute;
   top: var(--space-2);
@@ -11,28 +14,8 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   z-index: var(--z-panel);
-  flex-wrap: wrap;
-}
-
-.toolbar-cluster {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.toolbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--color-border);
-  margin: 0 var(--space-2);
-}
-
-.toolbar-segmented {
-  display: flex;
-  align-items: center;
-  gap: 0;
 }
 
 .toolbar .ui-btn:focus-visible {
-  z-index: 1;  /* ensure focus ring appears above sibling buttons */
+  z-index: 1; /* keep the focus ring above sibling triggers */
 }

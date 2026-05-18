@@ -4,6 +4,13 @@ import { dialog } from '../components/ui/Dialog'
 import { toast } from '../components/ui/Toast'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
 
+// Close any open toolbar dropdown via the decoupled window-event pattern
+// (the Dropdown primitive listens for this event). Mirrors the boq:toggle
+// pattern used for the BOQ panel collapse — see CLAUDE.md.
+function closeDropdowns() {
+  window.dispatchEvent(new CustomEvent('toolbar:close-dropdowns'))
+}
+
 /**
  * Mount-once global keyboard shortcuts. Listens on `window` for keydown.
  *
@@ -30,24 +37,28 @@ export function useKeyboardShortcuts() {
       if (mod && e.shiftKey && (key === 'z' || key === 'Z')) {
         e.preventDefault()
         useStore.getState().redo?.()
+        closeDropdowns()
         return
       }
       // Ctrl+Y / Cmd+Y → redo
       if (mod && !e.shiftKey && (key === 'y' || key === 'Y')) {
         e.preventDefault()
         useStore.getState().redo?.()
+        closeDropdowns()
         return
       }
       // Ctrl+Z / Cmd+Z → undo
       if (mod && !e.shiftKey && (key === 'z' || key === 'Z')) {
         e.preventDefault()
         useStore.getState().undo?.()
+        closeDropdowns()
         return
       }
       // Ctrl+S / Cmd+S → save
       if (mod && !e.shiftKey && (key === 's' || key === 'S')) {
         e.preventDefault()
         handleSave()
+        closeDropdowns()
         return
       }
       // Ctrl+B / Cmd+B → toggle BOQ sidebar (BOQPanel listens on window)
@@ -60,6 +71,7 @@ export function useKeyboardShortcuts() {
       if (mod && !e.shiftKey && key === '3') {
         e.preventDefault()
         useStore.getState().setTool?.('iso')
+        closeDropdowns()
         return
       }
 
@@ -69,51 +81,61 @@ export function useKeyboardShortcuts() {
       if (key === 'Escape') {
         e.preventDefault()
         handleEscape()
+        closeDropdowns()
         return
       }
       if (key === 'Delete' || key === 'Backspace') {
         e.preventDefault()
         handleDelete()
+        closeDropdowns()
         return
       }
       if (key === 'd' || key === 'D') {
         e.preventDefault()
         useStore.getState().setTool?.('draw')
+        closeDropdowns()
         return
       }
       if (key === 's' || key === 'S') {
         e.preventDefault()
         useStore.getState().setTool?.('select')
+        closeDropdowns()
         return
       }
       if (key === 'r' || key === 'R') {
         e.preventDefault()
         useStore.getState().setTool?.('room')
+        closeDropdowns()
         return
       }
       if (key === 'p' || key === 'P') {
         e.preventDefault()
         useStore.getState().setTool?.('plumbing')
+        closeDropdowns()
         return
       }
       if (key === 'e' || key === 'E') {
         e.preventDefault()
         useStore.getState().setTool?.('electrical')
+        closeDropdowns()
         return
       }
       if (key === 'h' || key === 'H') {
         e.preventDefault()
         useStore.getState().setTool?.('hvac')
+        closeDropdowns()
         return
       }
       if (key === 'f' || key === 'F') {
         e.preventDefault()
         useStore.getState().setTool?.('fire')
+        closeDropdowns()
         return
       }
       if (key === 'l' || key === 'L') {
         e.preventDefault()
         useStore.getState().setTool?.('elv')
+        closeDropdowns()
         return
       }
     }

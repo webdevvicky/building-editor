@@ -1,49 +1,42 @@
-import { useRef } from 'react'
-import {
-  Pencil,
-  MousePointer2,
-  Scissors,
-  Hexagon,
-  Columns3,
-  RectangleHorizontal,
-  LayoutGrid,
-  Anchor,
-  Stamp,
-  ArrowDownUp,
-  Droplet,
-  Zap,
-  Wind,
-  Flame,
-  Cable,
-  Container,
-  Cylinder,
-  Building2,
-  Ruler,
-  Settings,
-  EyeOff,
-  FolderOpen,
-  Save,
-  Upload,
-  Download,
-  Undo2,
-  Redo2,
-  History,
-  Box,
-} from 'lucide-react'
+// Toolbar — grouped cluster dropdowns. Each cluster button opens a flyout
+// listing its tools as labeled rows with keyboard shortcuts. The tool registry
+// lives in ./toolbarConfig.js so adding a new tool is a one-entry data change.
+//
+// Active-tool highlighting happens at TWO levels:
+//   - The cluster trigger button uses variant="primary" when any of its tools
+//     is the currently-active tool (via collectToolIds + activeTool match).
+//   - Inside the open flyout, the matching DropdownItem gets the
+//     ui-dropdown__item--active class (primary-bg + bold).
+//
+// Keyboard shortcuts continue to work through src/hooks/useKeyboardShortcuts.js.
+// The flyout shortcut chips are display-only reminders. When a shortcut fires
+// elsewhere, useKeyboardShortcuts dispatches `toolbar:close-dropdowns` so any
+// open flyout closes automatically.
+
+import { useRef, Fragment } from 'react'
 import { useStore } from '../store'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
-import { Button } from './ui/Button'
+import {
+  Dropdown,
+  DropdownGroup,
+  DropdownItem,
+  DropdownToggle,
+  DropdownSegmented,
+} from './ui/Dropdown'
+import { TOOL_CLUSTERS, collectToolIds } from './toolbarConfig'
 import './Toolbar.css'
 
-const ICON_SIZE = 14
-const ICON_STROKE = 2
+const TOGGLE_ACTIONS = {
+  showDimensions: 'toggleShowDimensions',
+  drawVirtual:    'toggleDrawVirtual',
+}
 
 export default function Toolbar() {
   const activeTool          = useStore(s => s.activeTool)
-  const drawVirtual         = useStore(s => s.drawVirtual)
   const showDimensions      = useStore(s => s.showDimensions)
+  const drawVirtual         = useStore(s => s.drawVirtual)
   const unit                = useStore(s => s.unit)
   const history             = useStore(s => s.history)
   const future              = useStore(s => s.future)
@@ -57,13 +50,18 @@ export default function Toolbar() {
 
   const fileInputRef = useRef(null)
 
+  // ── One-shot action handlers ────────────────────────────────────────────
+
   function handleExportJson() {
     const s = useStore.getState()
     const data = JSON.stringify({
-      version: 6, unit: 'inch',
+      version: 7, unit: 'inch',
       nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
       columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
       foundations: s.foundations,
+      plumbingFixtures: s.plumbingFixtures, electricalPoints: s.electricalPoints,
+      hvacUnits: s.hvacUnits, fireDevices: s.fireDevices, elvDevices: s.elvDevices,
+      solarEquipment: s.solarEquipment, risers: s.risers,
       ratesByKey: s.ratesByKey ?? {},
       projectSettings: s.projectSettings,
     }, null, 2)
@@ -81,7 +79,10 @@ export default function Toolbar() {
     reader.onload = (ev) => {
       try { loadProject(JSON.parse(ev.target.result)) }
       catch {
-        dialog.alert('Could not load this file. Please make sure it is a valid project JSON export.', { title: 'Invalid file' })
+        dialog.alert(
+          'Could not load this file. Please make sure it is a valid project JSON export.',
+          { title: 'Invalid file' }
+        )
       }
     }
     reader.readAsText(file)
@@ -93,181 +94,120 @@ export default function Toolbar() {
     if (!id) { setTool('projects'); return }
     const s = useStore.getState()
     const ok = saveCurrent(id, {
-      version: 7, nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
+      version: 7,
+      nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
       columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
-      foundations: s.foundations, ratesByKey: s.ratesByKey ?? {},
+      foundations: s.foundations,
+      plumbingFixtures: s.plumbingFixtures, electricalPoints: s.electricalPoints,
+      hvacUnits: s.hvacUnits, fireDevices: s.fireDevices, elvDevices: s.elvDevices,
+      solarEquipment: s.solarEquipment, risers: s.risers,
+      ratesByKey: s.ratesByKey ?? {},
       projectSettings: s.projectSettings,
     })
     if (ok === false) toast.error('Could not save — storage quota exceeded.')
     else toast.success('Project saved.')
   }
 
-  // Helper: tool button (icon-only, primary when active, ghost otherwise)
-  const toolBtn = (toolId, Icon, title) => (
-    <Button
-      size="sm"
-      variant={activeTool === toolId ? 'primary' : 'ghost'}
-      title={title}
-      onClick={() => setTool(toolId)}
-    >
-      <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-    </Button>
-  )
+  const ACTION_HANDLERS = {
+    save:   handleSaveProject,
+    import: () => fileInputRef.current?.click(),
+    export: handleExportJson,
+    undo,
+    redo,
+  }
+
+  const ACTION_DISABLED = {
+    undo: history.length === 0,
+    redo: future.length === 0,
+  }
+
+  // ── Item dispatch ───────────────────────────────────────────────────────
+
+  function renderItem(item, key) {
+    if (item.type === 'tool') {
+      return (
+        <DropdownItem
+          key={key}
+          icon={item.icon}
+          label={item.label}
+          shortcut={item.shortcut}
+          active={activeTool === item.toolId}
+          onSelect={() => setTool(item.toolId)}
+        />
+      )
+    }
+    if (item.type === 'toggle') {
+      const checked = { showDimensions, drawVirtual }[item.storeKey]
+      const handler = { showDimensions: toggleShowDimensions, drawVirtual: toggleDrawVirtual }[item.storeKey]
+      return (
+        <DropdownToggle
+          key={key}
+          icon={item.icon}
+          label={item.label}
+          checked={checked}
+          onToggle={handler}
+        />
+      )
+    }
+    if (item.type === 'segmented') {
+      return (
+        <DropdownSegmented
+          key={key}
+          options={item.options}
+          value={unit}
+          onChange={setUnit}
+        />
+      )
+    }
+    if (item.type === 'action') {
+      return (
+        <DropdownItem
+          key={key}
+          icon={item.icon}
+          label={item.label}
+          shortcut={item.shortcut}
+          disabled={ACTION_DISABLED[item.actionId] ?? false}
+          onSelect={ACTION_HANDLERS[item.actionId]}
+        />
+      )
+    }
+    return null
+  }
+
+  function clusterIsActive(cluster) {
+    return collectToolIds(cluster).includes(activeTool)
+  }
 
   return (
     <div className="toolbar">
-      {/* Cluster 1 — Draw */}
-      <div className="toolbar-cluster">
-        {toolBtn('draw',   Pencil,         'Draw walls (D)')}
-        {toolBtn('select', MousePointer2,  'Select (S)')}
-        {toolBtn('split',  Scissors,       'Split wall')}
-        {toolBtn('room',   Hexagon,        'Room (R)')}
-      </div>
-
-      <div className="toolbar-divider" />
-
-      {/* Cluster 2 — Structural & Civil */}
-      <div className="toolbar-cluster">
-        {toolBtn('column',        Columns3,            'Column')}
-        {toolBtn('beam',          RectangleHorizontal, 'Beam')}
-        {toolBtn('slabs',         LayoutGrid,          'Slabs')}
-        {toolBtn('foundations',   Anchor,              'Foundations')}
-        {toolBtn('stairs',        Stamp,               'Stairs')}
-        {toolBtn('lift',          ArrowDownUp,         'Lift')}
-        {toolBtn('plumbing',      Droplet,             'Plumbing (P)')}
-        {toolBtn('electrical',    Zap,                 'Electrical (E)')}
-        {toolBtn('hvac',          Wind,                'HVAC (H)')}
-        {toolBtn('fire',          Flame,               'Fire (F)')}
-        {toolBtn('elv',           Cable,               'ELV (L)')}
-        {toolBtn('sump',          Droplet,             'Sump')}
-        {toolBtn('overhead_tank', Container,           'Overhead tank')}
-        {toolBtn('septic_tank',   Cylinder,            'Septic tank')}
-      </div>
-
-      <div className="toolbar-divider" />
-
-      {/* Cluster 3 — View & Settings */}
-      <div className="toolbar-cluster">
-        {toolBtn('floors',   Building2, 'Floors')}
-        {toolBtn('bbs',      Ruler,     'BBS')}
-        {toolBtn('iso',      Box,       '3D View (Ctrl+3)')}
-        {toolBtn('settings', Settings,  'Settings')}
-
-        <Button
-          size="sm"
-          variant={showDimensions ? 'primary' : 'ghost'}
-          title="Show/hide wall dimensions"
-          onClick={toggleShowDimensions}
+      {TOOL_CLUSTERS.map(cluster => (
+        <Dropdown
+          key={cluster.id}
+          label={cluster.label}
+          isActive={clusterIsActive(cluster)}
         >
-          <Ruler size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
+          {cluster.groups
+            ? cluster.groups.map(group => (
+                <DropdownGroup key={group.title} title={group.title}>
+                  {group.items.map((item, i) => (
+                    <Fragment key={i}>{renderItem(item, i)}</Fragment>
+                  ))}
+                </DropdownGroup>
+              ))
+            : cluster.items.map((item, i) => (
+                <Fragment key={i}>{renderItem(item, i)}</Fragment>
+              ))
+          }
+        </Dropdown>
+      ))}
 
-        <Button
-          size="sm"
-          variant={drawVirtual ? 'primary' : 'ghost'}
-          title="Draw open-plan boundary lines (excluded from BOQ)"
-          onClick={toggleDrawVirtual}
-        >
-          <EyeOff size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <div className="toolbar-segmented">
-          <Button
-            size="sm"
-            variant={unit === 'ft' ? 'primary' : 'ghost'}
-            title="Display units in feet"
-            onClick={() => setUnit('ft')}
-          >
-            ft
-          </Button>
-          <Button
-            size="sm"
-            variant={unit === 'm' ? 'primary' : 'ghost'}
-            title="Display units in metres"
-            onClick={() => setUnit('m')}
-          >
-            m
-          </Button>
-        </div>
-      </div>
-
-      <div className="toolbar-divider" />
-
-      {/* Cluster 4 — Project */}
-      <div className="toolbar-cluster">
-        <Button
-          size="sm"
-          variant={activeTool === 'projects' ? 'primary' : 'ghost'}
-          title="Open project list"
-          onClick={() => setTool('projects')}
-        >
-          <FolderOpen size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <Button
-          size="sm"
-          variant={activeTool === 'revisions' ? 'primary' : 'ghost'}
-          title="Revisions"
-          onClick={() => setTool('revisions')}
-        >
-          <History size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <Button
-          size="sm"
-          variant="ghost"
-          title="Save project (Ctrl+S)"
-          onClick={handleSaveProject}
-        >
-          <Save size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <Button
-          size="sm"
-          variant="ghost"
-          title="Import project from JSON"
-          onClick={() => fileInputRef.current.click()}
-        >
-          <Upload size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <Button
-          size="sm"
-          variant="ghost"
-          title="Export project as JSON"
-          onClick={handleExportJson}
-        >
-          <Download size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={!history.length}
-          title="Undo (Ctrl+Z)"
-          onClick={undo}
-        >
-          <Undo2 size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={!future.length}
-          title="Redo (Ctrl+Y)"
-          onClick={redo}
-        >
-          <Redo2 size={ICON_SIZE} strokeWidth={ICON_STROKE} />
-        </Button>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          style={{ display: 'none' }}
-          onChange={handleLoadFile}
-        />
-      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleLoadFile}
+      />
     </div>
   )
 }
