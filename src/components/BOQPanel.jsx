@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { MATERIAL_LIBRARY, BONDING } from '../materials'
-import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import { MATERIAL_LIBRARY } from '../materials'
 import {
   explainWallArea, explainFlooring,
   explainPlasterWalls, explainPlasterCeiling,
@@ -51,21 +50,6 @@ function fmtCost(n) {
 }
 
 function r2(n) { return Math.round(n * 100) / 100 }
-
-// Returns initial rate keys for all materials (empty string = no rate entered)
-function buildMaterialRateKeys() {
-  const keys = {}
-  for (const [matKey, mat] of Object.entries(MATERIAL_LIBRARY)) {
-    keys[`mat_${matKey}_unit`] = ''
-    if (mat.bondingType === BONDING.CEMENT_SAND) {
-      keys[`mat_${matKey}_cement`] = ''
-      keys[`mat_${matKey}_sand`]   = ''
-    } else {
-      keys[`mat_${matKey}_adhesive`] = ''
-    }
-  }
-  return keys
-}
 
 // ── formula dispatcher ───────────────────────────────────────────────────────
 // Registry maps exact id → handler, or prefix → handler with id extraction.
@@ -222,34 +206,12 @@ export default function BOQPanel() {
   void columns; void beams; void slabs; void staircases; void foundations
   void projectSettings; void currentFloorId
 
-  const [rates, setRates] = useState(() => ({
-    plasterWalls: '',
-    plasterCeiling: '',
-    paintWalls: '',
-    paintCeiling: '',
-    flooring: '',
-    waterproofing: '',
-    roofing: '',
-    excavation: '',
-    brickwork: '',
-    rcc: '',
-    plasterInner: '',
-    waterproofingInner: '',
-    ...buildMaterialRateKeys(),
-    // Structural rate keys
-    ...Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [`beam_${lvl.id}`, ''])),
-    slab_main: '', slab_sunken: '',
-    sunshade_rcc: '', parapet_rcc: '',
-    steel_footing: '', steel_column: '', steel_beam: '',
-    steel_slab: '', steel_staircase: '', steel_civil: '',
-    conc_M7_5_cement: '', conc_M7_5_sand: '', conc_M7_5_agg20: '',
-    conc_M20_cement: '', conc_M20_sand: '', conc_M20_agg10: '', conc_M20_agg20: '',
-    stair_rcc: '',
-    plum_concrete: '',
-    // Column / footing / foundation rate keys are dynamic and read via rates[key]
-    // — undefined values render as empty placeholders. No registration needed.
-  }))
-  const setRate = (key, val) => setRates(prev => ({ ...prev, [key]: val }))
+  // Rates now live in the store (`ratesByKey`) so they survive autosave,
+  // project switches, JSON import/export, and revision snapshots. Unknown
+  // rateKeys naturally resolve to '' via the `?? ''` in BoqRow's `rates[key]`
+  // lookup — no need to pre-seed every possible key here.
+  const rates  = useStore(s => s.ratesByKey)
+  const setRate = useStore(s => s.setRate)
 
   const [openPopoverId, setOpenPopoverId] = useState(null)
   const [popoverPos,    setPopoverPos]    = useState(null)

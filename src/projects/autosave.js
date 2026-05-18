@@ -24,6 +24,7 @@ function buildSnapshot(s) {
     slabs:           s.slabs,
     staircases:      s.staircases,
     foundations:     s.foundations,
+    ratesByKey:      s.ratesByKey ?? {},
     projectSettings: s.projectSettings,
   }
 }

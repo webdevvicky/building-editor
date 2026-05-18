@@ -77,6 +77,7 @@ function emptyProjectData() {
     slabs:           {},
     staircases:      {},
     foundations:     {},
+    ratesByKey:      {},
     projectSettings: null, // store.loadProject seeds DEFAULT_PROJECT_SETTINGS when null
   }
 }

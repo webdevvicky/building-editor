@@ -155,6 +155,15 @@ export const useStore = create((set, get) => ({
   // Excluded from history snapshots — switching floors is a view operation.
   currentFloorId: DEFAULT_FLOOR_ID,
 
+  // BOQ rate inputs — keyed by rateKey from getBoqLines() lines.
+  // Persisted via autosave + project snapshot + revision snapshot. Excluded
+  // from history (changing a rate is a numerical adjustment, not a structural
+  // edit; Ctrl+Z should not unwind rate keystrokes).
+  ratesByKey: {},
+  setRate(key, val) {
+    set(s => ({ ratesByKey: { ...s.ratesByKey, [key]: val } }))
+  },
+
   // Ring buffer of action-emitted validation events (Phase 1.7+ floor topology).
   // Store actions that REJECT an invalid operation (e.g., splitWall on an
   // off-floor wall) push a pre-formed issue record here. runValidation() picks
@@ -935,6 +944,7 @@ export const useStore = create((set, get) => ({
       slabs:       migratedSlabs,
       staircases:  migratedStaircases,
       foundations: migratedFoundations,
+      ratesByKey: (data.ratesByKey && typeof data.ratesByKey === 'object') ? { ...data.ratesByKey } : {},
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [],
     })

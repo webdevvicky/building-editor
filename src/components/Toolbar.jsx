@@ -23,6 +23,7 @@ import {
   Download,
   Undo2,
   Redo2,
+  History,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
@@ -58,6 +59,7 @@ export default function Toolbar() {
       nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
       columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
       foundations: s.foundations,
+      ratesByKey: s.ratesByKey ?? {},
       projectSettings: s.projectSettings,
     }, null, 2)
     const blob = new Blob([data], { type: 'application/json' })
@@ -88,7 +90,8 @@ export default function Toolbar() {
     const ok = saveCurrent(id, {
       version: 7, nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
       columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
-      foundations: s.foundations, projectSettings: s.projectSettings,
+      foundations: s.foundations, ratesByKey: s.ratesByKey ?? {},
+      projectSettings: s.projectSettings,
     })
     if (ok === false) toast.error('Could not save — storage quota exceeded.')
     else toast.success('Project saved.')
@@ -188,6 +191,15 @@ export default function Toolbar() {
           onClick={() => setTool('projects')}
         >
           <FolderOpen size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant={activeTool === 'revisions' ? 'primary' : 'ghost'}
+          title="Revisions"
+          onClick={() => setTool('revisions')}
+        >
+          <History size={ICON_SIZE} strokeWidth={ICON_STROKE} />
         </Button>
 
         <Button

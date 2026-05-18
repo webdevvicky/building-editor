@@ -185,6 +185,7 @@ function handleSave() {
     slabs: s.slabs,
     staircases: s.staircases,
     foundations: s.foundations,
+    ratesByKey: s.ratesByKey ?? {},
     projectSettings: s.projectSettings,
   })
   if (ok === false) toast.error('Could not save — storage quota exceeded.')

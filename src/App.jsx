@@ -17,6 +17,7 @@ import FloorSwitcher from './components/FloorSwitcher'
 import FloorsManagerPanel from './components/FloorsManagerPanel'
 import BBSSpecPanel from './components/BBSSpecPanel'
 import ProjectsPanel from './components/ProjectsPanel'
+import RevisionsPanel from './components/RevisionsPanel'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -43,6 +44,7 @@ export default function App() {
         <BBSSpecPanel />
         <ProjectSettingsPanel />
         <ProjectsPanel />
+        <RevisionsPanel />
         <LayersPanel />
         <BOQPanel />
         <Canvas />
