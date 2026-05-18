@@ -26,10 +26,22 @@ import { exportBoqPdf } from '../export/pdf'
 import { exportBoqExcel } from '../export/excel'
 import { toast } from './ui/Toast'
 import { Button } from './ui/Button'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   BoqRow, BoqSubRow, SectionHeader, SubSectionHeader, InfoIcon, fmtLineQty,
 } from './boq/BoqRow'
 import './boq/boq.css'
+
+// localStorage key for collapse preference
+const BOQ_COLLAPSE_KEY = 'boq_panel_collapsed'
+const readCollapsed = () => {
+  try { return localStorage.getItem(BOQ_COLLAPSE_KEY) === '1' }
+  catch { return false }
+}
+const writeCollapsed = (v) => {
+  try { localStorage.setItem(BOQ_COLLAPSE_KEY, v ? '1' : '0') }
+  catch { /* quota or sandbox — ignore */ }
+}
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -245,6 +257,17 @@ export default function BOQPanel() {
 
   // Phase 1.9 — floor scope toggle: 'current' | 'all'. Only meaningful when multi-floor.
   const [floorScope, setFloorScope] = useState('current')
+
+  // Collapsible-sidebar state (persisted in localStorage).
+  // Ctrl+B dispatches a `boq:toggle` window event; we listen here so the
+  // keyboard hook stays decoupled from this component.
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  useEffect(() => { writeCollapsed(collapsed) }, [collapsed])
+  useEffect(() => {
+    const onToggle = () => setCollapsed(v => !v)
+    window.addEventListener('boq:toggle', onToggle)
+    return () => window.removeEventListener('boq:toggle', onToggle)
+  }, [])
   const floors      = projectSettings?.floors ?? []
   const isMultiFloor = floors.length > 1
   const scopeActive  = isMultiFloor && floorScope === 'current'
@@ -461,11 +484,40 @@ export default function BOQPanel() {
     Object.keys(columns).length === 0 &&
     Object.keys(stamps).length  === 0
 
+  // Collapsed sidebar: thin strip with toggle + vertical label.
+  // The toggle dispatches the same window event the Ctrl+B shortcut uses,
+  // so both code paths converge on a single state mutation.
+  if (collapsed) {
+    return (
+      <div className="boq-panel boq-panel--collapsed">
+        <button
+          type="button"
+          className="boq-collapse-toggle"
+          onClick={() => setCollapsed(false)}
+          title="Toggle BOQ panel (Ctrl+B)"
+          aria-label="Expand BOQ panel"
+        >
+          <ChevronRight size={14} strokeWidth={2} />
+        </button>
+        <div className="boq-collapsed-label" aria-hidden="true">BOQ Summary</div>
+      </div>
+    )
+  }
+
   return (
     <div
       className="boq-panel"
       onScroll={() => openPopoverId && setOpenPopoverId(null)}
     >
+      <button
+        type="button"
+        className="boq-collapse-toggle"
+        onClick={() => setCollapsed(true)}
+        title="Toggle BOQ panel (Ctrl+B)"
+        aria-label="Collapse BOQ panel"
+      >
+        <ChevronLeft size={14} strokeWidth={2} />
+      </button>
       <div className="boq-panel-header">
         <div className="boq-panel-title">BOQ Summary</div>
         {isMultiFloor && (

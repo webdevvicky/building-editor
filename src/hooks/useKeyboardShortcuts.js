@@ -50,6 +50,12 @@ export function useKeyboardShortcuts() {
         handleSave()
         return
       }
+      // Ctrl+B / Cmd+B → toggle BOQ sidebar (BOQPanel listens on window)
+      if (mod && !e.shiftKey && (key === 'b' || key === 'B')) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('boq:toggle'))
+        return
+      }
 
       // ── Form-input-aware shortcuts below ──────────────────────────────
       if (inForm) return

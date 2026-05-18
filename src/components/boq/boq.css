@@ -18,6 +18,76 @@
   font-size: var(--text-base);
   color: var(--color-text);
   box-shadow: var(--shadow-sm);
+  transition:
+    min-width var(--motion-normal) var(--ease-out),
+    width     var(--motion-normal) var(--ease-out),
+    padding   var(--motion-normal) var(--ease-out);
+}
+
+/* Collapsed sidebar: thin strip, just the toggle + a vertical "BOQ Summary"
+   wordmark. The 150ms width transition is owned by .boq-panel above so
+   expand/collapse animates symmetrically. */
+.boq-panel--collapsed {
+  min-width: 0;
+  width: 32px;
+  padding: var(--space-2) 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Toggle button: chevron pinned to the LEFT edge of the panel.
+   Positioned absolutely when expanded (top-left) and statically when
+   collapsed (the strip is so narrow we let it flow). */
+.boq-collapse-toggle {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color      var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+.boq-collapse-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.boq-collapse-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.boq-panel--collapsed .boq-collapse-toggle {
+  position: static;
+  flex-shrink: 0;
+}
+
+/* Vertical wordmark inside the collapsed strip. Uses CSS writing-mode so
+   text reads bottom-to-top — matches the dock-style narrow sidebar pattern
+   used in Linear / Stripe. */
+.boq-collapsed-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  user-select: none;
+  line-height: 1;
 }
 
 .boq-panel-header {
@@ -25,6 +95,9 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: var(--space-1);
+  /* Leaves room for the absolutely-positioned .boq-collapse-toggle at the
+     top-left corner of the panel (22px button + buffer). */
+  padding-left: 28px;
 }
 .boq-panel-title {
   font-weight: var(--weight-semibold);
