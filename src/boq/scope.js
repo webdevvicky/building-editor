@@ -26,6 +26,7 @@ import {
 } from '../constants/structural'
 import { getColumnAreaFt2 } from '../lib/columnShapes'
 import { isColumnOnFloor, sortedFloorList } from '../topology/floor.js'
+import { getWallAdjacencyCount as topoGetWallAdjacencyCount, classifyWallBeamFlags as topoClassifyWallBeamFlags } from '../topology/walls.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
@@ -99,29 +100,14 @@ export function scopeStateToFloor(state, floorId) {
     return total + Math.hypot(b.x - a.x, b.y - a.y) / 12
   }, 0)
 
-  // Walls-adjacency restricted to scoped rooms.
-  const getWallAdjacencyCount = () => {
-    const count = {}
-    for (const room of Object.values(rooms)) {
-      for (const wid of (room.wallIds || [])) count[wid] = (count[wid] || 0) + 1
-    }
-    return count
-  }
-
-  const classifyWallBeamFlags = (wallId) => {
-    const wall = walls[wallId]
-    if (!wall) return Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.flagName, false]))
-    const cnt   = getWallAdjacencyCount()[wallId] ?? 0
-    const isExt = cnt === 1, isPart = cnt === 2
-    const result = {}
-    for (const lvl of BEAM_LEVEL_REGISTRY) {
-      const override = wall[lvl.flagName]
-      result[lvl.flagName] = override !== null
-        ? override
-        : (lvl.autoExternal && isExt) || (lvl.autoPartition && isPart)
-    }
-    return result
-  }
+  // Wall-adjacency: scoped state has scoped rooms/walls, so topology helpers
+  // produce floor-scoped counts/classifications when called via the wrapper.
+  // We construct the scoped state shim early so these closures can use it;
+  // see the final return below — the returned object IS the shim, but we
+  // need the shim's rooms/walls fields in scope here. Build a partial shim.
+  const scopedShim = { rooms, walls }
+  const getWallAdjacencyCount = () => topoGetWallAdjacencyCount(scopedShim)
+  const classifyWallBeamFlags = (wallId) => topoClassifyWallBeamFlags(scopedShim, wallId)
 
   // ── Masonry quantities (scoped walls) ─────────────────────────────────
   const getMaterialQuantities = () => {
