@@ -59,6 +59,21 @@ export function scopeStateToFloor(state, floorId) {
     (sc.fromFloorId ?? DEFAULT_FLOOR_ID) === floorId ||
     (sc.toFloorId   ?? DEFAULT_FLOOR_ID) === floorId)
 
+  // MEP collections — same per-floor filter as structural entities.
+  const plumbingFixtures = filterMap(state.plumbingFixtures ?? {}, onFloor)
+  const electricalPoints = filterMap(state.electricalPoints ?? {}, onFloor)
+  const hvacUnits        = filterMap(state.hvacUnits        ?? {}, onFloor)
+  const fireDevices      = filterMap(state.fireDevices      ?? {}, onFloor)
+  const elvDevices       = filterMap(state.elvDevices       ?? {}, onFloor)
+  const solarEquipment   = filterMap(state.solarEquipment   ?? {}, onFloor)
+  // Risers special-cased: span fromFloor → toFloor; visible on every
+  // intermediate floor by sequence (mirrors staircase rule). For Phase 0
+  // simple range-check; per-sequence intermediate-floor inclusion lands
+  // when the floor-range helper does in Phase 1.
+  const risers = filterMap(state.risers ?? {}, r =>
+    (r.fromFloorId ?? DEFAULT_FLOOR_ID) === floorId ||
+    (r.toFloorId   ?? DEFAULT_FLOOR_ID) === floorId)
+
   const wallIdSet = new Set(Object.keys(walls))
   const roomIdSet = new Set(Object.keys(rooms))
 
@@ -547,12 +562,49 @@ export function scopeStateToFloor(state, floorId) {
     return result
   }
 
+  // ── MEP aggregator stubs ──────────────────────────────────────────────
+  // Phase 0: stubs return empty shapes. Real impls land per discipline in
+  // Phase 1.1+ (plumbing), 1.2 (electrical), 1.3 (HVAC), 2.x (others).
+  // Stubs exist so consumers (boq/lines.js MEP emitters) can call through
+  // the scoped state uniformly from day one — no special-casing needed.
+  //
+  // Critical invariant: when a discipline lands, both its network and
+  // quantities wrappers must be re-implemented here against the scoped
+  // collections, OR they delegate to a pure function that consumes
+  // state.<collection> by method-dispatch. Forgetting one = wrong
+  // multi-floor BOQ silently. verify-mep.mjs catches this via
+  // per-floor-sum-equals-total assertions.
+  const EMPTY_DISCIPLINE_Q = Object.freeze({ perSystem: {}, risers: [], totals: {} })
+  const EMPTY_GRAPH        = Object.freeze({ nodes: {}, edges: {}, systems: [], branches: [] })
+  const EMPTY_ROUTES       = Object.freeze([])
+
+  const getPlumbingNetwork   = () => EMPTY_GRAPH
+  const getPlumbingRoutes    = () => EMPTY_ROUTES
+  const getPlumbingQuantities = () => EMPTY_DISCIPLINE_Q
+  const getElectricalNetwork  = () => EMPTY_GRAPH
+  const getElectricalRoutes   = () => EMPTY_ROUTES
+  const getElectricalQuantities = () => EMPTY_DISCIPLINE_Q
+  const getHvacNetwork  = () => EMPTY_GRAPH
+  const getHvacRoutes   = () => EMPTY_ROUTES
+  const getHvacQuantities = () => EMPTY_DISCIPLINE_Q
+  const getFireNetwork  = () => EMPTY_GRAPH
+  const getFireRoutes   = () => EMPTY_ROUTES
+  const getFireQuantities = () => EMPTY_DISCIPLINE_Q
+  const getElvNetwork   = () => EMPTY_GRAPH
+  const getElvRoutes    = () => EMPTY_ROUTES
+  const getElvQuantities  = () => EMPTY_DISCIPLINE_Q
+  const getSolarNetwork  = () => EMPTY_GRAPH
+  const getSolarRoutes   = () => EMPTY_ROUTES
+  const getSolarQuantities = () => EMPTY_DISCIPLINE_Q
+
   // Build the scoped state. Spread first so the live state's helpers
   // (projectSettings, nodes, formula helpers, etc.) are inherited; then
   // override with floor-scoped collections and re-implemented selectors.
   const scopedState = {
     ...state,
     walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
+    // MEP collections
+    plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
     // Per-entity helpers (delegate)
     getWallArea, getWallLength, getRoomArea, getRoomWallArea, getRoomPolygon,
     isRoomValid, isRoomStructurallyValid, getColumnHeightFt,
@@ -574,6 +626,14 @@ export function scopeStateToFloor(state, floorId) {
     // Civil
     getSumpCivilQty, getSepticCivilQty, getStampsByType,
     getTotalExcavationVolumeFt3,
+    // MEP (6 disciplines × 3 layers = 18 aggregator wrappers).
+    // Phase 0 stubs — each discipline replaces these when it ships.
+    getPlumbingNetwork, getPlumbingRoutes, getPlumbingQuantities,
+    getElectricalNetwork, getElectricalRoutes, getElectricalQuantities,
+    getHvacNetwork, getHvacRoutes, getHvacQuantities,
+    getFireNetwork, getFireRoutes, getFireQuantities,
+    getElvNetwork, getElvRoutes, getElvQuantities,
+    getSolarNetwork, getSolarRoutes, getSolarQuantities,
     // Floor scope marker (consumers can check)
     _scopedFloorId: floorId,
   }

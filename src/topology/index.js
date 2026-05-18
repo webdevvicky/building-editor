@@ -19,6 +19,7 @@ export {
   getRoomPolygon, getRoomArea, getRoomWallArea,
   isRoomStructurallyValid, hasRoomOverlap, getOverlappingRoomName,
   getValidRoomIds, sumRoomAreas,
+  getRoomCentroid, getRoofPolygon, getShaftPolygons,
 } from './rooms.js'
 
 // Floor scope
@@ -35,6 +36,7 @@ export {
   getWallAdjacencyCount, getWallToRoomsIndex, getRoomsForWall,
   isExternalWall, isPartitionWall, getExternalWallIds,
   classifyWallBeamFlags,
+  getNearestWallToPoint, getExternalAccessibleWalls,
 } from './walls.js'
 
 // Openings
@@ -47,6 +49,7 @@ export {
 export {
   getNodeToColumnIndex, getColumnAtNode, getColumnPosition,
   getColumnAreaFt2, getColumnPerimeterFt, getColumnHeightFt,
+  getColumnFloorSpans,
 } from './columns.js'
 
 // Beams
@@ -65,6 +68,7 @@ export {
 export {
   findSharedWalls, getRoomAdjacencyGraph, getRoomsBorderingRoom,
   getRoomConnectivityGraph, getRoomNeighbourThroughDoor,
+  getFloorWallPerimeterGraph, getRoomWallPerimeterGraph, getCeilingPaths,
 } from './adjacency.js'
 
 // Surfaces

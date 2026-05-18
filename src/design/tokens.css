@@ -43,6 +43,24 @@
   --color-error-bg:        #fdecec;
   --color-error-border:    #f3c2c2;
 
+  /* ---------- MEP discipline colors ---------- */
+  --color-plumbing-cold:        #2563eb;  /* blue-600 */
+  --color-plumbing-hot:         #dc2626;  /* red-600 */
+  --color-plumbing-drain:       #16a34a;  /* green-600 */
+  --color-plumbing-rain:        #0d9488;  /* teal-600 */
+  --color-electrical-wire:      #d97706;  /* amber-600 */
+  --color-electrical-conduit:   #fcd34d;  /* amber-300 */
+  --color-electrical-submain:   #b45309;  /* amber-700 */
+  --color-hvac-refrigerant:     #9333ea;  /* purple-600 */
+  --color-hvac-condensate:      #22d3ee;  /* cyan-400 */
+  --color-fire-detection:       #ea580c;  /* orange-600 */
+  --color-fire-sprinkler:       #b91c1c;  /* red-700 */
+  --color-elv-data:             #4f46e5;  /* indigo-600 */
+  --color-elv-cctv:             #3730a3;  /* indigo-800 */
+  --color-solar-dc:             #eab308;  /* yellow-500 */
+  --color-solar-ac:             #a16207;  /* yellow-700 */
+  --color-riser-shaft:          #4b5563;  /* gray-600 */
+
   /* ---------- Spacing: 4px base scale ---------- */
   --space-1:  4px;
   --space-2:  8px;

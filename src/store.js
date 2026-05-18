@@ -7,6 +7,7 @@ import {
 import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS, DEFAULT_FLOOR_ID } from './structuralSlice'
+import { createMepSlice } from './mepSlice'
 import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
 import {
   walkPolygonNodeOrder as walkPolygon,
@@ -101,10 +102,16 @@ export const useStore = create((set, get) => ({
   // ── History ───────────────────────────────────────────────────────────
 
   _save() {
-    const { nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations } = get()
+    const {
+      nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
+      plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
+    } = get()
     set(s => ({
-      history: [...s.history.slice(-49), { nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations }],
-      future:  [],
+      history: [...s.history.slice(-49), {
+        nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
+        plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
+      }],
+      future: [],
     }))
   },
 
@@ -114,7 +121,13 @@ export const useStore = create((set, get) => ({
     const prev = history[history.length - 1]
     set(s => ({
       history: s.history.slice(0, -1),
-      future:  [{ nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations }, ...s.future.slice(0, 49)],
+      future:  [{
+        nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
+        columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations,
+        plumbingFixtures: s.plumbingFixtures, electricalPoints: s.electricalPoints,
+        hvacUnits: s.hvacUnits, fireDevices: s.fireDevices, elvDevices: s.elvDevices,
+        solarEquipment: s.solarEquipment, risers: s.risers,
+      }, ...s.future.slice(0, 49)],
       nodes:   prev.nodes,
       walls:   prev.walls,
       rooms:   prev.rooms,
@@ -124,6 +137,13 @@ export const useStore = create((set, get) => ({
       slabs:   prev.slabs      ?? s.slabs,
       staircases:  prev.staircases  ?? s.staircases,
       foundations: prev.foundations ?? s.foundations,
+      plumbingFixtures: prev.plumbingFixtures ?? s.plumbingFixtures,
+      electricalPoints: prev.electricalPoints ?? s.electricalPoints,
+      hvacUnits:        prev.hvacUnits        ?? s.hvacUnits,
+      fireDevices:      prev.fireDevices      ?? s.fireDevices,
+      elvDevices:       prev.elvDevices       ?? s.elvDevices,
+      solarEquipment:   prev.solarEquipment   ?? s.solarEquipment,
+      risers:           prev.risers           ?? s.risers,
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, pendingWallIds: [],
     }))
   },
@@ -134,7 +154,13 @@ export const useStore = create((set, get) => ({
     const next = future[0]
     set(s => ({
       future:  s.future.slice(1),
-      history: [...s.history.slice(-49), { nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps, columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations }],
+      history: [...s.history.slice(-49), {
+        nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
+        columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations,
+        plumbingFixtures: s.plumbingFixtures, electricalPoints: s.electricalPoints,
+        hvacUnits: s.hvacUnits, fireDevices: s.fireDevices, elvDevices: s.elvDevices,
+        solarEquipment: s.solarEquipment, risers: s.risers,
+      }],
       nodes:   next.nodes,
       walls:   next.walls,
       rooms:   next.rooms,
@@ -144,6 +170,13 @@ export const useStore = create((set, get) => ({
       slabs:   next.slabs      ?? s.slabs,
       staircases:  next.staircases  ?? s.staircases,
       foundations: next.foundations ?? s.foundations,
+      plumbingFixtures: next.plumbingFixtures ?? s.plumbingFixtures,
+      electricalPoints: next.electricalPoints ?? s.electricalPoints,
+      hvacUnits:        next.hvacUnits        ?? s.hvacUnits,
+      fireDevices:      next.fireDevices      ?? s.fireDevices,
+      elvDevices:       next.elvDevices       ?? s.elvDevices,
+      solarEquipment:   next.solarEquipment   ?? s.solarEquipment,
+      risers:           next.risers           ?? s.risers,
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, pendingWallIds: [],
     }))
   },
@@ -832,6 +865,19 @@ export const useStore = create((set, get) => ({
       }])
     )
 
+    // ── MEP collections: default-injection on load ──
+    // Greenfield — no legacy field renames, no version checks. Pure defaults
+    // for missing fields so the loaded entities are runtime-ready.
+    const _normalizeMepCollection = get()._normalizeMepCollection
+    const _normalizeRisers        = get()._normalizeRisers
+    const loadedPlumbingFixtures = _normalizeMepCollection(data.plumbingFixtures, 'plumbingFixtures')
+    const loadedElectricalPoints = _normalizeMepCollection(data.electricalPoints, 'electricalPoints')
+    const loadedHvacUnits        = _normalizeMepCollection(data.hvacUnits,        'hvacUnits')
+    const loadedFireDevices      = _normalizeMepCollection(data.fireDevices,      'fireDevices')
+    const loadedElvDevices       = _normalizeMepCollection(data.elvDevices,       'elvDevices')
+    const loadedSolarEquipment   = _normalizeMepCollection(data.solarEquipment,   'solarEquipment')
+    const loadedRisers           = _normalizeRisers(data.risers)
+
     set({
       nodes:  migratedNodes,
       walls:  migratedWalls,
@@ -871,6 +917,13 @@ export const useStore = create((set, get) => ({
       slabs:       migratedSlabs,
       staircases:  migratedStaircases,
       foundations: migratedFoundations,
+      plumbingFixtures: loadedPlumbingFixtures,
+      electricalPoints: loadedElectricalPoints,
+      hvacUnits:        loadedHvacUnits,
+      fireDevices:      loadedFireDevices,
+      elvDevices:       loadedElvDevices,
+      solarEquipment:   loadedSolarEquipment,
+      risers:           loadedRisers,
       ratesByKey: (data.ratesByKey && typeof data.ratesByKey === 'object') ? { ...data.ratesByKey } : {},
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [],
@@ -1073,6 +1126,9 @@ export const useStore = create((set, get) => ({
 
   // ── Structural slice (columns, beams, slabs, staircases, projectSettings) ──
   ...createStructuralSlice(set, get, uid),
+
+  // ── MEP slice (6 disciplines + risers) ──
+  ...createMepSlice(set, get, uid),
 }))
 
 exposeStoreForDev(useStore)

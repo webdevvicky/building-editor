@@ -1,15 +1,28 @@
-// Topology — room adjacency graph.
+// Topology — room adjacency graph + floor wall-perimeter graph.
 //
 // Two rooms are "adjacent" if they share at least one wall. They are
 // "connected" if they share a wall AND that wall has at least one door
 // opening. Used by MEP duct routing, drainage-stack siting, and the
 // corridor/passage-discovery step in interior layout engines.
+//
+// The wall-perimeter graph is THE load-bearing primitive for MEP
+// routing — every discipline BFS's over it to compute pipe / wire
+// polylines along wall lines.
 
 import { createMemo } from './cache.js'
 import { getWallToRoomsIndex } from './walls.js'
 
-const _adjacencyMemo   = createMemo()
+const DEFAULT_FLOOR_ID = 'F1'
+
+const _adjacencyMemo    = createMemo()
 const _connectivityMemo = createMemo()
+
+// Per-floor memo cells for the wall-perimeter graph. One cell per floorId.
+// Cell invalidates when state.walls or state.nodes reference changes —
+// which Zustand does on every store mutation. Multi-cell because the
+// function takes a floorId parameter; createMemo() is single-cell.
+const _floorWallPerimeterCells = new Map()
+const _roomWallPerimeterCells  = new Map()
 
 // Returns string[] of wallIds that appear in BOTH wallIdsA and wallIdsB.
 // Pure helper. Most callers go through getRoomsBorderingRoom or the graph
@@ -95,4 +108,187 @@ export function getRoomNeighbourThroughDoor(state, roomId, openingId) {
     return null  // external door
   }
   return null
+}
+
+// ── Wall-perimeter graph (load-bearing for MEP routing) ─────────────────────
+//
+// Builds a node-edge graph over the floor's walls. Nodes are existing
+// state.nodes (wall endpoints + splitWall midpoints — both are real
+// node entities). Edges are walls, weighted by lengthFt. MEP routing
+// engines BFS over this graph to compute wall-following polylines.
+//
+// Returned shape:
+//   {
+//     floorId,
+//     nodes:     { [nodeId]: { id, x, y, edgeIds: string[] } },
+//     edges:     { [wallId]: { id, wallId, fromNodeId, toNodeId, lengthIn, lengthFt } },
+//     adjacency: { [nodeId]: { [adjacentNodeId]: wallId } },
+//   }
+//
+// Invariants:
+//   - Only walls with (floorId ?? 'F1') === floorId are included.
+//   - Virtual walls (w.isVirtual) are excluded — they're not physical paths.
+//   - Plot walls (w.isPlot) are INCLUDED — site-boundary walls are routable.
+//   - Only nodes that are endpoints of at least one included wall appear.
+//   - Edges are inserted in deterministic order (sorted by wall.id) so
+//     downstream consumers can produce stable hashes.
+//   - T-intersections from splitWall(): the midpoint node is a real
+//     state.nodes entry; it appears with the natural degree (3+ if a
+//     branch wall meets there). No special handling needed.
+//   - Walls sharing a node but not collinear (a corner): both walls list
+//     the shared node in their edgeIds and the node's adjacency map
+//     points to both via the appropriate wallIds. No special handling.
+//
+// Memoization:
+//   - Per-floor cache in _floorWallPerimeterCells (Map<floorId, cell>).
+//   - Cell invalidates when state.walls OR state.nodes reference changes
+//     (Zustand replaces both on every mutation), forcing a recompute.
+//   - Result reference is stable within a memoized window so React/Zustand
+//     selectors don't trigger spurious re-renders.
+
+function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
+  // First pass: collect floor-scoped walls. Sort by id for determinism.
+  const floorWalls = []
+  for (const w of Object.values(walls)) {
+    if (w.isVirtual) continue
+    if ((w.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    floorWalls.push(w)
+  }
+  floorWalls.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+
+  // Second pass: collect used nodes
+  const graphNodes = {}
+  for (const w of floorWalls) {
+    for (const nid of [w.n1, w.n2]) {
+      const n = nodes[nid]
+      if (!n) continue
+      if (!graphNodes[nid]) graphNodes[nid] = { id: nid, x: n.x, y: n.y, edgeIds: [] }
+    }
+  }
+
+  // Third pass: build edges + adjacency
+  const graphEdges = {}
+  const adjacency = {}
+  for (const nid of Object.keys(graphNodes)) adjacency[nid] = {}
+
+  for (const w of floorWalls) {
+    const a = graphNodes[w.n1]
+    const b = graphNodes[w.n2]
+    if (!a || !b) continue
+    const dx = b.x - a.x, dy = b.y - a.y
+    const lengthIn = Math.hypot(dx, dy)
+    const lengthFt = lengthIn / 12
+    graphEdges[w.id] = {
+      id: w.id,
+      wallId: w.id,
+      fromNodeId: w.n1,
+      toNodeId: w.n2,
+      lengthIn,
+      lengthFt,
+    }
+    a.edgeIds.push(w.id)
+    b.edgeIds.push(w.id)
+    adjacency[w.n1][w.n2] = w.id
+    adjacency[w.n2][w.n1] = w.id
+  }
+
+  // Sort edgeIds per node for determinism
+  for (const n of Object.values(graphNodes)) {
+    n.edgeIds.sort()
+  }
+
+  return { floorId, nodes: graphNodes, edges: graphEdges, adjacency }
+}
+
+export function getFloorWallPerimeterGraph(state, floorId) {
+  const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+  const walls = state.walls
+  const nodes = state.nodes
+  const cell = _floorWallPerimeterCells.get(fid)
+  if (cell && cell.walls === walls && cell.nodes === nodes) return cell.result
+  const result = buildFloorWallPerimeterGraph(walls, nodes, fid)
+  _floorWallPerimeterCells.set(fid, { walls, nodes, result })
+  return result
+}
+
+// Room sub-graph — same node/edge shape, but restricted to the wallIds
+// referenced by a specific room. Used by within-room electrical routing
+// (switchboard → light/fan) and sprinkler branch coverage.
+//
+// Per-room memo cell keyed on (rooms, walls, nodes) references.
+
+function buildRoomWallPerimeterGraph(room, walls, nodes) {
+  const wallIdSet = new Set(room.wallIds ?? [])
+  const graphNodes = {}
+  const graphEdges = {}
+  const adjacency = {}
+
+  const roomWalls = []
+  for (const wid of wallIdSet) {
+    const w = walls[wid]
+    if (!w || w.isVirtual) continue
+    roomWalls.push(w)
+  }
+  roomWalls.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+
+  for (const w of roomWalls) {
+    for (const nid of [w.n1, w.n2]) {
+      const n = nodes[nid]
+      if (!n) continue
+      if (!graphNodes[nid]) graphNodes[nid] = { id: nid, x: n.x, y: n.y, edgeIds: [] }
+    }
+  }
+  for (const nid of Object.keys(graphNodes)) adjacency[nid] = {}
+
+  for (const w of roomWalls) {
+    const a = graphNodes[w.n1]
+    const b = graphNodes[w.n2]
+    if (!a || !b) continue
+    const lengthIn = Math.hypot(b.x - a.x, b.y - a.y)
+    const lengthFt = lengthIn / 12
+    graphEdges[w.id] = {
+      id: w.id, wallId: w.id,
+      fromNodeId: w.n1, toNodeId: w.n2,
+      lengthIn, lengthFt,
+    }
+    a.edgeIds.push(w.id)
+    b.edgeIds.push(w.id)
+    adjacency[w.n1][w.n2] = w.id
+    adjacency[w.n2][w.n1] = w.id
+  }
+  for (const n of Object.values(graphNodes)) n.edgeIds.sort()
+
+  return { roomId: room.id, nodes: graphNodes, edges: graphEdges, adjacency }
+}
+
+export function getRoomWallPerimeterGraph(state, roomId) {
+  const room = state.rooms[roomId]
+  if (!room) return null
+  const walls = state.walls
+  const nodes = state.nodes
+  const rooms = state.rooms
+  const cell = _roomWallPerimeterCells.get(roomId)
+  if (cell && cell.walls === walls && cell.nodes === nodes && cell.rooms === rooms) {
+    return cell.result
+  }
+  const result = buildRoomWallPerimeterGraph(room, walls, nodes)
+  _roomWallPerimeterCells.set(roomId, { walls, nodes, rooms, result })
+  return result
+}
+
+// Ceiling-path graph. In Phase 1 the ceiling path geometry is identical
+// to the wall perimeter (MEP runs along ceiling lines that follow walls
+// from above), but the zone tag is 'CEILING' so quantity engines apply
+// the ceiling multiplier. Same memoized graph, returned as a different
+// shape so callers don't accidentally treat it as wall geometry.
+export function getCeilingPaths(state, floorId) {
+  const g = getFloorWallPerimeterGraph(state, floorId)
+  return {
+    floorId: g.floorId,
+    nodes: g.nodes,
+    edges: Object.fromEntries(
+      Object.entries(g.edges).map(([k, e]) => [k, { ...e, zone: 'CEILING' }])
+    ),
+    adjacency: g.adjacency,
+  }
 }

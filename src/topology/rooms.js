@@ -173,3 +173,51 @@ export function sumRoomAreas(state, predicate) {
       .reduce((t, id) => t + getRoomArea(state, id), 0)
   )
 }
+
+// ── Centroid + roof + shaft (MEP foundation) ────────────────────────────────
+
+// Returns {x,y} centroid in world inches, or null if the room polygon is
+// malformed. Used by every MEP discipline for auto-placement heuristics
+// (DB seeding, fan placement, sprinkler coverage centering).
+export function getRoomCentroid(state, roomId) {
+  const poly = getRoomPolygon(state, roomId)
+  if (!poly || poly.length === 0) return null
+  let cx = 0, cy = 0
+  for (const p of poly) { cx += p.x; cy += p.y }
+  return { x: cx / poly.length, y: cy / poly.length }
+}
+
+// Union polygon of all valid rooms on the top floor — the roof footprint
+// solar panel placement uses. Phase 1 returns the polygon of the largest
+// room (single-room approximation); Phase 2.3 enhances with true polygon
+// union when L-shaped roofs become routine.
+export function getRoofPolygon(state, floorId) {
+  if (!floorId) return null
+  const validIds = getValidRoomIds(state).filter(
+    id => (state.rooms[id]?.floorId ?? DEFAULT_FLOOR_ID) === floorId
+  )
+  if (validIds.length === 0) return null
+  let bestPoly = null, bestArea = -1
+  for (const id of validIds) {
+    const poly = getRoomPolygon(state, id)
+    if (!poly) continue
+    const area = getRoomArea(state, id)
+    if (area > bestArea) { bestArea = area; bestPoly = poly }
+  }
+  return bestPoly
+}
+
+// Returns polygons of all SHAFT rooms on a floor (rooms with type 'SHAFT' or
+// room.isShaft truthy). Risers prefer to traverse these; validation checks
+// that riser XY lies inside at least one shaft polygon.
+export function getShaftPolygons(state, floorId) {
+  const out = []
+  for (const room of Object.values(state.rooms)) {
+    if (floorId && (room.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    const isShaft = room.type === 'SHAFT' || room.isShaft === true
+    if (!isShaft) continue
+    const poly = getRoomPolygon(state, room.id)
+    if (poly) out.push({ roomId: room.id, polygon: poly })
+  }
+  return out
+}

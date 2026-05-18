@@ -7,8 +7,10 @@
 import { GRID_IN } from '../geometry.js'
 import { getColumnAreaFt2, getColumnPerimeterFt } from '../lib/columnShapes.js'
 import { createMemo } from './cache.js'
+import { isColumnOnFloor, sortedFloorList } from './floor.js'
 
 const _nodeToColumnMemo = createMemo()
+const _columnFloorSpansMemo = createMemo()
 
 // Builds nodeId → columnId map for attached columns. Memoized on state.columns.
 export function getNodeToColumnIndex(state) {
@@ -44,6 +46,26 @@ export function getColumnPosition(state, columnId) {
 // Re-export column-shape helpers so callers asking topology questions about
 // columns don't need a second import.
 export { getColumnAreaFt2, getColumnPerimeterFt }
+
+// Per-floor column index. Returns Map<floorId, Set<columnId>> covering
+// every column that spans each floor (i.e. floor ∈ [base, top] in
+// sequence order). Memoized on { columns, floors } refs. Used by risers
+// when they need a column at the riser XY for support placement.
+export function getColumnFloorSpans(state) {
+  const columns = state.columns
+  const floors = state.projectSettings?.floors ?? []
+  return _columnFloorSpansMemo([columns, floors], () => {
+    const sorted = sortedFloorList(state)
+    const out = new Map()
+    for (const f of sorted) out.set(f.id, new Set())
+    for (const col of Object.values(columns)) {
+      for (const f of sorted) {
+        if (isColumnOnFloor(col, f.id, sorted)) out.get(f.id).add(col.id)
+      }
+    }
+    return out
+  })
+}
 
 // Column height — depends on projectSettings.floors[] span and the slab
 // thickness above. Pure on its inputs. Used by structural BOQ and (eventually)

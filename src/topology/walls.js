@@ -99,3 +99,59 @@ export function classifyWallBeamFlags(state, wallId) {
   }
   return result
 }
+
+// ── Snap-to-wall (MEP foundation) ───────────────────────────────────────────
+
+// Returns the wall closest to point, projected onto it. Used by every
+// fixture / point placement for snap-to-wall behavior.
+//
+// candidateWallIds: optional Set or Array of wall ids to restrict the
+// search to (e.g., walls on the current floor). When omitted, ALL walls
+// are searched — including virtual + plot walls — caller filters.
+//
+// Returns { wallId, projected:{x,y}, distance, t } where t∈[0,1] is the
+// parameter along the wall from n1 to n2. distance is in world inches.
+// Returns null if there are no candidate walls.
+export function getNearestWallToPoint(state, point, candidateWallIds) {
+  const ids = candidateWallIds
+    ? (candidateWallIds instanceof Set ? [...candidateWallIds] : candidateWallIds)
+    : Object.keys(state.walls)
+  // Deterministic order — sort ids
+  ids.sort()
+  let best = null
+  for (const wid of ids) {
+    const w = state.walls[wid]
+    if (!w) continue
+    const a = state.nodes[w.n1], b = state.nodes[w.n2]
+    if (!a || !b) continue
+    const dx = b.x - a.x, dy = b.y - a.y
+    const lenSq = dx * dx + dy * dy
+    if (lenSq === 0) continue
+    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq))
+    const px = a.x + t * dx, py = a.y + t * dy
+    const dist = Math.hypot(point.x - px, point.y - py)
+    // Strict < for deterministic tiebreak: first-sorted wins
+    if (!best || dist < best.distance) {
+      best = { wallId: wid, projected: { x: px, y: py }, distance: dist, t }
+    }
+  }
+  return best
+}
+
+// External walls that bear at least one door opening — i.e. service-entry
+// candidates for DB placement, fire-alarm-panel placement, energy-meter
+// placement (regulatory: must be accessible from outside / common
+// circulation). Floor-scoped via the wall.floorId match.
+export function getExternalAccessibleWalls(state, floorId) {
+  const adj = getWallAdjacencyCount(state)
+  const out = []
+  for (const w of Object.values(state.walls)) {
+    if (w.isVirtual || w.isPlot) continue
+    if (floorId && (w.floorId ?? 'F1') !== floorId) continue
+    if ((adj[w.id] ?? 0) !== 1) continue  // must be external
+    const hasDoor = (w.openings ?? []).some(o => o.type === 'door')
+    if (!hasDoor) continue
+    out.push(w)
+  }
+  return out
+}

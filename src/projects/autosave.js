@@ -24,6 +24,16 @@ function buildSnapshot(s) {
     slabs:           s.slabs,
     staircases:      s.staircases,
     foundations:     s.foundations,
+    // MEP entities (6 disciplines + risers). Greenfield rule — keys added
+    // to snapshot without bumping version. Old saves lacking them load as
+    // empty maps via loadProject normalization.
+    plumbingFixtures: s.plumbingFixtures ?? {},
+    electricalPoints: s.electricalPoints ?? {},
+    hvacUnits:        s.hvacUnits        ?? {},
+    fireDevices:      s.fireDevices      ?? {},
+    elvDevices:       s.elvDevices       ?? {},
+    solarEquipment:   s.solarEquipment   ?? {},
+    risers:           s.risers           ?? {},
     ratesByKey:      s.ratesByKey ?? {},
     projectSettings: s.projectSettings,
   }
