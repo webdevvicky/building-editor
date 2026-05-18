@@ -10,6 +10,7 @@
 import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { resolveBeamReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
+import { dialog } from './ui/Dialog'
 
 const panelStyle = {
   position: 'absolute', top: 56, left: 16,
@@ -77,19 +78,20 @@ export default function BeamPanel() {
     selectBeam(null)
   }
 
-  function handleApplyToMatching() {
+  async function handleApplyToMatching() {
     const peers = Object.values(state.beams).filter(
       b => b.id !== selectedBeamId && (b.beamClass ?? b.level) === beamClass
     )
     if (peers.length === 0) {
-      window.alert('No matching beams to update — no other explicit beams share this class.')
+      await dialog.alert('No matching beams to update — no other explicit beams share this class.', { title: 'No matching beams' })
       return
     }
     const specLabel = beam.reinforcementSpecId
       ? (specs[beam.reinforcementSpecId]?.label ?? beam.reinforcementSpecId)
       : 'no spec (clear)'
-    const ok = window.confirm(
-      `Apply "${specLabel}" to ${peers.length} other ${lvl?.label ?? beamClass} beam${peers.length === 1 ? '' : 's'}?`
+    const ok = await dialog.confirm(
+      `Apply "${specLabel}" to ${peers.length} other ${lvl?.label ?? beamClass} beam${peers.length === 1 ? '' : 's'}?`,
+      { title: 'Apply to matching beams?', confirmLabel: 'Apply', variant: 'default' }
     )
     if (!ok) return
     applyReinforcementSpecToMatching({

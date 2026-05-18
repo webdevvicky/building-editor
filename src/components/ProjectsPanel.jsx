@@ -4,6 +4,7 @@ import {
   listProjects, createProject, openProject, renameProject, deleteProject,
   getCurrentProjectId, setCurrentProjectId, subscribe,
 } from '../projects/manager'
+import { dialog } from './ui/Dialog'
 
 // ── styling (matches ProjectSettingsPanel) ───────────────────────────────────
 const overlay = {
@@ -143,13 +144,16 @@ export default function ProjectsPanel() {
     if (activeTool === 'projects') setTool('select')
   }
 
-  function handleRename(id, currentName) {
-    const next = window.prompt('Rename project', currentName)
+  async function handleRename(id, currentName) {
+    const next = await dialog.prompt('New name', { title: 'Rename project', defaultValue: currentName })
     if (next && next.trim()) renameProject(id, next.trim())
   }
 
-  function handleDelete(id, name) {
-    if (!window.confirm(`Delete project "${name}"? This cannot be undone.`)) return
+  async function handleDelete(id, name) {
+    const ok = await dialog.confirm(`Delete project "${name}"? This cannot be undone.`, {
+      title: 'Delete project', confirmLabel: 'Delete', variant: 'danger',
+    })
+    if (!ok) return
     deleteProject(id)
   }
 

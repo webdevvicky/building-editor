@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
+import { toast } from './ui/Toast'
 
 function Row({ label, value, sub }) {
   return (
@@ -38,6 +39,7 @@ export default function RoomDetailPanel() {
   const renameRoom              = useStore(s => s.renameRoom)
   const deleteRoom              = useStore(s => s.deleteRoom)
   const selectRoom              = useStore(s => s.selectRoom)
+  const undo                    = useStore(s => s.undo)
   const setRoomType             = useStore(s => s.setRoomType)
   const setRoomFinishes         = useStore(s => s.setRoomFinishes)
   const setRoomPlasterSystem    = useStore(s => s.setRoomPlasterSystem)
@@ -321,7 +323,14 @@ export default function RoomDetailPanel() {
 
       {/* Delete room */}
       <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 10, paddingTop: 10 }}>
-        <button onClick={() => { deleteRoom(room.id); selectRoom(null) }}
+        <button onClick={() => {
+            const roomToDelete = rooms[room.id]
+            deleteRoom(room.id)
+            selectRoom(null)
+            toast.action(`Deleted room "${roomToDelete?.name || 'Untitled'}".`, {
+              label: 'Undo', onClick: () => undo(), duration: 5000,
+            })
+          }}
           style={{ width: '100%', padding: '5px', background: '#fff0f0', border: '1px solid #e74c3c',
             borderRadius: 4, color: '#e74c3c', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
           Delete room

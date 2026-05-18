@@ -1,6 +1,8 @@
 import { useRef } from 'react'
 import { useStore } from '../store'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
+import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 
 const TOOLS = [
   { id: 'draw',   label: '✏ Draw' },
@@ -88,7 +90,9 @@ export default function Toolbar() {
     const reader = new FileReader()
     reader.onload = (ev) => {
       try { loadProject(JSON.parse(ev.target.result)) }
-      catch { alert('Invalid JSON file') }
+      catch {
+        dialog.alert('Could not load this file. Please make sure it is a valid project JSON export.', { title: 'Invalid file' })
+      }
     }
     reader.readAsText(file)
     e.target.value = ''
@@ -155,11 +159,13 @@ export default function Toolbar() {
           const id = getCurrentProjectId()
           if (!id) { setTool('projects'); return }
           const s = useStore.getState()
-          saveCurrent(id, {
+          const ok = saveCurrent(id, {
             version: 7, nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
             columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
             foundations: s.foundations, projectSettings: s.projectSettings,
           })
+          if (ok === false) toast.error('Could not save — storage quota exceeded.')
+          else toast.success('Project saved.')
         }}
       >💾 Save</button>
 

@@ -1,2 +1,47 @@
+@import './design/tokens.css';
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body, html, #root { width: 100%; height: 100%; overflow: hidden; }
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/* Focus ring — show only on keyboard navigation */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Scrollbar — restrained, matches Linear/Stripe */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }

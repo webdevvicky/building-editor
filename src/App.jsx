@@ -17,6 +17,8 @@ import FloorSwitcher from './components/FloorSwitcher'
 import FloorsManagerPanel from './components/FloorsManagerPanel'
 import BBSSpecPanel from './components/BBSSpecPanel'
 import ProjectsPanel from './components/ProjectsPanel'
+import { DialogHost } from './components/ui/Dialog'
+import { ToastHost } from './components/ui/Toast'
 
 export default function App() {
   return (
@@ -40,6 +42,8 @@ export default function App() {
       <LayersPanel />
       <BOQPanel />
       <Canvas />
+      <DialogHost />
+      <ToastHost />
     </div>
   )
 }

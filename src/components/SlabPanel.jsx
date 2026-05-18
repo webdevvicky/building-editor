@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { resolveSlabReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
+import { dialog } from './ui/Dialog'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -163,19 +164,20 @@ export default function SlabPanel() {
                 const state = useStore.getState()
                 const resolved = resolveSlabReinforcementSpec(state, slab.id)
                 const slabRole = slab.role ?? slab.classification ?? null
-                const handleApply = () => {
+                const handleApply = async () => {
                   const peers = Object.values(state.slabs).filter(
                     sl => sl.id !== slab.id && (sl.role ?? sl.classification ?? null) === slabRole
                   )
                   if (peers.length === 0) {
-                    window.alert('No matching slabs to update — no other slabs share this role.')
+                    await dialog.alert('No matching slabs to update — no other slabs share this role.', { title: 'No matching slabs' })
                     return
                   }
                   const specLabel = slab.reinforcementSpecId
                     ? (specs[slab.reinforcementSpecId]?.label ?? slab.reinforcementSpecId)
                     : 'no spec (clear)'
-                  const ok = window.confirm(
-                    `Apply "${specLabel}" to ${peers.length} other ${slabRole ?? 'matching'} slab${peers.length === 1 ? '' : 's'}?`
+                  const ok = await dialog.confirm(
+                    `Apply "${specLabel}" to ${peers.length} other ${slabRole ?? 'matching'} slab${peers.length === 1 ? '' : 's'}?`,
+                    { title: 'Apply to matching slabs?', confirmLabel: 'Apply', variant: 'default' }
                   )
                   if (!ok) return
                   applyReinforcementSpecToMatching({

@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { REINFORCEMENT_SPEC_PRESETS } from '../specs/reinforcementSpecs'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
+import { dialog } from './ui/Dialog'
 
 const overlay = {
   position: 'fixed', top: '50%', left: '50%',
@@ -233,14 +234,14 @@ export default function BBSSpecPanel() {
     setProjectSettings({ bbsDefaults: nextDefaults })
     if (selectedId === id) setSelectedId(null)
   }
-  const setAsDefault = (spec) => {
+  const setAsDefault = async (spec) => {
     // BEAM defaults are per-class { plinth, lintel, roof }. Other element
     // types use a flat specId. When prompted, pick a single class to set —
     // user can refine via the Project defaults panel rows below.
     if (spec.elementType === 'BEAM') {
-      const classChoice = window.prompt(
+      const classChoice = await dialog.prompt(
         `Apply as default for which beam class? (${BEAM_LEVEL_REGISTRY.map(l => l.id).join(' | ')})`,
-        'plinth'
+        { title: 'Set beam class default', defaultValue: 'plinth' }
       )
       if (!classChoice || !BEAM_LEVEL_REGISTRY.some(l => l.id === classChoice)) return
       const beamDefaults = { ...(defaults.BEAM ?? {}) }

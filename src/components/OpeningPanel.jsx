@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
 import { MATERIAL_LIBRARY } from '../materials'
 import { MASONRY_SYSTEMS } from '../specs/masonrySystems'
+import { toast } from './ui/Toast'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -28,6 +29,7 @@ export default function OpeningPanel() {
   const removeOpening       = useStore(s => s.removeOpening)
   const setOpeningOrient    = useStore(s => s.setOpeningOrient)
   const deleteWall          = useStore(s => s.deleteWall)
+  const undo                = useStore(s => s.undo)
   const setWallHeight       = useStore(s => s.setWallHeight)
   const setWallThickness    = useStore(s => s.setWallThickness)
   const setWallIsPlot       = useStore(s => s.setWallIsPlot)
@@ -115,7 +117,10 @@ export default function OpeningPanel() {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <span style={{ fontWeight: 700, color: '#333' }}>Wall Properties</span>
-        <button onClick={() => deleteWall(selectedWallId)}
+        <button onClick={() => {
+            deleteWall(selectedWallId)
+            toast.action('Wall deleted.', { label: 'Undo', onClick: () => undo(), duration: 5000 })
+          }}
           style={{ background: '#fff0f0', border: '1px solid #e74c3c', borderRadius: 4,
             color: '#e74c3c', cursor: 'pointer', fontSize: 11, padding: '3px 8px', fontWeight: 600 }}>
           Delete wall

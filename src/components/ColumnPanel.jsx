@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { getColumnDimLabel } from '../lib/columnShapes'
 import { resolveColumnReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
+import { dialog } from './ui/Dialog'
 
 const panelStyle = {
   position: 'absolute', top: 56, left: 16,
@@ -173,18 +174,19 @@ export default function ColumnPanel() {
         const colSpecs = Object.values(specs).filter(s => s.elementType === 'COLUMN')
         const state = useStore.getState()
         const resolved = resolveColumnReinforcementSpec(state, selectedColumnId)
-        const handleApplyToMatching = () => {
+        const handleApplyToMatching = async () => {
           const peers = Object.values(state.columns)
             .filter(c => c.id !== selectedColumnId && c.columnTypeId === column.columnTypeId)
           if (peers.length === 0) {
-            window.alert('No matching columns to update — this is the only column of its type.')
+            await dialog.alert('No matching columns to update — this is the only column of its type.', { title: 'No matching columns' })
             return
           }
           const specLabel = column.reinforcementSpecId
             ? (specs[column.reinforcementSpecId]?.label ?? column.reinforcementSpecId)
             : 'no spec (clear)'
-          const ok = window.confirm(
-            `Apply "${specLabel}" to ${peers.length} other column${peers.length === 1 ? '' : 's'} of type ${colType?.label ?? column.columnTypeId}?`
+          const ok = await dialog.confirm(
+            `Apply "${specLabel}" to ${peers.length} other column${peers.length === 1 ? '' : 's'} of type ${colType?.label ?? column.columnTypeId}?`,
+            { title: 'Apply to matching columns?', confirmLabel: 'Apply', variant: 'default' }
           )
           if (!ok) return
           applyReinforcementSpecToMatching({

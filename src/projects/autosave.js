@@ -7,6 +7,7 @@
 // Snapshot shape matches the canonical save format (version: 7 here).
 
 import { saveCurrent } from './manager'
+import { toast } from '../components/ui/Toast'
 
 const DEBOUNCE_MS = 30_000
 
@@ -38,7 +39,8 @@ export function installAutosave(store, getProjectId) {
     if (!id) return
     const state = store.getState()
     const snap  = buildSnapshot(state)
-    saveCurrent(id, snap)
+    const ok    = saveCurrent(id, snap)
+    if (ok !== false) toast.info('Auto-saved', { duration: 1500 })
   }
 
   function schedule() {

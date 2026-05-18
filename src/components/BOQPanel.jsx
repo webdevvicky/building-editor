@@ -24,6 +24,7 @@ import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
 import { exportBoqPdf } from '../export/pdf'
 import { exportBoqExcel } from '../export/excel'
+import { toast } from './ui/Toast'
 import {
   BoqRow, BoqSubRow, SectionHeader, SubSectionHeader, fmtLineQty,
 } from './boq/BoqRow'
@@ -397,22 +398,47 @@ export default function BOQPanel() {
   function handleExportCSV() {
     // CSV uses the canonical aggregator — same source as cost total +
     // every visible row.
-    const rows = [['Category', 'Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
-    for (const line of canonicalLines) {
-      const rateVal = parseFloat(rates[line.rateKey]) || ''
-      const costVal = line.cost !== null ? Math.round(line.cost) : ''
-      rows.push([line.category, line.label, line.qty, line.unit, rateVal, costVal])
+    try {
+      const rows = [['Category', 'Item', 'Quantity', 'Unit', 'Rate (₹)', 'Cost (₹)']]
+      for (const line of canonicalLines) {
+        const rateVal = parseFloat(rates[line.rateKey]) || ''
+        const costVal = line.cost !== null ? Math.round(line.cost) : ''
+        rows.push([line.category, line.label, line.qty, line.unit, rateVal, costVal])
+      }
+      const csv = rows
+        .map(r => r.map(cell => (typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell)).join(','))
+        .join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `boq-export-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('BOQ exported as CSV.')
+    } catch (err) {
+      toast.error('Export failed.')
     }
-    const csv = rows
-      .map(r => r.map(cell => (typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell)).join(','))
-      .join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href     = url
-    a.download = `boq-export-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+  }
+
+  function handleExportPDF() {
+    try {
+      exportBoqPdf(liveState, rates, {
+        projectName: 'Layout', preparedBy: '-', unitSystem: unit === 'm' ? 'metric' : 'ft (Indian)',
+      })
+      toast.success('BOQ exported as PDF.')
+    } catch (err) {
+      toast.error('Export failed.')
+    }
+  }
+
+  function handleExportExcel() {
+    try {
+      exportBoqExcel(liveState, rates, { projectName: 'Layout' })
+      toast.success('BOQ exported as Excel.')
+    } catch (err) {
+      toast.error('Export failed.')
+    }
   }
 
   // Unit-aware area / length display for the summary section.
@@ -628,9 +654,7 @@ export default function BOQPanel() {
           }}
         >CSV</button>
         <button
-          onClick={() => exportBoqPdf(liveState, rates, {
-            projectName: 'Layout', preparedBy: '-', unitSystem: unit === 'm' ? 'metric' : 'ft (Indian)',
-          })}
+          onClick={handleExportPDF}
           style={{
             flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
             background: '#fff8e6', border: '1px solid #e0b020', borderRadius: 4, color: '#7a5400',
@@ -638,7 +662,7 @@ export default function BOQPanel() {
           }}
         >📄 PDF</button>
         <button
-          onClick={() => exportBoqExcel(liveState, rates, { projectName: 'Layout' })}
+          onClick={handleExportExcel}
           style={{
             flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
             background: '#e8f5e9', border: '1px solid #81c784', borderRadius: 4, color: '#2e7d32',

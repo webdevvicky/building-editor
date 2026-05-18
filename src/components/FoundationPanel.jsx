@@ -7,6 +7,7 @@
 
 import { useStore } from '../store'
 import { resolveFootingReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
+import { dialog } from './ui/Dialog'
 
 const FOUNDATION_TYPES = ['ISOLATED', 'COMBINED', 'RAFT', 'STRIP', 'PILE']
 
@@ -224,18 +225,19 @@ export default function FoundationPanel() {
           const footingSpecs = Object.values(specs).filter(sp => sp.elementType === 'FOOTING')
           const state = useStore.getState()
           const resolved = resolveFootingReinforcementSpec(state, { foundationId: f.id })
-          const handleApply = () => {
+          const handleApply = async () => {
             const peers = Object.values(state.foundations)
               .filter(o => o.id !== f.id && o.type === f.type)
             if (peers.length === 0) {
-              window.alert('No matching foundations to update — this is the only foundation of its type.')
+              await dialog.alert('No matching foundations to update — this is the only foundation of its type.', { title: 'No matching foundations' })
               return
             }
             const specLabel = f.reinforcementSpecId
               ? (specs[f.reinforcementSpecId]?.label ?? f.reinforcementSpecId)
               : 'no spec (clear)'
-            const ok = window.confirm(
-              `Apply "${specLabel}" to ${peers.length} other ${f.type} foundation${peers.length === 1 ? '' : 's'}?`
+            const ok = await dialog.confirm(
+              `Apply "${specLabel}" to ${peers.length} other ${f.type} foundation${peers.length === 1 ? '' : 's'}?`,
+              { title: 'Apply to matching foundations?', confirmLabel: 'Apply', variant: 'default' }
             )
             if (!ok) return
             applyReinforcementSpecToMatching({
