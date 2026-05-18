@@ -32,6 +32,15 @@ Collapsible BOQ sidebar (commit `0394c88`, 2026-05-18): BOQ panel now
 collapses to a 32px strip via Ctrl/Cmd+B or the toggle button on its left
 edge. State persists in `localStorage['boq_panel_collapsed']`.
 
+Toolbar dropdown redesign (commit `fbfcc4a`, 2026-05-18): flat 25-icon
+toolbar replaced with 5 cluster dropdown buttons (Draw / Structural &
+Civil / MEP / View & Settings / Project). Each cluster opens a flyout
+listing labeled tools + keyboard shortcuts. Active tool highlighted at
+two levels (cluster trigger + dropdown item). New `<Dropdown>`
+primitive in `src/components/ui/Dropdown.jsx`. Single-source tool
+registry in `src/components/toolbarConfig.js`. See "Toolbar conventions"
+section below.
+
 ERP integration (replace static MATERIAL_LIBRARY + MEP catalogs + add live
 rate catalog) is the next major work item; foundation for it is in place
 via the canonical `getBoqLines()` pipeline and the versioned
@@ -861,17 +870,64 @@ For new BOQ lines to be clickable, the emitter in `src/boq/lines.js` must
 populate `sourceEntityIds`. Currently populated by BBS grouped-by-spec
 steel lines; other emitters set `[]` and stay non-clickable.
 
-### Toolbar conventions (`Toolbar.jsx` + `Toolbar.css`)
+### Toolbar conventions (`Toolbar.jsx` + `Toolbar.css` + `toolbarConfig.js`)
 
-- 4 intent-clusters separated by `.toolbar-divider`:
-  **Draw** | **Structural & Civil** | **View & Settings** | **Project**.
-- Every button is `<Button variant size title>`. Active tool gets
-  `variant="primary"`; inactive gets `variant="ghost"`. NEVER inline
-  `background:` for active state.
-- Icons exclusively from `lucide-react` at `size={14}` `strokeWidth={2}`.
-  **No emoji anywhere in toolbar output.**
-- Tooltips via `title` attribute. Include keyboard hint when applicable
-  ("Draw walls (D)", "Save project (Ctrl+S)", "Undo (Ctrl+Z)").
+**Pattern shipped 2026-05-18 (commit `fbfcc4a`):** Replaces the previous
+flat 25-icon-only row. The toolbar is now 5 cluster dropdown buttons:
+**Draw** | **Structural & Civil** | **MEP** | **View & Settings** | **Project**.
+
+- Click a cluster trigger → flyout opens beneath, anchored to its left
+  edge. Items are rendered as labeled rows with the keyboard shortcut
+  shown on the right side of each row.
+- Active-tool feedback at **TWO levels**: the cluster button that
+  contains the active tool gets `variant="primary"` (indigo tint); the
+  matching item inside the open flyout gets bold + `--color-primary-bg`
+  background.
+- Toolbar logic is driven by **`src/components/toolbarConfig.js`** — a
+  frozen `TOOL_CLUSTERS` array that describes every cluster + its items.
+  Adding a new tool = ONE entry there; `Toolbar.jsx` iterates the config
+  and dispatches by item type (`tool` / `toggle` / `segmented` / `action`).
+- The `<Dropdown>` primitive lives in `src/components/ui/Dropdown.jsx`.
+  Composable shape: `<Dropdown>`, `<DropdownGroup title>`,
+  `<DropdownItem icon label shortcut active disabled onSelect>`,
+  `<DropdownToggle icon label checked onToggle>`,
+  `<DropdownSegmented options value onChange>`, `<DropdownDivider />`.
+  Reuses the `Button` primitive for the trigger, mirrors `Panel`'s
+  `position: absolute` + `ui-fade-in` animation, borrows `Modal`'s
+  Esc-close + outside-click-close logic.
+- **Sub-headers inside dropdowns** where it adds clarity: `Structural &
+  Civil` splits into "Structural" + "Civil"; `View & Settings` groups
+  Tools / Toggles / Units. Mirror the LayersPanel group-header styling.
+- **Toggle items** (Dimensions, Virtual Walls) use `<DropdownToggle>` —
+  they do NOT close the flyout on click (lets users flip multiple
+  toggles in one open).
+- **Segmented items** (Units ft/m) use `<DropdownSegmented>` — clicking
+  an option sets the value AND closes the flyout.
+- **One-shot actions** (Save / Import / Export / Undo / Redo) live in
+  the Project dropdown as `<DropdownItem>` with `actionId` + shortcut
+  hint. Undo/Redo correctly disabled when `history`/`future` arrays
+  are empty; shortcut hint stays visible (educational).
+- Icons exclusively from `lucide-react` at `size={14}` `strokeWidth={2}`
+  for items; cluster trigger uses 12px chevron. **No emoji anywhere.**
+- Cluster trigger button uses `<Button>` `size="sm"` + `variant`
+  (primary / ghost). Active-cluster detection via `collectToolIds(cluster)`
+  helper in `toolbarConfig.js` — walks flat `items[]` or nested
+  `groups[].items[]` and returns every `toolId` the cluster contains.
+- **Cross-component close**: a window event `toolbar:close-dropdowns`
+  is dispatched whenever:
+  - A keyboard shortcut fires in `useKeyboardShortcuts.js` (after every
+    `setTool` / undo / redo / save / Esc / Delete / bare-key D/S/R/P/E/H/F/L).
+  - A `<DropdownItem>` is clicked (`onSelect` fires inside the item,
+    which then dispatches the close event before bubbling).
+  Each open `<Dropdown>` listens for the event and closes itself.
+  Follows the same decoupled pattern as `boq:toggle`. Add new
+  panel/toolbar events under `panel:` / `toolbar:` namespaces.
+- **Adding a new tool**: edit `toolbarConfig.js` — one entry with
+  `{ type: 'tool', toolId, icon, label, shortcut }`. No JSX changes
+  required in `Toolbar.jsx`. The keyboard shortcut is then registered
+  in `useKeyboardShortcuts.js` separately — that's the only other touch.
+- **Adding a new cluster**: append a new cluster to `TOOL_CLUSTERS`
+  with `id`, `label`, and either `items[]` or `groups[]`.
 
 ### Keyboard shortcuts (`src/hooks/useKeyboardShortcuts.js`)
 
@@ -1499,7 +1555,9 @@ Deferred categories (Phase 2.3 / 2.4): `solar_pv`, `solar_wiring_dc`,
 - **PDF currency.** Default jsPDF helvetica lacks `U+20B9`. Use the ASCII `Rs. ` prefix in `src/export/pdf.js`. Excel uses formulas (`=C*D`) so the column header carries the currency note instead.
 - **No new libraries without asking** — but `jspdf`, `jspdf-autotable`, `xlsx` (Phase 2.0) and `lucide-react` (UI Phase 2) were explicitly approved.
 - **Design tokens are the only source for color / spacing / typography / radius / shadow / z-index / motion.** Defined in `src/design/tokens.css`; consumed via `var(--color-...)` etc. No raw hex literals or px values for these concerns in component code. See "UI Design System" section for the exhaustive variable list. Greppable check on any new file: `grep -n "#[0-9a-fA-F]\{3,6\}" <file>` must return nothing in style values.
-- **Use UI primitives — never hand-roll.** `<Button>` for any styled button, `<Panel>` for side panels, `<Modal>` for centered overlays (backdrop + ESC + focus trap are owned by the primitive — don't reimplement), `<Field>` for label + input pairs. All in `src/components/ui/`.
+- **Use UI primitives — never hand-roll.** `<Button>` for any styled button, `<Panel>` for side panels, `<Modal>` for centered overlays (backdrop + ESC + focus trap are owned by the primitive — don't reimplement), `<Field>` for label + input pairs, `<Dropdown>` + `<DropdownGroup>` + `<DropdownItem>` + `<DropdownToggle>` + `<DropdownSegmented>` for cluster menus (used by the toolbar; available to any panel that needs a flyout list). All in `src/components/ui/`.
+- **Toolbar is config-driven via `src/components/toolbarConfig.js`.** Adding a new tool = one entry in `TOOL_CLUSTERS`. `Toolbar.jsx` is purely a renderer that iterates the config and dispatches by item type (`tool` / `toggle` / `segmented` / `action`). Active-cluster detection runs through `collectToolIds(cluster)` from the same file. NEVER inline tool definitions in `Toolbar.jsx` — the registry is the single source of truth.
+- **Cross-component close events: `toolbar:close-dropdowns`** is the toolbar's equivalent of `boq:toggle`. Dispatched on every keyboard shortcut that affects tool state (see `useKeyboardShortcuts.js`) AND on every `DropdownItem` click (the primitive dispatches it before bubbling). Each open `<Dropdown>` listens and closes itself. Use this same window-event pattern for any future cross-component toggle that shouldn't reach into the store. Namespace new events under `panel:` / `toolbar:` / `boq:` so they're greppable.
 - **No `window.alert / .confirm / .prompt` in component code.** Use `dialog.alert / .confirm / .prompt` (imperative API from `src/components/ui/Dialog.jsx`). The fallback path inside `Dialog.jsx` itself is the only allowed usage. After a destructive action with the `dialog.confirm` gate, fire `toast.action(msg, { label: 'Undo', onClick: () => undo(), duration: 5000 })`.
 - **Toolbar buttons use `lucide-react` icons exclusively.** No emoji anywhere in UI output. Active tool state via `variant="primary"` (token-driven), inactive via `variant="ghost"`. Never inline `background:` for active state.
 - **BOQ rows use the `1fr 76px 104px 90px` grid.** Rate inputs are composed `.boq-rate-input` divs with a `₹` prefix span — never bare `<input>`. Row striping via `.boq-group .boq-row:nth-of-type(even)`. Sections wrap their rows in `<div class="boq-group">` to scope the striping.
