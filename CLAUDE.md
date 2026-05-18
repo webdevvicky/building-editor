@@ -3,8 +3,14 @@
 ## Current Phase Status
 
 Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +
-Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + **UI Phases 1–4** +
-**Collapsible BOQ sidebar** complete on `main` (2026-05-18).
+Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + UI Phases 1–4 +
+Collapsible BOQ sidebar + **Topology Layer (Steps 0–9)** complete on
+`main` (2026-05-18).
+
+Topology layer (commits step-0 → step-9) is the canonical read-only
+spatial-relationship surface for downstream discipline engines
+(structural BOQ, MEP, interiors, fabrication). See "Topology Layer"
+section below.
 
 UI rebuild (Phases 1–4, commits `3ee27a8 → bfed97a`, 2026-05-18) landed the
 design-token system, 6 UI primitives, native-dialog removal, panel/toolbar/
@@ -61,9 +67,10 @@ Query Context7 before writing any code that uses:
 Training data for these versions is outdated.
 
 ## Verification Commands
-node scripts/verify-boq.mjs        # 77 single-floor checks (incl. per-instance BBS + node ownership)
-node scripts/verify-multifloor.mjs # 37 multi-floor checks (incl. floor-aware topology + splitWall guard)
-Both must pass green before any commit.
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs        # single-floor BOQ checks
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-multifloor.mjs # multi-floor scope + topology guard
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-topology.mjs   # 23 topology-layer relationship checks
+All three must pass green before any commit.
 
 ## Planned Features (do not implement yet)
 - DXF import (Phase 2.1) — parse AutoCAD floor plans into walls/rooms
@@ -1076,6 +1083,136 @@ can't break in responsive states. Resize listener re-evaluates the gate.
 
 ---
 
+## Topology Layer (src/topology/)
+
+Topology is the canonical, read-only spatial-relationship layer. Discipline
+engines (structural BOQ, MEP, interiors, fabrication) consume it; they
+**never recompute relationships**. This is the MEP/interiors/fabrication
+foundation — every "which side of wall X faces room Y?" or "is this wet
+wall external?" question goes through topology.
+
+### Module structure
+
+```
+src/topology/
+  cache.js         # createMemo() — reference-equality memo helper
+  index.js         # barrel re-export (single canonical import path)
+  rooms.js         # walkPolygonNodeOrder, buildPlotPolygon, getRoomPolygon,
+                   # getRoomArea, getRoomWallArea, isRoomStructurallyValid,
+                   # getOverlappingRoomName, hasRoomOverlap, getValidRoomIds,
+                   # sumRoomAreas
+  floor.js         # isColumnOnFloor, getNodes/Walls/Rooms/Stamps/Beams/
+                   # Slabs/Foundations/Staircases/ColumnsOnFloor,
+                   # getNodeIdsOnFloor, getWallIdsOnFloor,
+                   # getActiveFloorNodes/Walls, getEntitiesOnFloor,
+                   # sortedFloorList
+  walls.js         # getWallAdjacencyCount, getWallToRoomsIndex,
+                   # getRoomsForWall, isExternalWall, isPartitionWall,
+                   # getExternalWallIds, classifyWallBeamFlags
+  openings.js      # getOpeningsOnWall, getDoorOpenings, getWindowOpenings,
+                   # getSunshadeOpenings, getOpeningArea,
+                   # getTotalOpeningAreaForWall
+  columns.js       # getNodeToColumnIndex, getColumnAtNode,
+                   # getColumnPosition, getColumnHeightFt,
+                   # getColumnAreaFt2, getColumnPerimeterFt
+  beams.js         # resolveBeamEndpoint, getBeamLengthFt,
+                   # getDerivedWallBeams, getAllBeams
+  foundations.js   # getFoundationForColumn, getFoundationForWall,
+                   # getFoundationsForWall, getColumnsByFoundation,
+                   # getColumnIsAttachedToFoundation,
+                   # getInlineFootingColumnTypeIds
+  adjacency.js     # getRoomAdjacencyGraph (shared wall edges),
+                   # getRoomConnectivityGraph (shared wall + door),
+                   # getRoomsBorderingRoom, getRoomNeighbourThroughDoor,
+                   # findSharedWalls
+  surfaces.js      # getWallSurfaces (faceA/faceB → roomId|null with
+                   # oriented normals), getRoomSurfaces, getExteriorFaces,
+                   # getInteriorFaceArea
+  wet.js           # WET_ROOM_TYPES, isWetRoomType, getWetRoomIds,
+                   # getWetWallIds, getWetWalls, getWetExternalWalls
+                   # (plumbing service entry), getWetPartitions (chase
+                   # candidates), getWetRoomsForWall
+```
+
+### Topology invariants — mandatory
+
+- **Pure spatial math lives in `src/geometry.js`** (point-in-polygon,
+  segment math, snap, signed area, doRoomsOverlap). Topology USES geometry —
+  it isn't geometry.
+- **State-reading relationships live in `src/topology/`.** Each module owns
+  ONE kind of relationship.
+- **State contract:** every state-reading function accepts a `state`
+  parameter (live Zustand state OR the floor-scoped wrapper from
+  `boq/scope.js`). Topology functions read `state.rooms` / `state.walls` /
+  `state.nodes` directly AND call other state methods via method dispatch
+  (`state.getWallArea(id)`) — this is why `scopeStateToFloor` works
+  transparently when the scoped wrapper substitutes its own collections.
+- **No store mutations.** Ever. Topology is read-only by contract.
+- **Memoization via `createMemo()` in `topology/cache.js`** — reference
+  equality only, single-store assumption, one memo cell per cached
+  selector at module scope. No deep equality, no LRU, no JSON
+  serialization. When a memoized topology selector is called from both
+  the live store and a scoped wrapper, the two call paths key on
+  different `state.rooms` references and naturally distinguish.
+- **No inline `Object.values(state.walls).filter(...)` outside
+  `src/topology/` and `src/store.js`.** Use the topology selector that
+  asks your question. If no selector exists for your question, ADD one
+  to the appropriate module before using it.
+- **`endpointPos` lives in `topology/beams.js` as `resolveBeamEndpoint`.**
+  Five copies were collapsed in Step 5 — do not re-introduce inline
+  endpoint resolution in new code (BOQ aggregators, validation rules,
+  Canvas render, MEP engines).
+- **`nodeToColId` lives in `topology/columns.js` as
+  `getNodeToColumnIndex`.** Single-source, memoized on `state.columns`.
+- **Wall adjacency is memoized once per `state.rooms`** —
+  `getWallAdjacencyCount` returns the same object reference until rooms
+  change. External/partition classification follows from this same
+  invariant.
+- **Wall-surface ownership** (`getWallSurfaces`) is the load-bearing
+  API for any engine that distinguishes interior vs exterior face of a
+  wall (interior paint, exterior cladding, MEP switch placement,
+  electrical conduit, tile area). Never re-implement face↔room
+  determination — call `getWallSurfaces` or `getRoomSurfaces`.
+- **Room adjacency** (`getRoomAdjacencyGraph`) is the load-bearing API
+  for MEP duct routing, drainage stacks, and corridor discovery. Edges
+  are SYMMETRIC, cross-floor edges are non-existent by construction
+  (walls are floor-owned). The connectivity variant
+  (`getRoomConnectivityGraph`) filters to walls bearing at least one
+  door.
+- **Wet-wall set** lives in `topology/wet.js` with `WET_ROOM_TYPES` as
+  the single source of truth (currently `TOILET`, `KITCHEN`,
+  `UTILITY`). MEP engines import from here — never re-hardcode the
+  wet-room list.
+
+### What NOT to extract into topology
+
+- `geometry.js` helpers (point-in-polygon, doRoomsOverlap, etc.) — already
+  pure and reusable; topology calls them.
+- Store mutators (`addWall`, `splitWall`, `attachColumnToFoundation`,
+  etc.) — they may *consult* topology for read-only checks ("is this
+  node on the current floor?") but they own state changes.
+- `boq/scope.js`'s aggregator re-implementations — they exist because
+  Zustand selectors are closures bound to live `get()`. The wrapper is
+  the floor-scope boundary; topology delegations inside it are correct.
+- `iso/projection.js` — pure math, unit-conversion only. Not a
+  relationship question.
+- Per-rule `check(state)` shape in `validation/engine.js` — stable
+  contract. Rules consume topology imports rather than inlining.
+
+### Adding a new topology API
+
+1. Choose the module by question kind (room? wall? opening? adjacency?
+   surface?). Resist the urge to create `utils.js` — toy projects
+   accumulate kitchen-sink modules.
+2. Signature follows the existing convention: `xxx(state, ...args)`.
+3. If memoized, add one `createMemo()` cell at module scope, keyed on
+   the minimum stable inputs (`state.rooms`, `state.walls`, etc.).
+4. Re-export from `topology/index.js`.
+5. Add an assertion to `scripts/verify-topology.mjs` if the API
+   establishes a new invariant.
+
+### Architectural reminders (existing)
+
 ## Architectural reminders
 
 - `getValidRoomIds()` is the filter for ALL finish-gated and floor area totals. Never iterate `Object.keys(rooms)` directly for BOQ.
@@ -1094,7 +1231,23 @@ can't break in responsive states. Resize listener re-evaluates the gate.
 - **Fix 1 — foundation ownership.** `column.foundationId` does not exist. Read attachment via `getFoundationForColumn(state, columnId)` or `getColumnsByFoundation(state, foundationId)`. Mutate via `attachColumnToFoundation` / `detachColumnFromFoundation` (and the wall equivalents). Never traverse `state.foundations` inline to find a column's parent.
 - **Fix 2 — column height.** Always use `state.getColumnHeightFt(col)`. Never recompute via `plinth + floor + slabThk` because multi-span columns will be wrong. The helper spans `[baseFloorId, topFloorId]` in the sequence-ordered floor stack.
 - **Fix 3 — slab role.** A slab's structural role is `slab.role` / `slab.classification`. Derive via `inferSlabRole(state, floorId)` (`'ROOF' | 'FLOOR' | 'SUNKEN' | 'STAIR_LANDING'`). Never branch on `slab.type` for role logic — type is layout (MAIN/SUNKEN), role is structural.
-- **Selector discipline.** Phase 1.7+ code uses `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor / getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor / getEntitiesOnFloor` for floor scoping. No inline `.filter(e => e.floorId === ...)` in components or quantity functions.
+- **Selector discipline.** Floor scoping flows through topology:
+  `getColumnsOnFloor / getWallsOnFloor / getSlabsOnFloor / getStampsOnFloor /
+  getRoomsOnFloor / getBeamsOnFloor / getStaircasesOnFloor /
+  getFoundationsOnFloor / getEntitiesOnFloor` (and the Set variants
+  `getNodeIdsOnFloor`, `getWallIdsOnFloor`) all live in
+  `src/topology/floor.js`. Store + structuralSlice methods are one-line
+  delegations. No inline `.filter(e => e.floorId === ...)` in components,
+  quantity functions, or validation rules. See the dedicated **Topology
+  Layer** section above for the full module map and invariants.
+- **Topology layer is the canonical spatial-relationship surface.** Every
+  question of the form "which X is related to Y?" goes through
+  `src/topology/`. Beam endpoint resolution → `resolveBeamEndpoint` (one
+  home, was 5× duplicated). Node↔column index → `getNodeToColumnIndex`.
+  Wall adjacency → `getWallAdjacencyCount`. Wall-surface ownership →
+  `getWallSurfaces`. Room adjacency for MEP routing →
+  `getRoomAdjacencyGraph`. Wet-wall set → `getWetWalls`. New discipline
+  engines (MEP, interiors, fabrication) consume these — never reimplement.
 - **Foundation BOQ pipeline.** `computeFoundationQuantities(state)` is the per-type geometry source. `getFoundationQuantities()` keeps the inline `byColumnTypeInline` path for legacy columns with no foundation attached. `boq/lines.js`, `excavation.js`, `shuttering.js` all read from `computeFoundationQuantities`.
 - **Room overlap is same-floor only.** `saveRoom`, `getOverlappingRoomName`, `getValidRoomIds` (pairwise loop), and the `loadProject` dev-warning all filter by `room.floorId === subject.floorId` before running the overlap check. Identical or overlapping footprints across floors are the expected case for multi-storey buildings — never conflicts.
 - **PILE foundation emits TWO RCC BOQ lines.** Cast-in-situ pile shaft concrete and on-top pile-cap concrete are distinct procurement pours. `boq/lines.js` and `StructuralBOQSection.jsx` both branch on `f.type === 'PILE'` to emit `_rcc_shaft` + `_rcc_cap` (separate rateKeys); all other foundation types emit a single combined `_rcc` line. `computeFoundationQuantities` carries `shaftVolFt3` / `capVolFt3` / `pileGeometry` alongside the combined `concreteVolFt3` so steel/concrete-mix aggregators stay simple.
