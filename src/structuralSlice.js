@@ -40,6 +40,12 @@ import {
 import {
   getColumnHeightFt as topoGetColumnHeightFt,
 } from './topology/columns.js'
+import {
+  getFoundationForColumn as topoGetFoundationForColumn,
+  getFoundationForWall as topoGetFoundationForWall,
+  getFoundationsForWall as topoGetFoundationsForWall,
+  getColumnsByFoundation as topoGetColumnsByFoundation,
+} from './topology/foundations.js'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
@@ -877,35 +883,10 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Centralized relationship/floor selectors. All components and quantity
   // functions go through these — never traverse foundations/columns/walls inline.
 
-  getFoundationForColumn: (columnId) => {
-    const { foundations } = get()
-    for (const f of Object.values(foundations)) {
-      if ((f.columnIds || []).includes(columnId)) return f
-    }
-    return null
-  },
-
-  // A wall can attach to at most one strip foundation in practice, but the data
-  // model permits more. Returns the first match (or null) plus a plural variant.
-  getFoundationForWall: (wallId) => {
-    const { foundations } = get()
-    for (const f of Object.values(foundations)) {
-      if ((f.wallIds || []).includes(wallId)) return f
-    }
-    return null
-  },
-
-  getFoundationsForWall: (wallId) => {
-    const { foundations } = get()
-    return Object.values(foundations).filter(f => (f.wallIds || []).includes(wallId))
-  },
-
-  getColumnsByFoundation: (foundationId) => {
-    const { foundations, columns } = get()
-    const f = foundations[foundationId]
-    if (!f) return []
-    return (f.columnIds || []).map(cid => columns[cid]).filter(Boolean)
-  },
+  getFoundationForColumn: (columnId)      => topoGetFoundationForColumn(get(), columnId),
+  getFoundationForWall:   (wallId)        => topoGetFoundationForWall(get(), wallId),
+  getFoundationsForWall:  (wallId)        => topoGetFoundationsForWall(get(), wallId),
+  getColumnsByFoundation: (foundationId)  => topoGetColumnsByFoundation(get(), foundationId),
 
   getColumnsOnFloor:    (floorId) => topoGetColumnsOnFloor(get(), floorId),
   getWallsOnFloor:      (floorId) => topoGetWallsOnFloor(get(), floorId),
