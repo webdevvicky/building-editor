@@ -8,6 +8,7 @@ import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS, DEFAULT_FLOOR_ID } from './structuralSlice'
 import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
+import { walkPolygonNodeOrder as walkPolygon, buildPlotPolygon } from './topology/rooms.js'
 
 const uid = () => crypto.randomUUID()
 
@@ -24,64 +25,6 @@ function removeOrphanNodes(nodes, walls) {
   const cleaned = { ...nodes }
   Object.keys(cleaned).forEach(id => { if (!used.has(id)) delete cleaned[id] })
   return cleaned
-}
-
-function buildPlotPolygon(walls, nodes) {
-  const plotWalls = Object.values(walls).filter(w => w.isPlot)
-  if (plotWalls.length < 3) return null
-  const adj = {}
-  for (const w of plotWalls) {
-    if (!adj[w.n1]) adj[w.n1] = []
-    if (!adj[w.n2]) adj[w.n2] = []
-    adj[w.n1].push(w.n2)
-    adj[w.n2].push(w.n1)
-  }
-  const nodeIds = Object.keys(adj)
-  if (nodeIds.length < 3) return null
-  let best = []
-  for (const startId of nodeIds) {
-    const p = [startId]
-    let prev = null, current = startId
-    for (let i = 0; i < nodeIds.length - 1; i++) {
-      const next = (adj[current] || []).find(n => n !== prev && !p.includes(n))
-      if (!next) break
-      p.push(next); prev = current; current = next
-    }
-    if (p.length > best.length) best = p
-    if (best.length === nodeIds.length) break
-  }
-  const isClosed = best.length === nodeIds.length && (adj[best[best.length - 1]] || []).includes(best[0])
-  if (!isClosed) return null
-  return best.map(id => nodes[id]).filter(Boolean)
-}
-
-// Walk adjacency graph to find polygon node order
-function walkPolygon(wallIds, walls) {
-  const adj = {}
-  for (const wid of wallIds) {
-    const w = walls[wid]
-    if (!w) return null   // stale reference — refuse to compute a partial polygon
-    if (!adj[w.n1]) adj[w.n1] = []
-    if (!adj[w.n2]) adj[w.n2] = []
-    adj[w.n1].push(w.n2)
-    adj[w.n2].push(w.n1)
-  }
-  const nodeIds = Object.keys(adj)
-  if (nodeIds.length < 3) return null
-  let best = []
-  for (const startId of nodeIds) {
-    const p = [startId]
-    let prev = null, current = startId
-    for (let i = 0; i < nodeIds.length - 1; i++) {
-      const next = (adj[current] || []).find(n => n !== prev && !p.includes(n))
-      if (!next) break
-      p.push(next); prev = current; current = next
-    }
-    if (p.length > best.length) best = p
-    if (best.length === nodeIds.length) break
-  }
-  const isClosed = best.length === nodeIds.length && (adj[best[best.length - 1]] || []).includes(best[0])
-  return isClosed ? best : null
 }
 
 // ── Floor-aware topology helpers (Phase 1.7+ multi-floor) ───────────────────
