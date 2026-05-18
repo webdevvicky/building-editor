@@ -3,7 +3,13 @@
 ## Current Phase Status
 
 Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +
-Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 complete on `main` (2026-05-16).
+Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + **UI Phases 1–4** complete on
+`main` (2026-05-18).
+
+UI rebuild (Phases 1–4, commits `3ee27a8 → bfed97a`, 2026-05-18) landed the
+design-token system, 6 UI primitives, native-dialog removal, panel/toolbar/
+BOQ refactor, keyboard shortcuts, canvas selection feedback, empty states,
+and the 1024px desktop gate. See "UI Design System" section below.
 
 ERP integration (replace static MATERIAL_LIBRARY + add live rate catalog) is
 the next major work item; foundation for it is in place via the canonical
@@ -670,6 +676,226 @@ under the cost total.
 
 ---
 
+## UI Design System (Phases UI-1 through UI-4, 2026-05-18)
+
+Aesthetic: **Linear / Notion / Stripe Dashboard.** Restrained, professional,
+desktop-only (1024px+). No gradients, no glassmorphism, no spring physics.
+All animations 100-150ms with `ease-out`. One sanctioned infinite animation
+(canvas empty-state arrow bob, 2s) — do not add others.
+
+### Design tokens (`src/design/tokens.css`)
+
+ALL color / spacing / radius / shadow / typography / z-index / motion values
+in the app go through CSS variables defined here. **Component code must
+never use raw hex literals or px values for these concerns** — only
+`var(--color-...)` / `var(--space-N)` / `var(--text-N)` / `var(--radius-N)`
+/ `var(--shadow-...)` / `var(--z-...)` / `var(--motion-...)` references.
+
+Variables (exhaustive — do not invent new ones):
+- Color neutrals: `--color-bg / -bg-subtle / -bg-muted / -bg-hover /
+  -surface / -surface-raised / -border / -border-strong / -border-focus /
+  -text / -text-secondary / -text-muted / -text-disabled / -text-inverse`
+- Color primary (indigo `#5e6ad2`): `--color-primary / -primary-hover /
+  -primary-active / -primary-bg / -primary-text`
+- Color semantic: `--color-success / -success-hover / -success-bg /
+  -success-border` (same pattern for `warning`, `error`)
+- Spacing (4px scale): `--space-1` (4), `-2` (8), `-3` (12), `-4` (16),
+  `-5` (20), `-6` (24), `-8` (32), `-12` (48)
+- Radius: `--radius-sm` (4), `-md` (8), `-lg` (12), `-full`
+- Shadow: `--shadow-sm / -md / -lg / -focus`
+- Typography: `--font-sans` (Inter via Google Fonts), `--font-mono`;
+  `--text-xs` (11), `-sm` (12), `-base` (13), `-md` (14), `-lg` (16),
+  `-xl` (20), `-2xl` (24); `--weight-regular / -medium / -semibold / -bold`
+- Z-index: `--z-base` (1), `-panel` (10), `-overlay` (50), `-modal` (100),
+  `-dialog` (200), `-toast` (300)
+- Motion: `--motion-fast` (100ms), `--motion-normal` (150ms),
+  `--ease-out`, `--ease-in-out`
+
+`body` sets `font-variant-numeric: tabular-nums` globally — all numerical
+columns line up by digit place without extra CSS. Opt out with the
+`.proportional-nums` utility class on headings if needed.
+
+`@media (prefers-reduced-motion: reduce)` is honored globally in
+`ui.css` — all transitions collapse to 0.01ms.
+
+### UI primitives (`src/components/ui/`)
+
+Six primitives, all styled via `ui.css` class names (NOT inline styles):
+
+- **`Button.jsx`** — `<Button variant="primary|secondary|danger|ghost"
+  size="sm|md" disabled onClick title>`. Active scale(0.97) on press.
+  Focus-visible ring via `--shadow-focus`. Hover backgrounds per variant.
+- **`Panel.jsx`** — side-panel wrapper.
+  `<Panel title onClose width position={{ top/left/right/bottom }} footer>`.
+  Built-in fade-in + 4px translateY (150ms). Optional `×` close button
+  driven by `onClose` presence.
+- **`Modal.jsx`** — centered overlay.
+  `<Modal open onClose title width footer>`. Backdrop click + ESC close,
+  focus trap cycling Tab/Shift-Tab through focusable descendants, restores
+  focus to previously-focused element on unmount. Body fade + 4px slide;
+  backdrop opacity-only fade.
+- **`Field.jsx`** — `<Field label hint error inline required>...input...</Field>`.
+  Wraps native `<input>` / `<select>` / `<textarea>`. Field-input styling
+  comes from `.ui-field input/select/textarea` selectors — wrap and forget.
+- **`Dialog.jsx`** — imperative replacement for `window.alert/confirm/prompt`.
+  - API: `await dialog.alert(message, opts)` / `dialog.confirm(message, opts)`
+    / `dialog.prompt(message, opts)` (returns `void | boolean | string|null`).
+  - `opts`: `{ title?, confirmLabel?, cancelLabel?, variant?: 'default'|'danger',
+    defaultValue? }`.
+  - Mounted once in `App.jsx` via `<DialogHost />`. Falls back to native if
+    host absent (development safety).
+- **`Toast.jsx`** — imperative top-right toast.
+  - API: `toast.success / .info / .warning / .error / .action(message, opts)`.
+  - `toast.action(msg, { label, onClick, duration? })` is the "Deleted X.
+    [Undo]" affordance.
+  - Mounted once via `<ToastHost />`. Default duration 3000ms; pass
+    `duration: null/0` for sticky.
+  - Pending queue: toasts emitted before host mounts surface on mount.
+
+### Imperative-API rule
+
+**No native `window.alert / .confirm / .prompt` calls allowed in component
+code.** The three remaining matches in `Dialog.jsx` are the host-absent
+fallback path — leave them alone. Any new dialog needs `dialog.alert / .confirm
+/ .prompt`. Grep guard: `grep -rn "window\.\(alert\|confirm\|prompt\)" src/`
+should match only `src/components/ui/Dialog.jsx`.
+
+### Panel patterns (mandatory for new panels)
+
+- **Side panel** (selection-driven, top-left): wrap in `<Panel>` with
+  `position={{ top: 56, left: 16 }}`, `width` between 240 and 280, and
+  `onClose` that clears whichever selection ID the panel reads.
+- **Modal panel** (configuration, tool-driven): wrap in `<Modal open={...}
+  onClose={...} title={...} width={...}>`. Width: 480 for simple modals,
+  520-560 for dense ones. `open` predicate uses the existing
+  `activeTool === 'xxx'` guard. NEVER hand-roll backdrop / close-button /
+  focus-trap scaffolding — that's Modal's job.
+- **Floating non-modal** (LayersPanel-style): `<Panel>` without `onClose`.
+
+### BOQ visual contract (`src/components/boq/boq.css`)
+
+- Row grid is `1fr 76px 104px 90px` — item / qty / rate / cost. Every row
+  primitive in `BoqRow.jsx` and every section's container must use this
+  grid to keep columns aligned across the panel.
+- Rate input is a composed `.boq-rate-input` div with a `₹` prefix span +
+  bare input. For `isPer1000` rates, append `--per1000` modifier (CSS adds
+  the `/1000` suffix). Never render a bare `<input>` for rates.
+- Row striping comes from `.boq-group .boq-row:nth-of-type(even)` —
+  scoped to a wrapping `.boq-group` so it doesn't bleed across sections.
+  Each section component renders its rows inside a `<div class="boq-group">`.
+- Section headers use `<div class="boq-section-header">` with a `.boq-section-title`
+  span + flex-grow `.boq-section-rule` divider line.
+- Total: `.boq-total-row` (muted bg, bordered, 16/20px scale, semibold/bold).
+- Validation footer: `.boq-validation-footer` (or `--error` variant). Each
+  issue is a `<button class="boq-validation-issue">` calling
+  `selectWall/selectRoom/selectColumn/selectBeam/selectStamp` based on
+  `issue.entityType` + `entityId`. Unselectable issues carry `data-no-target=""`.
+
+### BOQ line click → canvas selection
+
+`BoqRow` / `BoqSubRow` accept optional `onSelectEntity(line)` prop. When a
+line carries non-empty `line.sourceEntityIds[]`, its label gets class
+`.boq-row-label--clickable` (cursor pointer + hover color shift). Click
+dispatches the matching `selectX` action via the first id. `BOQPanel`
+defines the handler centrally and threads it to all section components.
+**Sections remain purely presentational** — they accept and forward
+`onSelectEntity`, never call selectors themselves.
+
+For new BOQ lines to be clickable, the emitter in `src/boq/lines.js` must
+populate `sourceEntityIds`. Currently populated by BBS grouped-by-spec
+steel lines; other emitters set `[]` and stay non-clickable.
+
+### Toolbar conventions (`Toolbar.jsx` + `Toolbar.css`)
+
+- 4 intent-clusters separated by `.toolbar-divider`:
+  **Draw** | **Structural & Civil** | **View & Settings** | **Project**.
+- Every button is `<Button variant size title>`. Active tool gets
+  `variant="primary"`; inactive gets `variant="ghost"`. NEVER inline
+  `background:` for active state.
+- Icons exclusively from `lucide-react` at `size={14}` `strokeWidth={2}`.
+  **No emoji anywhere in toolbar output.**
+- Tooltips via `title` attribute. Include keyboard hint when applicable
+  ("Draw walls (D)", "Save project (Ctrl+S)", "Undo (Ctrl+Z)").
+
+### Keyboard shortcuts (`src/hooks/useKeyboardShortcuts.js`)
+
+Mounted once via `useKeyboardShortcuts()` call in `App()`. Behavior:
+
+| Shortcut | Action |
+|---|---|
+| `Esc` | `setTool('select')` — closes any panel/modal, clears selections |
+| `Del` / `Bksp` | `dialog.confirm` → delete current selection → `toast.action` undo |
+| `Ctrl/Cmd+Z` | `undo()` |
+| `Ctrl/Cmd+Y` or `Ctrl/Cmd+Shift+Z` | `redo()` |
+| `Ctrl/Cmd+S` | replicates Toolbar Save handler (autosave + toast) |
+| `D` / `S` / `R` | `setTool('draw' | 'select' | 'room')` |
+
+Bare-key shortcuts (Esc/Del/D/S/R) are suppressed when focus is in
+`INPUT/TEXTAREA/SELECT/[contenteditable]`. Modifier shortcuts fire
+everywhere. Use defensive optional chaining (`useStore.getState().fn?.()`)
+when invoking store actions from this hook.
+
+### Canvas selection feedback (`Canvas.jsx`)
+
+Selected entities render with `var(--color-primary)` stroke and a
+600ms one-shot pulse element keyed by the selected id (forces remount +
+restart animation on selection change). Walls also get a 0.18-opacity
+underglow line. The pulse keyframe (`canvas-pulse-once`) lives in
+`Canvas.css`. **Never increase pulse duration beyond 600ms or make it
+loop.**
+
+Floor-switch fade: `.canvas-floor-layer[data-fading="true"]` dims the
+layer's opacity to 0.4 for 120ms when `currentFloorId` changes. The fade
+applies to floor-specific content only; grid background is unaffected.
+
+### Empty states
+
+- **Canvas** (`Canvas.jsx` + `Canvas.css`): `.canvas-empty-state` overlay
+  renders when `walls + rooms + columns + stamps` are all empty. Includes
+  a 2s bobbing `↖` arrow pointing toward the Draw tool — the SOLE
+  infinite animation in the app, sanctioned for first-use affordance.
+- **BOQ** (`BOQPanel.jsx` + `boq.css`): `.boq-empty-state` replaces the
+  section list when no entities exist. Export buttons get `disabled` on
+  empty. Header / floor toggle / export bar still render.
+
+### Desktop gate (`DesktopGate.jsx` + `DesktopGate.css`)
+
+Wraps the app in `App.jsx`. If `window.innerWidth < 1024`, renders a
+centered card with the desktop requirement message and the current
+viewport width. App contents are NOT rendered when narrow, so panels
+can't break in responsive states. Resize listener re-evaluates the gate.
+
+### Dependencies added in UI phases
+- `lucide-react` ^1.16.0 — icon set for toolbar buttons. No new
+  libraries beyond this.
+
+### What NOT to do
+- Don't add CSS-in-JS runtime systems (styled-components, emotion, etc.).
+  All styling is class-based + tokens.
+- Don't use inline `style={{ ... }}` for static colors/spacing/fonts. Inline
+  style is OK only for dynamic values (computed widths, position offsets,
+  conditional colors that swap between tokens).
+- Don't introduce hex literals in JSX. Greppable check on a new file:
+  `grep -n "#[0-9a-fA-F]\{3,6\}" <file>` should return nothing in style values.
+- Don't use emoji in UI output — use `lucide-react` icons or Unicode
+  typographic glyphs (e.g., `↖` for an arrow, `×` for close).
+- Don't add gradient backgrounds, glassmorphism (backdrop-filter), shadow
+  layers heavier than `--shadow-lg`, or any scale/bounce/spring animation.
+- Don't replace `dialog.*` / `toast.*` with native browser dialogs.
+- Don't hand-roll modal scaffolding — use the `Modal` primitive.
+
+### Known UI carry-overs
+- `removeFloor` and `removeSpec` write to `projectSettings`; the store's
+  undo history doesn't currently snapshot that subtree, so the undo toast
+  fires but the operation isn't actually restorable. Widening the undo
+  scope is a future task — don't paper over by removing the toast.
+- BOQ-line click-to-select only works for emitters that populate
+  `sourceEntityIds`. Currently only BBS grouped-by-spec steel lines.
+  When you add new line emitters in `boq/lines.js`, populate
+  `sourceEntityIds: [...]` so the click affordance becomes available.
+
+---
+
 ## Known issues / Phase 2 backlog
 
 - **Undo/redo can restore room-overlap state** that bypassed save-time prevention.
@@ -852,4 +1078,15 @@ under the cost total.
 - **BOQ rendering — canonical pipeline only.** `BOQPanel` computes `canonicalLines = getBoqLines(state, rates, { floorId })` once and slices via `groupBoqLinesByCategory`. Every BOQ section component (`StructuralBOQSection`, `ShutteringSection`, `ExcavationSection`, `PlasterSection`, `PlumConcreteRow`) is **purely presentational** — it accepts a pre-filtered `lines: BoqLine[]` prop and renders rows. Sections do NOT call `useStore`, do NOT call store selectors, do NOT re-derive quantities. Shared primitives (`BoqRow`, `BoqSubRow`, `BoqTotalRow`, `SectionHeader`, `SubSectionHeader`, `fmtLineQty`) live in `src/components/boq/BoqRow.jsx`. Masonry / civil / finishes groupings inside `BOQPanel` itself also consume `canonicalLines` slices (grouped via `line.meta.materialKey` for masonry, `id` prefix for civil). Header summary stats (wall count, total length, wall area, floor area, stamp counts) come from `scopedState = scopeStateToFloor(state, currentFloorId)` so they honor the floor toggle. Adding a new BOQ category = emit lines from `boq/lines.js` with the right `category` field; if rendering needs grouping, group on `line.meta.*`.
 - **Project manager snapshot caching.** `listProjects()` and `getCurrentProjectId()` MUST keep stable references between calls. `notify()` invalidates the in-module caches before fanning out. Required by `useSyncExternalStore` in `ProjectsPanel`.
 - **PDF currency.** Default jsPDF helvetica lacks `U+20B9`. Use the ASCII `Rs. ` prefix in `src/export/pdf.js`. Excel uses formulas (`=C*D`) so the column header carries the currency note instead.
-- **No new libraries without asking** — but `jspdf`, `jspdf-autotable`, and `xlsx` were explicitly approved for Phase 2.0.
+- **No new libraries without asking** — but `jspdf`, `jspdf-autotable`, `xlsx` (Phase 2.0) and `lucide-react` (UI Phase 2) were explicitly approved.
+- **Design tokens are the only source for color / spacing / typography / radius / shadow / z-index / motion.** Defined in `src/design/tokens.css`; consumed via `var(--color-...)` etc. No raw hex literals or px values for these concerns in component code. See "UI Design System" section for the exhaustive variable list. Greppable check on any new file: `grep -n "#[0-9a-fA-F]\{3,6\}" <file>` must return nothing in style values.
+- **Use UI primitives — never hand-roll.** `<Button>` for any styled button, `<Panel>` for side panels, `<Modal>` for centered overlays (backdrop + ESC + focus trap are owned by the primitive — don't reimplement), `<Field>` for label + input pairs. All in `src/components/ui/`.
+- **No `window.alert / .confirm / .prompt` in component code.** Use `dialog.alert / .confirm / .prompt` (imperative API from `src/components/ui/Dialog.jsx`). The fallback path inside `Dialog.jsx` itself is the only allowed usage. After a destructive action with the `dialog.confirm` gate, fire `toast.action(msg, { label: 'Undo', onClick: () => undo(), duration: 5000 })`.
+- **Toolbar buttons use `lucide-react` icons exclusively.** No emoji anywhere in UI output. Active tool state via `variant="primary"` (token-driven), inactive via `variant="ghost"`. Never inline `background:` for active state.
+- **BOQ rows use the `1fr 76px 104px 90px` grid.** Rate inputs are composed `.boq-rate-input` divs with a `₹` prefix span — never bare `<input>`. Row striping via `.boq-group .boq-row:nth-of-type(even)`. Sections wrap their rows in `<div class="boq-group">` to scope the striping.
+- **BOQ line click → entity selection.** `BoqRow`/`BoqSubRow` accept optional `onSelectEntity` prop; `BOQPanel` threads a centralized handler that dispatches `selectWall/selectRoom/selectColumn/selectBeam/selectStamp` based on `line.sourceEntityIds[0]`. New BOQ emitters in `boq/lines.js` should populate `sourceEntityIds: [...]` to unlock click affordance — sections stay purely presentational.
+- **Validation issues are navigable.** Each issue in the BOQ footer is a `<button>` calling the same `selectX` action by `issue.entityType` + `entityId`. Unselectable issues carry `data-no-target=""` to suppress the hover affordance.
+- **Keyboard shortcuts via `src/hooks/useKeyboardShortcuts.js`.** Mounted once in `App()`. Bare-key shortcuts (Esc/Del/D/S/R) are auto-suppressed in form inputs; modifier shortcuts (Ctrl+Z/Y/S) fire everywhere. New shortcuts go in this hook only — don't sprinkle keydown handlers across components.
+- **Canvas selection pulse is keyed by entity id.** `<element key={`pulse-${selectedId}`}>` forces React to remount the pulse element on selection change, restarting the CSS animation. Don't change the pulse duration (600ms) or make it loop.
+- **Desktop-only.** Minimum viewport is 1024px enforced by `DesktopGate` wrapper in `App.jsx`. Below that, the entire app shell is replaced by a splash card. Don't add media queries to "support" smaller viewports — the gate is the design.
+- **Animation budget: 100-150ms with `var(--ease-out)`.** The 2s bobbing arrow in the canvas empty state is the SOLE sanctioned infinite animation in the app — don't add others. `prefers-reduced-motion` collapses all transitions globally (the rule lives at the bottom of `ui.css`).
