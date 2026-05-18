@@ -9,12 +9,18 @@ import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
 import { getNearestWallToPoint } from '../topology/index.js'
 import PlumbingOverlay from './canvas/PlumbingOverlay.jsx'
+import ElectricalOverlay from './canvas/ElectricalOverlay.jsx'
 import './Canvas.css'
 
 // Phase 1 plumbing — fixed placeholder type until a floating type picker
 // lands. Plumbing tool drops one WC per click; user then changes the type
 // via PlumbingFixturePanel. The picker is Phase 1.x polish.
 const DEFAULT_PLUMBING_FIXTURE_TYPE = 'WC'
+
+// Phase 1 electrical — fixed placeholder type until a floating type picker
+// lands. Electrical tool drops one LIGHT per click; user then changes the
+// type via ElectricalPointPanel. The picker is Phase 1.x polish.
+const DEFAULT_ELECTRICAL_POINT_TYPE = 'LIGHT'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -98,6 +104,7 @@ const TOOL_CURSOR = {
   column:        'crosshair',
   beam:          'crosshair',
   plumbing:      'crosshair',
+  electrical:    'crosshair',
 }
 
 function getColPos(col, nodes) {
@@ -380,6 +387,34 @@ export default function Canvas() {
         DEFAULT_PLUMBING_FIXTURE_TYPE, px, py, wallId, wallT,
       )
       useStore.getState().selectPlumbingFixture(id)
+      return
+    }
+
+    if (activeTool === 'electrical') {
+      // Phase 1: snap to nearest wall on the current floor and drop the
+      // default point. Engines subagent owns roomId resolution / routing.
+      // Floating type-picker is Phase 1.x polish; for now the user changes
+      // the type from ElectricalPointPanel after placement.
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      const state = useStore.getState()
+      // Floor-scoped candidate set so we don't snap to walls on another floor.
+      const candidateIds = typeof state.getWallIdsByFloor === 'function'
+        ? state.getWallIdsByFloor(currentFloorId)
+        : null
+      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
+      // 36in (3ft) snap radius — beyond that we place a free point.
+      const SNAP_IN = 36
+      let wallId = null, wallT = null, px = x, py = y
+      if (near && near.distance <= SNAP_IN) {
+        wallId = near.wallId
+        wallT  = near.t
+        px = near.projected.x
+        py = near.projected.y
+      }
+      const id = useStore.getState().addElectricalPoint(
+        DEFAULT_ELECTRICAL_POINT_TYPE, px, py, wallId, wallT,
+      )
+      useStore.getState().selectElectricalPoint(id)
       return
     }
 
@@ -936,6 +971,10 @@ export default function Canvas() {
         {/* Plumbing overlay (fixtures, supply/drain routes, risers).
          * Renders between beams and nodes per CLAUDE.md MEP plan §16.2. */}
         <PlumbingOverlay />
+
+        {/* Electrical overlay (points, wiring/submain routes, submain risers).
+         * Renders right after plumbing, before nodes, per CLAUDE.md MEP plan §16.2. */}
+        <ElectricalOverlay />
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {

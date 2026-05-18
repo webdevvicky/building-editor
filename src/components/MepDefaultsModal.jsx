@@ -1,12 +1,14 @@
 // MepDefaultsModal — appears after a room is saved and offers to apply
-// IS-2065 plumbing defaults (electrical/HVAC/etc. wire in later phases).
+// IS-2065 plumbing + IS-732 electrical defaults (HVAC/fire/ELV wire in
+// later phases).
 //
 // Listens for the `mep:room-created` window event dispatched from RoomPanel
 // after a successful saveRoom(). The event detail carries `{ roomId }`.
 //
-// Suggestions module is owned by the engines subagent; we probe it
-// dynamically and only render the modal when it exists AND returns at least
-// one default for the room's type.
+// Suggestion modules are owned by the engines subagent; we probe each
+// dynamically and only render a discipline group when its module exists
+// AND returns at least one default for the room's type. The modal opens
+// as long as any discipline has suggestions.
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
@@ -14,82 +16,113 @@ import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
-import { getFixtureType } from '../mep/catalogs/index.js'
+import { getFixtureType, getPointType } from '../mep/catalogs/index.js'
 
-function useSuggestFn() {
-  const [fn, setFn] = useState(null)
+function useSuggestFns() {
+  const [fns, setFns] = useState({ plumbing: null, electrical: null })
   useEffect(() => {
     let alive = true
-    import('../mep/plumbing/suggestions.js')
-      .then(mod => { if (alive) setFn(() => mod.suggestPlumbingFixturesForRoom ?? null) })
-      .catch(() => {})
+    Promise.allSettled([
+      import('../mep/plumbing/suggestions.js'),
+      import('../mep/electrical/suggestions.js'),
+    ]).then(([p, e]) => {
+      if (!alive) return
+      setFns({
+        plumbing:   p.status === 'fulfilled' ? (p.value.suggestPlumbingFixturesForRoom ?? null) : null,
+        electrical: e.status === 'fulfilled' ? (e.value.suggestElectricalPointsForRoom ?? null) : null,
+      })
+    })
     return () => { alive = false }
   }, [])
-  return fn
+  return fns
 }
 
 export default function MepDefaultsModal() {
   const applyRoomMepDefaults = useStore(s => s.applyRoomMepDefaults)
-  const suggestFn = useSuggestFn()
+  const suggestFns = useSuggestFns()
 
-  // Pending offer state. `null` = no offer open. `{ roomId, suggestions, selected }`
-  // = a modal is being shown for the room.
+  // Pending offer state. `null` = no offer open. Otherwise:
+  // { roomId, roomName, plumbing: { suggestions, selected }, electrical: {...} }
   const [pending, setPending] = useState(null)
 
-  // Keep the latest suggestion-fn ref so the event listener (mounted once)
-  // can call into it without re-binding on every render.
   useEffect(() => {
     function handler(ev) {
       const roomId = ev?.detail?.roomId
-      if (!roomId || !suggestFn) return
+      if (!roomId) return
       const state = useStore.getState()
       const room = state.rooms?.[roomId]
       if (!room) return
-      const suggestions = suggestFn(state, roomId) ?? []
-      if (!suggestions.length) return
+
+      const plumbingSugs = suggestFns.plumbing
+        ? (suggestFns.plumbing(state, roomId) ?? [])
+        : []
+      const electricalSugs = suggestFns.electrical
+        ? (suggestFns.electrical(state, roomId) ?? [])
+        : []
+
+      if (!plumbingSugs.length && !electricalSugs.length) return
+
       setPending({
         roomId,
         roomName: room.name,
-        suggestions,
-        selected: suggestions.map(() => true),
+        plumbing: {
+          suggestions: plumbingSugs,
+          selected: plumbingSugs.map(() => true),
+        },
+        electrical: {
+          suggestions: electricalSugs,
+          selected: electricalSugs.map(() => true),
+        },
       })
     }
     window.addEventListener('mep:room-created', handler)
     return () => window.removeEventListener('mep:room-created', handler)
-  }, [suggestFn])
+  }, [suggestFns])
 
   if (!pending) return null
 
   function close() { setPending(null) }
 
-  function toggle(i) {
+  function toggle(disc, i) {
     setPending(p => {
       if (!p) return p
-      const next = [...p.selected]
-      next[i] = !next[i]
-      return { ...p, selected: next }
+      const group = p[disc]
+      const nextSel = [...group.selected]
+      nextSel[i] = !nextSel[i]
+      return { ...p, [disc]: { ...group, selected: nextSel } }
     })
   }
 
   async function apply() {
-    const chosen = pending.suggestions.filter((_, i) => pending.selected[i])
-    if (!chosen.length) {
-      await dialog.alert('Select at least one fixture to apply, or skip.', {
+    const chosenPlumbing   = pending.plumbing.suggestions.filter((_, i) => pending.plumbing.selected[i])
+    const chosenElectrical = pending.electrical.suggestions.filter((_, i) => pending.electrical.selected[i])
+    const total = chosenPlumbing.length + chosenElectrical.length
+    if (!total) {
+      await dialog.alert('Select at least one item to apply, or skip.', {
         title: 'Nothing selected',
       })
       return
     }
-    applyRoomMepDefaults(pending.roomId, { plumbing: chosen })
-    toast.success(`Placed ${chosen.length} plumbing default${chosen.length === 1 ? '' : 's'}.`)
+    applyRoomMepDefaults(pending.roomId, {
+      plumbing: chosenPlumbing,
+      electrical: chosenElectrical,
+    })
+    const parts = []
+    if (chosenPlumbing.length)   parts.push(`${chosenPlumbing.length} plumbing`)
+    if (chosenElectrical.length) parts.push(`${chosenElectrical.length} electrical`)
+    toast.success(`Placed ${parts.join(' + ')} default${total === 1 ? '' : 's'}.`)
     setPending(null)
   }
+
+  const hasPlumbing   = pending.plumbing.suggestions.length > 0
+  const hasElectrical = pending.electrical.suggestions.length > 0
 
   return (
     <Modal
       open={!!pending}
       onClose={close}
-      title={`Apply plumbing defaults to "${pending.roomName}"?`}
-      width={460}
+      title={`Apply MEP defaults to "${pending.roomName}"?`}
+      width={480}
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={close}>
@@ -107,13 +140,61 @@ export default function MepDefaultsModal() {
         marginBottom: 'var(--space-3)',
         lineHeight: 1.5,
       }}>
-        IS-2065 / NBC 2016 suggests the following fixtures for this room type.
-        Uncheck any you don&apos;t want, then Apply.
+        IS-2065 / IS-732 / NBC 2016 suggest the following items for this
+        room type. Uncheck any you don&apos;t want, then Apply.
       </div>
 
+      {hasPlumbing && (
+        <SuggestionGroup
+          title="Plumbing (IS-2065)"
+          suggestions={pending.plumbing.suggestions}
+          selected={pending.plumbing.selected}
+          onToggle={i => toggle('plumbing', i)}
+          renderItem={(sug) => {
+            const catalog = getFixtureType(sug.type)
+            return {
+              label: catalog?.label ?? sug.type,
+              meta: catalog?.fixtureUnits != null ? `${catalog.fixtureUnits} FU` : null,
+            }
+          }}
+        />
+      )}
+
+      {hasElectrical && (
+        <SuggestionGroup
+          title="Electrical (IS-732)"
+          suggestions={pending.electrical.suggestions}
+          selected={pending.electrical.selected}
+          onToggle={i => toggle('electrical', i)}
+          renderItem={(sug) => {
+            const catalog = getPointType(sug.type)
+            return {
+              label: catalog?.label ?? sug.type,
+              meta: catalog?.defaultLoadW != null ? `${catalog.defaultLoadW} W` : null,
+            }
+          }}
+        />
+      )}
+    </Modal>
+  )
+}
+
+function SuggestionGroup({ title, suggestions, selected, onToggle, renderItem }) {
+  return (
+    <div style={{ marginBottom: 'var(--space-3)' }}>
+      <div style={{
+        fontSize: 'var(--text-xs)',
+        color: 'var(--color-text-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        fontWeight: 'var(--weight-semibold)',
+        marginBottom: 'var(--space-2)',
+      }}>
+        {title}
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-        {pending.suggestions.map((sug, i) => {
-          const catalog = getFixtureType(sug.type)
+        {suggestions.map((sug, i) => {
+          const item = renderItem(sug)
           return (
             <label
               key={`${sug.type}-${i}`}
@@ -130,29 +211,29 @@ export default function MepDefaultsModal() {
             >
               <input
                 type="checkbox"
-                checked={pending.selected[i]}
-                onChange={() => toggle(i)}
+                checked={selected[i]}
+                onChange={() => onToggle(i)}
                 style={{ cursor: 'pointer', accentColor: 'var(--color-primary)' }}
               />
               <span style={{
                 fontWeight: 'var(--weight-medium)',
                 color: 'var(--color-text)',
               }}>
-                {catalog?.label ?? sug.type}
+                {item.label}
               </span>
-              {catalog?.fixtureUnits != null && (
+              {item.meta && (
                 <span style={{
                   marginLeft: 'auto',
                   fontSize: 'var(--text-xs)',
                   color: 'var(--color-text-muted)',
                 }}>
-                  {catalog.fixtureUnits} FU
+                  {item.meta}
                 </span>
               )}
             </label>
           )
         })}
       </div>
-    </Modal>
+    </div>
   )
 }

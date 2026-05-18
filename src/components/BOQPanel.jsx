@@ -19,6 +19,7 @@ import ExcavationSection   from './boq/ExcavationSection'
 import PlumConcreteRow     from './boq/PlumConcreteRow'
 import PlasterSection      from './boq/PlasterSection'
 import PlumbingBoqSection  from './boq/PlumbingBoqSection'
+import ElectricalBoqSection from './boq/ElectricalBoqSection'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../boq/lines'
 import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
@@ -259,6 +260,20 @@ export default function BOQPanel() {
   const plumbingSupplyLines   = linesByCat.plumbing_supply   ?? []
   const plumbingDrainageLines = linesByCat.plumbing_drainage ?? []
   const plumbingFixturesLines = linesByCat.plumbing_fixtures ?? []
+  // Electrical categories — wire/conduit per system + points + fittings + DB.
+  const electricalLighting = linesByCat.electrical_lighting ?? []
+  const electricalPower    = linesByCat.electrical_power    ?? []
+  const electricalHvac     = linesByCat.electrical_hvac     ?? []
+  const electricalSubmain  = linesByCat.electrical_submain  ?? []
+  const electricalSolar    = linesByCat.electrical_solar    ?? []
+  const electricalEv       = linesByCat.electrical_ev       ?? []
+  const electricalPoints   = linesByCat.electrical_points   ?? []
+  const electricalFittings = linesByCat.electrical_fittings ?? []
+  const electricalDb       = linesByCat.electrical_db       ?? []
+  const electricalWiring   = [
+    ...electricalLighting, ...electricalPower, ...electricalHvac,
+    ...electricalSubmain, ...electricalSolar, ...electricalEv,
+  ]
 
   // ── Header summary stats — pulled from scopedState so they honor the toggle.
   const wallCount      = Object.values(scopedState.walls).filter(w => !w.isVirtual).length
@@ -577,6 +592,17 @@ export default function BOQPanel() {
         supplyLines={plumbingSupplyLines}
         drainageLines={plumbingDrainageLines}
         fixturesLines={plumbingFixturesLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity}
+      />
+
+      {/* Electrical (wiring + points + fittings + DB) — Phase 1.2 */}
+      <ElectricalBoqSection
+        wiringLines={electricalWiring}
+        pointLines={electricalPoints}
+        fittingLines={electricalFittings}
+        dbLines={electricalDb}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity}

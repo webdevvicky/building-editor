@@ -663,11 +663,343 @@ reset()
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 1.2 — Electrical engine + quantities + BOQ
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Same soft-detect pattern as plumbing: engine modules may not all exist
+// yet (sibling subagent builds them). The BOQ-side surface (emitter,
+// catalog wiring, line contract) IS owned by this agent and must pass.
+
+import { emitElectricalLines } from '../src/boq/emitters/electrical.js'
+import {
+  getElectricalDefaultsForRoom,
+  getPointType,
+  getWireGauge,
+} from '../src/mep/catalogs/index.js'
+
+let suggestElectricalPointsForRoom = null
+let groupPointsIntoCircuits = null
+let placeDefaultDb = null
+let buildElectricalSystemGraph = null
+let computeElectricalQuantities = null
+try {
+  const mod = await import('../src/mep/electrical/suggestions.js')
+  suggestElectricalPointsForRoom = mod.suggestElectricalPointsForRoom ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/electrical/circuitGrouping.js')
+  groupPointsIntoCircuits = mod.groupPointsIntoCircuits ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/electrical/dbPlacement.js')
+  placeDefaultDb = mod.placeDefaultDb ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/electrical/network.js')
+  buildElectricalSystemGraph = mod.buildElectricalSystemGraph ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/quantities/electrical.js')
+  computeElectricalQuantities = mod.computeElectricalQuantities ?? null
+} catch { /* engine pending */ }
+
+// Helper: build a BEDROOM room (10×10) and return id + center.
+function buildRoom(name, type, x0, y0, sizeFt = 10) {
+  const SW = s().getOrCreateNode(x0, y0)
+  const SE = s().getOrCreateNode(x0 + sizeFt * FT, y0)
+  const NE = s().getOrCreateNode(x0 + sizeFt * FT, y0 + sizeFt * FT)
+  const NW = s().getOrCreateNode(x0, y0 + sizeFt * FT)
+  s().addWall(SW, SE); s().addWall(SE, NE); s().addWall(NE, NW); s().addWall(NW, SW)
+  const allWalls = Object.values(s().walls)
+  const wIds = [
+    allWalls.find(w => (w.n1===SW&&w.n2===SE)||(w.n2===SW&&w.n1===SE))?.id,
+    allWalls.find(w => (w.n1===SE&&w.n2===NE)||(w.n2===SE&&w.n1===NE))?.id,
+    allWalls.find(w => (w.n1===NE&&w.n2===NW)||(w.n2===NE&&w.n1===NW))?.id,
+    allWalls.find(w => (w.n1===NW&&w.n2===SW)||(w.n2===NW&&w.n1===SW))?.id,
+  ].filter(Boolean)
+  wIds.forEach(id => s().togglePendingWall(id))
+  s().saveRoom(name, type)
+  const room = Object.values(s().rooms).find(r => r.name === name)
+  return { roomId: room?.id, centerX: x0 + (sizeFt/2) * FT, centerY: y0 + (sizeFt/2) * FT }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('20. Electrical — auto-suggest defaults for BEDROOM')
+reset()
+{
+  // Catalog-level default check works without the suggestion engine —
+  // verifies the IS-732 table itself.
+  const defaults = getElectricalDefaultsForRoom('BEDROOM')
+  ok('IS-732 BEDROOM defaults exist',
+    Array.isArray(defaults) && defaults.length > 0,
+    `length=${defaults?.length}`)
+  const byType = Object.fromEntries(defaults.map(d => [d.type, d.n]))
+  ok('BEDROOM defaults include LIGHT n=2',           byType.LIGHT === 2, `got LIGHT=${byType.LIGHT}`)
+  ok('BEDROOM defaults include FAN n=1',             byType.FAN === 1,   `got FAN=${byType.FAN}`)
+  ok('BEDROOM defaults include SOCKET_5A n=4',       byType.SOCKET_5A === 4, `got SOCKET_5A=${byType.SOCKET_5A}`)
+  ok('BEDROOM defaults include AC_INDOOR_POINT n=1', byType.AC_INDOOR_POINT === 1, `got AC=${byType.AC_INDOOR_POINT}`)
+
+  const { roomId } = buildRoom('Bed1', 'BEDROOM', 0, 0)
+  if (suggestElectricalPointsForRoom) {
+    const suggestions = suggestElectricalPointsForRoom(s(), roomId) ?? []
+    const types = new Set(suggestions.map(x => x?.type))
+    ok('suggestor returns at least LIGHT + FAN + SOCKET_5A + AC_INDOOR_POINT',
+      types.has('LIGHT') && types.has('FAN') && types.has('SOCKET_5A') && types.has('AC_INDOOR_POINT'),
+      `got [${[...types].join(',')}]`)
+  } else {
+    skip('suggestor returns LIGHT + FAN + SOCKET_5A + AC_INDOOR_POINT', 'suggestElectricalPointsForRoom not yet built')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('21. Electrical — circuit grouping IS-732')
+reset()
+{
+  const { centerX, centerY } = buildRoom('Hall', 'LIVING', 0, 0, 20)
+  // Add a DB so circuits have a root.
+  s().addElectricalPoint('DB', centerX + 8 * FT, centerY)
+  // Add 10 LIGHT points (15W each → 150W total — fits in one 800W circuit
+  // but exceeds the IS-732 8-point cap, forcing a second circuit).
+  const lightIds = []
+  for (let i = 0; i < 10; i++) {
+    lightIds.push(s().addElectricalPoint('LIGHT', centerX - 8 * FT + i * FT, centerY))
+  }
+  ok('10 LIGHT points created', lightIds.filter(Boolean).length === 10,
+    `got ${lightIds.filter(Boolean).length}`)
+
+  if (groupPointsIntoCircuits) {
+    const circuits = groupPointsIntoCircuits(s(), 'F1')
+    const lighting = circuits.filter(c => c.circuitClass === 'LIGHTING')
+    ok('circuit grouping returns LIGHTING circuits',
+      lighting.length >= 1, `got ${lighting.length}`)
+    // With 10 points and 8-point cap, we expect 2 circuits.
+    ok('LIGHTING circuits respect 8-point cap (2 circuits for 10 points)',
+      lighting.length === 2, `got ${lighting.length}`)
+    // Each circuit uses 1.5sqmm wire.
+    ok('LIGHTING circuits use 1.5sqmm wire',
+      lighting.every(c => c.gaugeMm2 === 1.5),
+      `gauges=[${lighting.map(c => c.gaugeMm2).join(',')}]`)
+    // MCB rating from catalog (10A for 1.5sqmm).
+    const wireCat = getWireGauge(1.5)
+    ok('LIGHTING MCB rating matches catalog (10A)',
+      lighting.every(c => c.mcbAmps === wireCat.mcbAmps),
+      `wireCat.mcbAmps=${wireCat?.mcbAmps}, got=[${lighting.map(c=>c.mcbAmps).join(',')}]`)
+  } else {
+    skip('circuit grouping returns LIGHTING circuits', 'groupPointsIntoCircuits not yet built')
+    skip('LIGHTING circuits respect 8-point cap', 'engine pending')
+    skip('LIGHTING circuits use 1.5sqmm wire', 'engine pending')
+    skip('LIGHTING MCB rating matches catalog', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('22. Electrical — DB auto-seed heuristic')
+reset()
+{
+  const { centerX, centerY } = buildRoom('Hall', 'LIVING', 0, 0, 20)
+  // Add 5 load points scattered around the room centroid.
+  s().addElectricalPoint('LIGHT', centerX - 4 * FT, centerY)
+  s().addElectricalPoint('LIGHT', centerX + 4 * FT, centerY)
+  s().addElectricalPoint('FAN',   centerX, centerY + 4 * FT)
+  s().addElectricalPoint('SOCKET_5A', centerX, centerY - 4 * FT)
+  s().addElectricalPoint('SOCKET_5A', centerX, centerY)
+
+  if (placeDefaultDb) {
+    const suggestion = placeDefaultDb(s(), 'F1')
+    ok('placeDefaultDb returns a placement object',
+      suggestion && typeof suggestion === 'object' && Number.isFinite(suggestion.x) && Number.isFinite(suggestion.y),
+      `got ${JSON.stringify(suggestion)}`)
+    if (suggestion) {
+      ok('placeDefaultDb suggestion carries floorId=F1',
+        suggestion.floorId === 'F1', `got ${suggestion.floorId}`)
+    }
+  } else {
+    skip('placeDefaultDb returns a placement object', 'placeDefaultDb not yet built')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('23. Electrical — system graph builds with mixed circuit classes')
+reset()
+{
+  const { centerX, centerY } = buildRoom('Hall', 'LIVING', 0, 0, 20)
+  s().addElectricalPoint('DB', centerX + 8 * FT, centerY)
+  s().addElectricalPoint('LIGHT', centerX - 3 * FT, centerY)
+  s().addElectricalPoint('AC_INDOOR_POINT', centerX, centerY + 3 * FT)
+  s().addElectricalPoint('GEYSER_POINT', centerX, centerY - 3 * FT)
+  s().addElectricalPoint('SOCKET_5A', centerX + 3 * FT, centerY)
+
+  if (buildElectricalSystemGraph) {
+    const g = buildElectricalSystemGraph(s())
+    ok('system graph builds without error', !!g && typeof g === 'object')
+    const systems = new Set((g?.systems ?? []).map(x => x?.id ?? x))
+    ok('system graph exposes LIGHTING system', systems.has('LIGHTING'),
+      `systems=[${[...systems].join(',')}]`)
+    ok('system graph exposes POWER_5A system', systems.has('POWER_5A'),
+      `systems=[${[...systems].join(',')}]`)
+    ok('system graph exposes AC system', systems.has('AC'))
+    ok('system graph exposes GEYSER system', systems.has('GEYSER'))
+    // Branches exist for at least 4 of the 5 points (DB is the root).
+    const branches = g?.branches ?? []
+    ok('system graph emits ≥3 branches (LIGHT + AC + GEYSER, plus SOCKET_5A)',
+      branches.length >= 3, `got ${branches.length}`)
+  } else {
+    skip('system graph builds without error', 'buildElectricalSystemGraph not yet built')
+    skip('system graph exposes LIGHTING system', 'engine pending')
+    skip('system graph exposes POWER_5A system', 'engine pending')
+    skip('system graph exposes AC system', 'engine pending')
+    skip('system graph exposes GEYSER system', 'engine pending')
+    skip('system graph emits ≥3 branches', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('24. Electrical — quantities aggregate by gauge')
+{
+  // Reuse state from Test 23. Verify gauge-grouped aggregation IF the
+  // quantity engine has shipped.
+  if (computeElectricalQuantities) {
+    const q = computeElectricalQuantities(s())
+    ok('computeElectricalQuantities returns an object with perSystem', q && typeof q.perSystem === 'object')
+    const lighting = q?.perSystem?.LIGHTING?.byGauge ?? {}
+    const ac       = q?.perSystem?.AC?.byGauge ?? {}
+    const has15 = Object.keys(lighting).some(k => /1\.5/.test(k))
+    const has4  = Object.keys(ac).some(k => /^4/.test(k))
+    ok('LIGHTING.byGauge includes a 1.5sqmm entry', has15, `keys=[${Object.keys(lighting).join(',')}]`)
+    ok('AC.byGauge includes a 4sqmm entry', has4, `keys=[${Object.keys(ac).join(',')}]`)
+  } else {
+    skip('computeElectricalQuantities returns an object', 'quantities/electrical.js not yet built')
+    skip('LIGHTING.byGauge includes a 1.5sqmm entry', 'engine pending')
+    skip('AC.byGauge includes a 4sqmm entry', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('25. Electrical — BOQ emitter produces lines (contract check)')
+{
+  // Direct emitter contract — must be callable + not throw, even when
+  // engine returns EMPTY_Q. When the engine ships, real lines flow.
+  const collected = []
+  emitElectricalLines(s(), (l) => collected.push(l), {})
+  ok('electrical emitter is callable + does not throw', true)
+
+  if (computeElectricalQuantities) {
+    const allLines = getBoqLines(s(), {})
+    const grouped = groupBoqLinesByCategory(allLines)
+    const lighting = grouped.electrical_lighting ?? []
+    const power    = grouped.electrical_power    ?? []
+    const points   = grouped.electrical_points   ?? []
+    ok('getBoqLines includes electrical_points category', points.length > 0, `got ${points.length}`)
+    ok('getBoqLines includes electrical_lighting or electrical_power',
+      lighting.length + power.length > 0,
+      `lighting=${lighting.length}, power=${power.length}`)
+    const electricalLines = [
+      ...lighting, ...power,
+      ...(grouped.electrical_hvac ?? []),
+      ...(grouped.electrical_submain ?? []),
+      ...(grouped.electrical_solar ?? []),
+      ...(grouped.electrical_ev ?? []),
+      ...points,
+      ...(grouped.electrical_fittings ?? []),
+      ...(grouped.electrical_db ?? []),
+    ]
+    ok('every electrical line carries meta.discipline=ELECTRICAL',
+      electricalLines.every(l => l.meta?.discipline === 'ELECTRICAL'),
+      `${electricalLines.length} lines checked`)
+    ok('every electrical line has a non-empty rateKey + id',
+      electricalLines.every(l => typeof l.rateKey === 'string' && l.rateKey.length > 0 &&
+                                 typeof l.id === 'string' && l.id.length > 0))
+  } else {
+    // Engine not yet built — emitter must safely no-op.
+    ok('emitter pushes zero lines when engine returns empty Q',
+      collected.length === 0, `got ${collected.length} lines`)
+    skip('getBoqLines includes electrical_points category', 'quantities/electrical.js not yet built')
+    skip('getBoqLines includes electrical_lighting or electrical_power', 'engine pending')
+    skip('every electrical line carries meta.discipline=ELECTRICAL', 'engine pending')
+    skip('every electrical line has rateKey + id', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('26. Electrical — floor scope (F1 + F2 ≈ All)')
+reset()
+{
+  // F1 — small bedroom with 3 points.
+  s().setCurrentFloorId('F1')
+  const f1 = buildRoom('Bed-F1', 'BEDROOM', 0, 0)
+  s().addElectricalPoint('DB',    f1.centerX + 3 * FT, f1.centerY)
+  s().addElectricalPoint('LIGHT', f1.centerX - 2 * FT, f1.centerY)
+  s().addElectricalPoint('FAN',   f1.centerX, f1.centerY + 2 * FT)
+
+  // F2 — different bedroom with 2 points.
+  const f2Id = s().addFloor({ label: 'Floor 2', floorHeightFt: 10 })
+  s().setCurrentFloorId(f2Id)
+  const f2 = buildRoom('Bed-F2', 'BEDROOM', 50 * FT, 0)
+  s().addElectricalPoint('DB',    f2.centerX + 3 * FT, f2.centerY)
+  s().addElectricalPoint('LIGHT', f2.centerX - 2 * FT, f2.centerY)
+
+  const totalPts = Object.keys(s().electricalPoints).length
+  ok('total electricalPoints across floors = 5', totalPts === 5, `got ${totalPts}`)
+
+  // Floor-scope BOQ — verify the pipeline path runs without error in both modes.
+  const allLines = getBoqLines(s(), {})
+  const f1Lines  = getBoqLines(s(), {}, { floorId: 'F1' })
+  const f2Lines  = getBoqLines(s(), {}, { floorId: f2Id })
+  ok('floor-scope path runs without error on multi-floor electrical',
+    Array.isArray(allLines) && Array.isArray(f1Lines) && Array.isArray(f2Lines))
+
+  if (computeElectricalQuantities) {
+    const onlyElec = (ls) => ls.filter(l => /^electrical_/.test(l.category))
+    const allElec = onlyElec(allLines)
+    const f1Elec  = onlyElec(f1Lines)
+    const f2Elec  = onlyElec(f2Lines)
+    ok('per-floor electrical-line counts > 0 on both floors',
+      f1Elec.length > 0 && f2Elec.length > 0,
+      `F1=${f1Elec.length}, F2=${f2Elec.length}`)
+    // Point counts are pure per-floor — sum should equal total.
+    const ptAll = allLines.filter(l => l.category === 'electrical_points').reduce((t,l) => t + (l.qty || 0), 0)
+    const ptF1  = f1Lines.filter(l => l.category === 'electrical_points').reduce((t,l) => t + (l.qty || 0), 0)
+    const ptF2  = f2Lines.filter(l => l.category === 'electrical_points').reduce((t,l) => t + (l.qty || 0), 0)
+    ok('electrical points: F1 + F2 === All',
+      Math.abs((ptF1 + ptF2) - ptAll) < 0.01,
+      `F1=${ptF1}, F2=${ptF2}, All=${ptAll}`)
+  } else {
+    skip('per-floor electrical-line counts > 0 on both floors', 'engine pending')
+    skip('electrical points: F1 + F2 === All', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('27. Electrical — load-exceeded validation guard')
+reset()
+{
+  const { centerX, centerY } = buildRoom('Hall', 'LIVING', 0, 0, 30)
+  s().addElectricalPoint('DB', centerX + 12 * FT, centerY)
+  // 50 LIGHT points — pushes circuit count high; validation surfaces if rule exists.
+  for (let i = 0; i < 50; i++) {
+    s().addElectricalPoint('LIGHT', centerX - 12 * FT + (i % 25) * FT, centerY + (i < 25 ? -2 : 2) * FT)
+  }
+  const lightCount = Object.values(s().electricalPoints).filter(p => p.type === 'LIGHT').length
+  ok('50 LIGHT points placed', lightCount === 50, `got ${lightCount}`)
+
+  const result = runValidation(s())
+  ok('runValidation runs without throwing on dense electrical layout', !!result)
+  const issues = result.issues ?? []
+  const hasLoadIssue = issues.some(i => /mep_db_load_exceeded|electrical_db_load|db_load_exceeded|load_exceeded/i.test(i.ruleId ?? ''))
+  if (computeElectricalQuantities) {
+    ok('validation surfaces a load-exceeded issue on dense layout', hasLoadIssue,
+      `issues=${issues.map(i => i.ruleId).join(',') || 'none'}`)
+  } else {
+    skip('validation surfaces a load-exceeded issue', 'mep validation rule pending')
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
-console.log(`Phase 0a + Phase 1.1 plumbing: ${pass} pass, ${fail} fail, ${skipped} skipped`)
+console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical: ${pass} pass, ${fail} fail, ${skipped} skipped`)
 if (skipped > 0) {
   console.log(`  (${skipped} engine-dependent assertions skipped — sibling subagent owns)`)
 }

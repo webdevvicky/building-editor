@@ -96,6 +96,11 @@ export function useKeyboardShortcuts() {
         useStore.getState().setTool?.('plumbing')
         return
       }
+      if (key === 'e' || key === 'E') {
+        e.preventDefault()
+        useStore.getState().setTool?.('electrical')
+        return
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)

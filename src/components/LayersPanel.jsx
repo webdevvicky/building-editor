@@ -19,6 +19,11 @@ const LAYER_LABELS = {
   plumbingDrainageRoutes:  'Drainage',
   plumbingHotWaterRoutes:  'Hot supply',
   risers:                  'Risers',
+
+  // Electrical
+  electricalPoints:        'Points',
+  electricalWiringRoutes:  'Wiring',
+  electricalSubmainRoutes: 'Submains',
 }
 
 const LAYER_GROUPS = [
@@ -34,6 +39,14 @@ const LAYER_GROUPS = [
       'plumbingDrainageRoutes',
       'plumbingHotWaterRoutes',
       'risers',
+    ],
+  },
+  {
+    title: 'Electrical',
+    keys: [
+      'electricalPoints',
+      'electricalWiringRoutes',
+      'electricalSubmainRoutes',
     ],
   },
 ]

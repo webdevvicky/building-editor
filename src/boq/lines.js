@@ -34,6 +34,7 @@ import { humanizeAssignmentSource as humanizeSource } from '../specs/resolution'
 import { PLASTER_KIND }                from '../specs/plasterSystems'
 import { scopeStateToFloor }           from './scope'
 import { emitPlumbingLines }           from './emitters/plumbing.js'
+import { emitElectricalLines }         from './emitters/electrical.js'
 
 const DEFAULT_FLOOR = 'F1'
 
@@ -301,6 +302,11 @@ export function getBoqLines(state, rates, opts = {}) {
   // Floor scope is already applied (state may be the scoped wrapper).
   // The emitter no-ops when no plumbing fixtures / network exist.
   emitPlumbingLines(state, push, { rates, scopedFloorId })
+
+  // ── 12. Electrical (Phase 1.2 — per-discipline emitter) ───────────────
+  // Same floor-scope contract as plumbing. No-ops until the electrical
+  // engine (computeElectricalQuantities) or scoped wrapper returns data.
+  emitElectricalLines(state, push, { rates, scopedFloorId })
 
   return lines
 }

@@ -31,6 +31,9 @@ import { resolveBeamEndpoint as topoResolveBeamEndpoint, getDerivedWallBeams as 
 import { buildPlumbingSystemGraph } from '../mep/plumbing/network.js'
 import { buildPlumbingRoutes } from '../mep/plumbing/routing.js'
 import { computePlumbingQuantities } from '../mep/quantities/plumbing.js'
+import { buildElectricalSystemGraph } from '../mep/electrical/network.js'
+import { buildElectricalRoutes } from '../mep/electrical/routing.js'
+import { computeElectricalQuantities } from '../mep/quantities/electrical.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
@@ -584,9 +587,9 @@ export function scopeStateToFloor(state, floorId) {
   const getPlumbingNetwork    = () => buildPlumbingSystemGraph(scopedStateRef)
   const getPlumbingRoutes     = () => buildPlumbingRoutes(getPlumbingNetwork(), scopedStateRef)
   const getPlumbingQuantities = (opts) => computePlumbingQuantities(scopedStateRef, opts)
-  const getElectricalNetwork  = () => EMPTY_GRAPH
-  const getElectricalRoutes   = () => EMPTY_ROUTES
-  const getElectricalQuantities = () => EMPTY_DISCIPLINE_Q
+  const getElectricalNetwork    = () => buildElectricalSystemGraph(scopedStateRef)
+  const getElectricalRoutes     = () => buildElectricalRoutes(getElectricalNetwork(), scopedStateRef)
+  const getElectricalQuantities = (opts) => computeElectricalQuantities(scopedStateRef, opts)
   const getHvacNetwork  = () => EMPTY_GRAPH
   const getHvacRoutes   = () => EMPTY_ROUTES
   const getHvacQuantities = () => EMPTY_DISCIPLINE_Q
