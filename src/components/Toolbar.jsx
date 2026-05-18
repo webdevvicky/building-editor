@@ -24,6 +24,7 @@ import {
   Undo2,
   Redo2,
   History,
+  Box,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
@@ -140,6 +141,7 @@ export default function Toolbar() {
       <div className="toolbar-cluster">
         {toolBtn('floors',   Building2, 'Floors')}
         {toolBtn('bbs',      Ruler,     'BBS')}
+        {toolBtn('iso',      Box,       '3D View (Ctrl+3)')}
         {toolBtn('settings', Settings,  'Settings')}
 
         <Button

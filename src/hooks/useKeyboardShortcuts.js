@@ -56,6 +56,12 @@ export function useKeyboardShortcuts() {
         window.dispatchEvent(new CustomEvent('boq:toggle'))
         return
       }
+      // Ctrl+3 / Cmd+3 → open 2.5D iso view
+      if (mod && !e.shiftKey && key === '3') {
+        e.preventDefault()
+        useStore.getState().setTool?.('iso')
+        return
+      }
 
       // ── Form-input-aware shortcuts below ──────────────────────────────
       if (inForm) return

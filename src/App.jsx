@@ -18,6 +18,7 @@ import FloorsManagerPanel from './components/FloorsManagerPanel'
 import BBSSpecPanel from './components/BBSSpecPanel'
 import ProjectsPanel from './components/ProjectsPanel'
 import RevisionsPanel from './components/RevisionsPanel'
+import IsoView from './components/IsoView'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -45,6 +46,7 @@ export default function App() {
         <ProjectSettingsPanel />
         <ProjectsPanel />
         <RevisionsPanel />
+        <IsoView />
         <LayersPanel />
         <BOQPanel />
         <Canvas />
