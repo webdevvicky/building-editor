@@ -53,13 +53,17 @@ export function runValidation(state) {
     const result = rule.check(state)
     if (result && Array.isArray(result.issues)) {
       for (const it of result.issues) {
+        // Per-issue `severity` wins when present (e.g. clash detection
+        // emits info/warning/error per discipline pair); else fall back
+        // to the rule-level severity.
         pushIssue({
           ruleId:     rule.id,
-          severity:   rule.severity,
-          category:   rule.category,
+          severity:   it.severity ?? rule.severity,
+          category:   it.category ?? rule.category,
           entityType: it.entityType,
           entityId:   it.entityId,
           message:    it.message ?? rule.message,
+          meta:       it.meta,
         })
       }
     }

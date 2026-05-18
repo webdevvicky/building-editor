@@ -13,6 +13,7 @@ import ElectricalOverlay from './canvas/ElectricalOverlay.jsx'
 import HvacOverlay from './canvas/HvacOverlay.jsx'
 import FireOverlay from './canvas/FireOverlay.jsx'
 import ElvOverlay from './canvas/ElvOverlay.jsx'
+import ClashOverlay from './canvas/ClashOverlay.jsx'
 import './Canvas.css'
 
 // Phase 1 plumbing — fixed placeholder type until a floating type picker
@@ -1086,6 +1087,12 @@ export default function Canvas() {
         {/* ELV overlay (extra-low-voltage devices, CCTV / data routes).
          * Renders right after fire, before nodes. */}
         <ElvOverlay />
+
+        {/* Clash overlay — cross-discipline route intersection markers
+         * (Phase 2.5). Mounts above every MEP overlay so clash diamonds
+         * stay visible on top of the routes that produced them, but
+         * below the UI overlays / nodes / columns layers. */}
+        <ClashOverlay />
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {

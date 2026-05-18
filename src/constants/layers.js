@@ -32,4 +32,7 @@ export const DEFAULT_LAYER_VISIBILITY = Object.freeze({
   elvDataRoutes:           true,
   solarDcRoutes:           true,
   solarAcRoutes:           true,
+
+  // ---------- Cross-discipline diagnostics ----------
+  clashes:                 true,
 })

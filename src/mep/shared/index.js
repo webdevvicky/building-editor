@@ -63,10 +63,12 @@ export {
   applyRoomDefaults,
 } from './suggestions.js'
 
-// Clash detection (Phase 1 stub)
+// Clash detection (Phase 2.5 — cross-discipline route intersection)
 export {
-  PHASE_1_STUB,
+  PHASE_2_5,
   detectClashes,
+  disciplineOf,
+  severityFor,
 } from './clashDetection.js'
 
 // IFC mapping

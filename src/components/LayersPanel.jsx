@@ -39,6 +39,9 @@ const LAYER_LABELS = {
   elvDevices:              'Devices',
   elvCctvRoutes:           'CCTV',
   elvDataRoutes:           'Data',
+
+  // Diagnostics
+  clashes:                 'Clashes',
 }
 
 const LAYER_GROUPS = [
@@ -86,6 +89,12 @@ const LAYER_GROUPS = [
       'elvDevices',
       'elvCctvRoutes',
       'elvDataRoutes',
+    ],
+  },
+  {
+    title: 'Diagnostics',
+    keys: [
+      'clashes',
     ],
   },
 ]
