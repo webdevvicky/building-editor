@@ -4,7 +4,7 @@
 
 import { SectionHeader, BoqSubRow, BoqTotalRow, fmtLineQty } from './BoqRow'
 
-export default function ShutteringSection({ lines, rates, onRateChange, openId, onInfoClick, unit }) {
+export default function ShutteringSection({ lines, rates, onRateChange, openId, onInfoClick, unit, onSelectEntity }) {
   if (!lines || lines.length === 0) return null
 
   // Strip "Shuttering — " prefix from labels (the section header carries that).
@@ -19,7 +19,8 @@ export default function ShutteringSection({ lines, rates, onRateChange, openId, 
       {lines.map(line => (
         <BoqSubRow key={line.id} line={line} labelOverride={stripPrefix(line)}
           rates={rates} onRateChange={onRateChange}
-          openId={openId} onInfoClick={onInfoClick} unit={unit} />
+          openId={openId} onInfoClick={onInfoClick} unit={unit}
+          onSelectEntity={onSelectEntity} />
       ))}
       <BoqTotalRow label="Total" value={fmtLineQty(totalLine, unit)} />
     </div>

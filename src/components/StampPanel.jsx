@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { GRID_IN } from '../geometry'
+import { toast } from './ui/Toast'
 import { Panel } from './ui/Panel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
@@ -29,6 +30,7 @@ export default function StampPanel() {
   const updateStamp     = useStore(s => s.updateStamp)
   const deleteStamp     = useStore(s => s.deleteStamp)
   const selectStamp     = useStore(s => s.selectStamp)
+  const undo            = useStore(s => s.undo)
   const unit            = useStore(s => s.unit)
 
   const stamp   = stamps[selectedStampId]
@@ -98,7 +100,17 @@ export default function StampPanel() {
       position={{ top: 56, left: 16 }}
     >
       <div style={{ marginBottom: 'var(--space-3)' }}>
-        <Button variant="danger" size="sm" onClick={() => deleteStamp(stamp.id)}>
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => {
+            const stampName = stamp.name || label
+            deleteStamp(stamp.id)
+            toast.action(`Deleted ${stampName}.`, {
+              label: 'Undo', onClick: () => undo(), duration: 5000,
+            })
+          }}
+        >
           Delete
         </Button>
       </div>

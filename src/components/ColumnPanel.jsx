@@ -2,6 +2,7 @@ import { useStore } from '../store'
 import { getColumnDimLabel } from '../lib/columnShapes'
 import { resolveColumnReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import { Panel } from './ui/Panel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
@@ -41,6 +42,7 @@ export default function ColumnPanel() {
   const deleteColumn     = useStore(s => s.deleteColumn)
   const setColumnFloorSpan = useStore(s => s.setColumnFloorSpan)
   const setColumnReinforcementSpec = useStore(s => s.setColumnReinforcementSpec)
+  const undo             = useStore(s => s.undo)
   const getFoundationForColumn = useStore(s => s.getFoundationForColumn)
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
   // Subscribe so the resolution badge re-renders when the spec map or
@@ -65,8 +67,12 @@ export default function ColumnPanel() {
   const dimLabel = colType ? getColumnDimLabel(colType) : '—'
 
   function handleDelete() {
+    const label = colType?.label || selectedColumnId.slice(0, 4)
     deleteColumn(selectedColumnId)
     selectColumn(null)
+    toast.action(`Deleted column "${label}".`, {
+      label: 'Undo', onClick: () => undo(), duration: 5000,
+    })
   }
 
   return (

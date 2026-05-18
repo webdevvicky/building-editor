@@ -11,6 +11,7 @@ import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { resolveBeamReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import { Panel } from './ui/Panel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
@@ -48,6 +49,7 @@ export default function BeamPanel() {
 
   const selectBeam = useStore(s => s.selectBeam)
   const deleteBeam = useStore(s => s.deleteBeam)
+  const undo       = useStore(s => s.undo)
   const setBeamReinforcementSpec = useStore(s => s.setBeamReinforcementSpec)
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
 
@@ -66,8 +68,12 @@ export default function BeamPanel() {
   const resolved = resolveBeamReinforcementSpec(state, beam)
 
   function handleDelete() {
+    const label = lvl?.label || beamClass || selectedBeamId.slice(0, 4)
     deleteBeam(selectedBeamId)
     selectBeam(null)
+    toast.action(`Deleted ${label} beam.`, {
+      label: 'Undo', onClick: () => undo(), duration: 5000,
+    })
   }
 
   async function handleApplyToMatching() {

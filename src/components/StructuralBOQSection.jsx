@@ -14,7 +14,7 @@ import {
 
 export default function StructuralBOQSection({
   rccLines, steelLines, concreteMixLines, staircaseLines,
-  rates, onRateChange, openId, onInfoClick, unit,
+  rates, onRateChange, openId, onInfoClick, unit, onSelectEntity,
 }) {
   const hasRCC      = rccLines?.length > 0
   const hasSteel    = steelLines?.length > 0
@@ -49,7 +49,8 @@ export default function StructuralBOQSection({
           {rccLines.map(line => (
             <BoqSubRow key={line.id} line={line}
               rates={rates} onRateChange={onRateChange}
-              openId={openId} onInfoClick={onInfoClick} unit={unit} />
+              openId={openId} onInfoClick={onInfoClick} unit={unit}
+              onSelectEntity={onSelectEntity} />
           ))}
         </div>
       )}
@@ -60,7 +61,8 @@ export default function StructuralBOQSection({
           {steelLines.map(line => (
             <BoqSubRow key={line.id} line={line}
               rates={rates} onRateChange={onRateChange}
-              openId={openId} onInfoClick={onInfoClick} unit={unit} />
+              openId={openId} onInfoClick={onInfoClick} unit={unit}
+              onSelectEntity={onSelectEntity} />
           ))}
           <BoqTotalRow label="Total steel" value={fmtLineQty(totalSteelLine, unit)} />
         </div>
@@ -76,7 +78,8 @@ export default function StructuralBOQSection({
                 <BoqSubRow key={line.id} line={line}
                   labelOverride={stripGradePrefix(line)}
                   rates={rates} onRateChange={onRateChange}
-                  openId={openId} onInfoClick={onInfoClick} unit={unit} />
+                  openId={openId} onInfoClick={onInfoClick} unit={unit}
+                  onSelectEntity={onSelectEntity} />
               ))}
             </div>
           ))}
@@ -89,7 +92,8 @@ export default function StructuralBOQSection({
           {staircaseLines.map(line => (
             <BoqSubRow key={line.id} line={line}
               rates={rates} onRateChange={onRateChange}
-              openId={openId} onInfoClick={onInfoClick} unit={unit} />
+              openId={openId} onInfoClick={onInfoClick} unit={unit}
+              onSelectEntity={onSelectEntity} />
           ))}
         </div>
       )}

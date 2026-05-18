@@ -2,7 +2,7 @@
 
 import { BoqRow } from './BoqRow'
 
-export default function PlumConcreteRow({ lines, rates, onRateChange, openId, onInfoClick, unit }) {
+export default function PlumConcreteRow({ lines, rates, onRateChange, openId, onInfoClick, unit, onSelectEntity }) {
   if (!lines || lines.length === 0) return null
 
   return (
@@ -10,7 +10,8 @@ export default function PlumConcreteRow({ lines, rates, onRateChange, openId, on
       {lines.map(line => (
         <BoqRow key={line.id} line={line}
           rates={rates} onRateChange={onRateChange}
-          openId={openId} onInfoClick={onInfoClick} unit={unit} />
+          openId={openId} onInfoClick={onInfoClick} unit={unit}
+          onSelectEntity={onSelectEntity} />
       ))}
     </div>
   )

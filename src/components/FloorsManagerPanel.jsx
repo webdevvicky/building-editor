@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 
@@ -101,6 +102,7 @@ export default function FloorsManagerPanel() {
   const getEntitiesOnFloor = useStore(s => s.getEntitiesOnFloor)
   const currentFloorId     = useStore(s => s.currentFloorId)
   const setCurrentFloorId  = useStore(s => s.setCurrentFloorId)
+  const undo               = useStore(s => s.undo)
 
   const open = activeTool === 'floors'
   const onClose = () => setTool('select')
@@ -118,7 +120,11 @@ export default function FloorsManagerPanel() {
       const fallback = floors.find(f => f.id !== floor.id)
       if (fallback) setCurrentFloorId(fallback.id)
     }
+    const label = floor.label || floor.id
     removeFloor(floor.id)
+    toast.action(`Deleted floor "${label}".`, {
+      label: 'Undo', onClick: () => undo(), duration: 5000,
+    })
   }
 
   return (

@@ -11,6 +11,7 @@ import { useStore } from '../store'
 import { REINFORCEMENT_SPEC_PRESETS } from '../specs/reinforcementSpecs'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 
@@ -215,6 +216,7 @@ export default function BBSSpecPanel() {
   const setTool            = useStore(s => s.setTool)
   const projectSettings    = useStore(s => s.projectSettings)
   const setProjectSettings = useStore(s => s.setProjectSettings)
+  const undo               = useStore(s => s.undo)
 
   const [selectedId, setSelectedId] = useState(null)
   const [creating, setCreating]     = useState(false)
@@ -246,6 +248,7 @@ export default function BBSSpecPanel() {
     updateSpecMap({ ...specMap, [next.id]: next })
   }
   const removeSpec = (id) => {
+    const specLabel = specMap[id]?.label || id
     const next = { ...specMap }
     delete next[id]
     updateSpecMap(next)
@@ -265,6 +268,9 @@ export default function BBSSpecPanel() {
     }
     setProjectSettings({ bbsDefaults: nextDefaults })
     if (selectedId === id) setSelectedId(null)
+    toast.action(`Deleted reinforcement spec "${specLabel}".`, {
+      label: 'Undo', onClick: () => undo(), duration: 5000,
+    })
   }
   const setAsDefault = async (spec) => {
     // BEAM defaults are per-class { plinth, lintel, roof }. Other element

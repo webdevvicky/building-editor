@@ -8,6 +8,7 @@
 import { useStore } from '../store'
 import { resolveFootingReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 
@@ -201,6 +202,7 @@ export default function FoundationPanel() {
   const setFoundationReinforcementSpec = useStore(s => s.setFoundationReinforcementSpec)
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
   const setTool                    = useStore(s => s.setTool)
+  const undo                       = useStore(s => s.undo)
 
   const open = activeTool === 'foundations'
   const onClose = () => setTool('select')
@@ -531,7 +533,14 @@ export default function FoundationPanel() {
               <Button
                 variant="danger"
                 size="sm"
-                onClick={e => { e.stopPropagation(); deleteFoundation(f.id) }}
+                onClick={e => {
+                  e.stopPropagation()
+                  const label = f.label || `${f.type} foundation`
+                  deleteFoundation(f.id)
+                  toast.action(`Deleted foundation "${label}".`, {
+                    label: 'Undo', onClick: () => undo(), duration: 5000,
+                  })
+                }}
               >
                 Delete
               </Button>

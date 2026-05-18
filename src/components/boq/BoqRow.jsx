@@ -71,17 +71,31 @@ function RateInput({ value, onChange, isPer1000, unit }) {
   )
 }
 
+// Render the label cell. When the line has back-link entity ids AND
+// onSelectEntity is provided, only the label text becomes clickable —
+// the rest of the row (qty / rate input / cost) stays untouched so
+// rate-editing isn't disrupted.
+function LabelCell({ line, label, openId, onInfoClick, onSelectEntity }) {
+  const clickable = !!onSelectEntity && (line.sourceEntityIds?.length ?? 0) > 0
+  const cls = clickable ? 'boq-row-label--clickable' : undefined
+  const handleClick = clickable ? () => onSelectEntity(line) : undefined
+  return (
+    <div className="boq-row-label">
+      <span className={cls} onClick={handleClick}>{label}</span>
+      {line.formulaId && <InfoIcon id={line.formulaId} openId={openId} onInfoClick={onInfoClick} />}
+    </div>
+  )
+}
+
 // Top-level priced row (used for finishes flooring/plaster/paint).
-export function BoqRow({ line, rates, onRateChange, openId, onInfoClick, unit, labelOverride }) {
+export function BoqRow({ line, rates, onRateChange, openId, onInfoClick, unit, labelOverride, onSelectEntity }) {
   const label   = labelOverride ?? line.label
   const rateVal = rates[line.rateKey] ?? ''
   const hasCost = line.cost !== null && line.cost !== undefined
   return (
     <div className="boq-row">
-      <div className="boq-row-label">
-        <span>{label}</span>
-        {line.formulaId && <InfoIcon id={line.formulaId} openId={openId} onInfoClick={onInfoClick} />}
-      </div>
+      <LabelCell line={line} label={label}
+        openId={openId} onInfoClick={onInfoClick} onSelectEntity={onSelectEntity} />
       <span className="boq-row-qty">{fmtLineQty(line, unit)}</span>
       <RateInput
         value={rateVal}
@@ -98,16 +112,14 @@ export function BoqRow({ line, rates, onRateChange, openId, onInfoClick, unit, l
 
 // Indented priced sub-row (used inside grouped sections — masonry, structural,
 // shuttering, plaster, etc.).
-export function BoqSubRow({ line, rates, onRateChange, openId, onInfoClick, unit, labelOverride }) {
+export function BoqSubRow({ line, rates, onRateChange, openId, onInfoClick, unit, labelOverride, onSelectEntity }) {
   const label   = labelOverride ?? line.label
   const rateVal = rates[line.rateKey] ?? ''
   const hasCost = line.cost !== null && line.cost !== undefined
   return (
     <div className="boq-row boq-row--subrow">
-      <div className="boq-row-label">
-        <span>{label}</span>
-        {line.formulaId && <InfoIcon id={line.formulaId} openId={openId} onInfoClick={onInfoClick} />}
-      </div>
+      <LabelCell line={line} label={label}
+        openId={openId} onInfoClick={onInfoClick} onSelectEntity={onSelectEntity} />
       <span className="boq-row-qty">{fmtLineQty(line, unit)}</span>
       <RateInput
         value={rateVal}

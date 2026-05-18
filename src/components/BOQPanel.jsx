@@ -419,6 +419,22 @@ export default function BOQPanel() {
     }
   }
 
+  // Click a BOQ line label → select the underlying canvas entity. Used by
+  // BOQ rows whose sourceEntityIds[] back-link to wall / room / column / beam /
+  // stamp entities (currently: BBS-grouped steel lines). Foundation + slab
+  // lines have no canvas-selection state today and silently no-op.
+  function handleSelectEntity(line) {
+    const ids = line.sourceEntityIds
+    if (!ids || ids.length === 0) return
+    const id = ids[0]
+    const s = useStore.getState()
+    if      (s.walls?.[id])   selectWall(id)
+    else if (s.rooms?.[id])   selectRoom(id)
+    else if (s.columns?.[id]) selectColumn(id)
+    else if (s.beams?.[id])   selectBeam(id)
+    else if (s.stamps?.[id])  selectStamp(id)
+  }
+
   // Unit-aware area / length display for the summary section.
   function fmtLen(ft) {
     if (unit === 'm') return `${Math.round(ft * 0.3048 * 100) / 100} m`
@@ -482,7 +498,8 @@ export default function BOQPanel() {
         <div className="boq-group">
           <BoqRow line={flooringLine}
             rates={rates} onRateChange={setRate}
-            openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+            openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+            onSelectEntity={handleSelectEntity} />
         </div>
       )}
 
@@ -499,7 +516,8 @@ export default function BOQPanel() {
                   <BoqSubRow key={line.id} line={line}
                     labelOverride={stripMaterialPrefix(line)}
                     rates={rates} onRateChange={setRate}
-                    openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+                    openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+                    onSelectEntity={handleSelectEntity} />
                 ))}
               </div>
             )
@@ -515,27 +533,32 @@ export default function BOQPanel() {
         staircaseLines={staircaseLines}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity}
       />
 
       {/* Plum concrete */}
       <PlumConcreteRow lines={plumLines}
         rates={rates} onRateChange={setRate}
-        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
 
       {/* Shuttering */}
       <ShutteringSection lines={shutteringLines}
         rates={rates} onRateChange={setRate}
-        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
 
       {/* Excavation */}
       <ExcavationSection lines={excavationLines}
         rates={rates} onRateChange={setRate}
-        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
 
       {/* Plaster materials by system */}
       <PlasterSection lines={plasterLines}
         rates={rates} onRateChange={setRate}
-        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
 
       {/* Plaster, Paint, Waterproofing, Roofing — other finishes */}
       {otherFinishLines.length > 0 && (
@@ -543,7 +566,8 @@ export default function BOQPanel() {
           {otherFinishLines.map(line => (
             <BoqRow key={line.id} line={line}
               rates={rates} onRateChange={setRate}
-              openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+              openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+              onSelectEntity={handleSelectEntity} />
           ))}
         </div>
       )}
@@ -560,7 +584,8 @@ export default function BOQPanel() {
                 <BoqSubRow key={line.id} line={line}
                   labelOverride={stripStampPrefix(line)}
                   rates={rates} onRateChange={setRate}
-                  openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+                  openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+                  onSelectEntity={handleSelectEntity} />
               ))}
             </div>
           )}
@@ -572,7 +597,8 @@ export default function BOQPanel() {
                 <BoqSubRow key={line.id} line={line}
                   labelOverride={stripStampPrefix(line)}
                   rates={rates} onRateChange={setRate}
-                  openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+                  openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+                  onSelectEntity={handleSelectEntity} />
               ))}
             </div>
           )}

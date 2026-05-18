@@ -3,7 +3,7 @@
 
 import { SectionHeader, SubSectionHeader, BoqSubRow } from './BoqRow'
 
-export default function PlasterSection({ lines, rates, onRateChange, openId, onInfoClick, unit }) {
+export default function PlasterSection({ lines, rates, onRateChange, openId, onInfoClick, unit, onSelectEntity }) {
   if (!lines || lines.length === 0) return null
 
   // Group by plaster system. boq/lines.js stamps line.meta.plasterSystemId
@@ -32,7 +32,8 @@ export default function PlasterSection({ lines, rates, onRateChange, openId, onI
           {groupLines.map(line => (
             <BoqSubRow key={line.id} line={line} labelOverride={stripPrefix(line)}
               rates={rates} onRateChange={onRateChange}
-              openId={openId} onInfoClick={onInfoClick} unit={unit} />
+              openId={openId} onInfoClick={onInfoClick} unit={unit}
+              onSelectEntity={onSelectEntity} />
           ))}
         </div>
       ))}

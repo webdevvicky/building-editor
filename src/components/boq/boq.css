@@ -146,6 +146,18 @@
   white-space: nowrap;
 }
 
+/* Clickable label affordance — entity-backed BOQ rows highlight + select
+   their underlying canvas entity when the label is clicked. Only the label
+   text is clickable; the rate input / cost cells stay untouched. */
+.boq-row-label--clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.boq-row-label--clickable:hover {
+  color: var(--color-primary);
+}
+
 .boq-row-qty {
   text-align: right;
   font-weight: var(--weight-medium);

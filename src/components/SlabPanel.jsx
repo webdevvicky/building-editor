@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { resolveSlabReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 
@@ -99,6 +100,7 @@ export default function SlabPanel() {
   const addSlab         = useStore(s => s.addSlab)
   const updateSlab      = useStore(s => s.updateSlab)
   const deleteSlab      = useStore(s => s.deleteSlab)
+  const undo            = useStore(s => s.undo)
   const assignRoomToSlab = useStore(s => s.assignRoomToSlab)
   const setSlabReinforcementSpec = useStore(s => s.setSlabReinforcementSpec)
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
@@ -149,7 +151,17 @@ export default function SlabPanel() {
                 </span>
                 {canDelete && (
                   <div style={{ marginLeft: 'auto' }}>
-                    <Button variant="danger" size="sm" onClick={() => deleteSlab(slab.id)}>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => {
+                        const label = slab.type || slab.id.slice(0, 4)
+                        deleteSlab(slab.id)
+                        toast.action(`Deleted ${label} slab.`, {
+                          label: 'Undo', onClick: () => undo(), duration: 5000,
+                        })
+                      }}
+                    >
                       Delete
                     </Button>
                   </div>
