@@ -3,13 +3,17 @@
 ## Current Phase Status
 
 Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +
-Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + **UI Phases 1–4** complete on
-`main` (2026-05-18).
+Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + **UI Phases 1–4** +
+**Collapsible BOQ sidebar** complete on `main` (2026-05-18).
 
 UI rebuild (Phases 1–4, commits `3ee27a8 → bfed97a`, 2026-05-18) landed the
 design-token system, 6 UI primitives, native-dialog removal, panel/toolbar/
 BOQ refactor, keyboard shortcuts, canvas selection feedback, empty states,
 and the 1024px desktop gate. See "UI Design System" section below.
+
+Collapsible BOQ sidebar (commit `0394c88`, 2026-05-18): BOQ panel now
+collapses to a 32px strip via Ctrl/Cmd+B or the toggle button on its left
+edge. State persists in `localStorage['boq_panel_collapsed']`.
 
 ERP integration (replace static MATERIAL_LIBRARY + add live rate catalog) is
 the next major work item; foundation for it is in place via the canonical
@@ -772,6 +776,38 @@ should match only `src/components/ui/Dialog.jsx`.
   focus-trap scaffolding — that's Modal's job.
 - **Floating non-modal** (LayersPanel-style): `<Panel>` without `onClose`.
 
+### BOQ collapsible sidebar
+
+The BOQ panel can collapse to a 32px-wide vertical strip so the canvas
+reclaims full viewport width. Implementation:
+
+- **State**: `collapsed` (boolean) lives in `BOQPanel.jsx` local component
+  state, seeded from `localStorage['boq_panel_collapsed']` (`'0'` | `'1'`).
+  Every change is written back via a small `writeCollapsed` helper that
+  swallows quota / sandbox errors with try/catch.
+- **Toggle paths**:
+  - Click the chevron button on the left edge of the BOQ panel — direct
+    setState.
+  - `Ctrl/Cmd+B` from `useKeyboardShortcuts.js` dispatches
+    `window.dispatchEvent(new CustomEvent('boq:toggle'))`; BOQPanel
+    listens once via `useEffect` and flips state on event.
+  - This decoupling means the keyboard hook never imports the BOQ panel,
+    and the BOQ panel doesn't need to know about the keyboard hook —
+    the window event is the contract.
+- **Chevron direction**: `ChevronLeft` when expanded, `ChevronRight` when
+  collapsed (matches the explicit spec from the original task; do not
+  flip without re-asking the user).
+- **CSS**: `.boq-panel` carries the width transition; `.boq-panel--collapsed`
+  is the modifier. `.boq-collapse-toggle` is absolutely positioned in the
+  top-left of the expanded panel (22px ghost-style button) and flows
+  inline in the collapsed strip. `.boq-collapsed-label` uses
+  `writing-mode: vertical-rl` + `rotate(180deg)` for the bottom-up
+  "BOQ SUMMARY" wordmark. `.boq-panel-header` carries `padding-left:28px`
+  so the title doesn't sit under the absolute toggle button.
+- **Width transition**: 150ms ease-out on `min-width`, `width`, `padding`.
+  Canvas auto-reflows because BOQ is absolutely positioned over the
+  canvas — Canvas.jsx is untouched.
+
 ### BOQ visual contract (`src/components/boq/boq.css`)
 
 - Row grid is `1fr 76px 104px 90px` — item / qty / rate / cost. Every row
@@ -828,6 +864,7 @@ Mounted once via `useKeyboardShortcuts()` call in `App()`. Behavior:
 | `Ctrl/Cmd+Z` | `undo()` |
 | `Ctrl/Cmd+Y` or `Ctrl/Cmd+Shift+Z` | `redo()` |
 | `Ctrl/Cmd+S` | replicates Toolbar Save handler (autosave + toast) |
+| `Ctrl/Cmd+B` | dispatch `boq:toggle` window event — collapses/expands BOQ |
 | `D` / `S` / `R` | `setTool('draw' | 'select' | 'room')` |
 
 Bare-key shortcuts (Esc/Del/D/S/R) are suppressed when focus is in
@@ -1090,3 +1127,4 @@ can't break in responsive states. Resize listener re-evaluates the gate.
 - **Canvas selection pulse is keyed by entity id.** `<element key={`pulse-${selectedId}`}>` forces React to remount the pulse element on selection change, restarting the CSS animation. Don't change the pulse duration (600ms) or make it loop.
 - **Desktop-only.** Minimum viewport is 1024px enforced by `DesktopGate` wrapper in `App.jsx`. Below that, the entire app shell is replaced by a splash card. Don't add media queries to "support" smaller viewports — the gate is the design.
 - **Animation budget: 100-150ms with `var(--ease-out)`.** The 2s bobbing arrow in the canvas empty state is the SOLE sanctioned infinite animation in the app — don't add others. `prefers-reduced-motion` collapses all transitions globally (the rule lives at the bottom of `ui.css`).
+- **BOQ collapsible state is persisted in `localStorage['boq_panel_collapsed']`.** The keyboard hook (`useKeyboardShortcuts.js`) dispatches `window.dispatchEvent(new CustomEvent('boq:toggle'))` on `Ctrl/Cmd+B`; `BOQPanel.jsx` listens for that event and flips state. **Use this same window-event pattern for any future cross-component toggle that shouldn't reach into the store** — it keeps the keyboard hook decoupled from concrete component imports. Add new event names under the `boq:` / `panel:` namespace.
