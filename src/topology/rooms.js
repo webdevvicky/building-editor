@@ -1,15 +1,28 @@
-// Topology — room polygon math.
+// Topology — room polygon and room-set selectors.
 //
 // Pure helpers that walk a set of wall ids and produce a closed-loop node
-// order. Used by every selector that needs "the polygon of room R" or the
-// "site boundary polygon."
+// order, plus state-reading selectors that compute room polygons, areas,
+// validity, and the canonical "valid room set" used to gate BOQ totals.
+//
+// State contract: every state-reading function accepts a `state` whose
+// shape includes { rooms, walls, nodes } plus method-dispatch helpers
+// (getWallArea, getRoomPolygon, etc.). This contract is honored by both
+// the live Zustand store and the floor-scoped wrapper in boq/scope.js,
+// so topology calls auto-scope when invoked via the scoped state.
+
+import { GRID_IN, doRoomsOverlap } from '../geometry.js'
+
+const DEFAULT_FLOOR_ID = 'F1'
+
+function r2(n) { return Math.round(n * 100) / 100 }
+
+// ── Pure polygon helpers ────────────────────────────────────────────────────
 
 // Walk a set of wallIds to discover the closed polygon's node order.
 // Returns the node-id sequence (length === wallIds.length), or null if the
-// walls don't form a closed loop.
-//
-// Stale wall references (an id not present in `walls`) cause an early null
-// return rather than a partial polygon — callers must handle null.
+// walls don't form a closed loop. Stale wall references (an id not present
+// in `walls`) cause an early null return rather than a partial polygon —
+// callers must handle null.
 export function walkPolygonNodeOrder(wallIds, walls) {
   const adj = {}
   for (const wid of wallIds) {
@@ -50,4 +63,113 @@ export function buildPlotPolygon(walls, nodes) {
   const order = walkPolygonNodeOrder(plotWallIds, walls)
   if (!order) return null
   return order.map(id => nodes[id]).filter(Boolean)
+}
+
+// ── State-reading selectors ─────────────────────────────────────────────────
+
+// Returns the room polygon as a vertex array {x,y}[] in node order, or null
+// if the room is malformed (missing walls, doesn't close).
+export function getRoomPolygon(state, roomId) {
+  const room = state.rooms[roomId]
+  if (!room || room.wallIds.length < 3) return null
+  const nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  if (!nodeOrder) return null
+  return nodeOrder.map(id => state.nodes[id]).filter(Boolean)
+}
+
+// Returns room floor area in ft². Uses shoelace on the walked polygon.
+export function getRoomArea(state, roomId) {
+  const room = state.rooms[roomId]
+  if (!room || room.wallIds.length < 2) return 0
+  const nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  if (!nodeOrder || nodeOrder.length < 3) return 0
+  const pts = nodeOrder.map(id => state.nodes[id]).filter(Boolean)
+  let area = 0
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+  }
+  return r2(Math.abs(area) / 2 / (GRID_IN * GRID_IN))
+}
+
+// Sum of net wall area across a room's wallIds. Delegates to state.getWallArea
+// (which honors virtual walls + openings). Note that the live store's
+// getWallArea is independent of room identity, so this remains correct under
+// the floor-scoped wrapper (which guards by roomIdSet).
+export function getRoomWallArea(state, roomId) {
+  const room = state.rooms[roomId]
+  if (!room) return 0
+  return r2(room.wallIds.reduce((t, wid) => t + state.getWallArea(wid), 0))
+}
+
+// Pure topology: walls exist + form a closed loop. No overlap check.
+export function isRoomStructurallyValid(state, roomId) {
+  const room = state.rooms[roomId]
+  if (!room || room.wallIds.length < 3) return false
+  return walkPolygonNodeOrder(room.wallIds, state.walls) !== null
+}
+
+// Returns name of first structurally-valid room on the SAME FLOOR that
+// overlaps roomId, or null. Floor scope: rooms on different floors NEVER
+// conflict (multi-storey buildings have overlapping footprints by design).
+export function getOverlappingRoomName(state, roomId) {
+  const subject = state.rooms[roomId]
+  if (!subject) return null
+  const polyA = getRoomPolygon(state, roomId)
+  if (!polyA) return null
+  const subjectFloorId = subject.floorId ?? DEFAULT_FLOOR_ID
+  for (const [otherId, room] of Object.entries(state.rooms)) {
+    if (otherId === roomId) continue
+    if ((room.floorId ?? DEFAULT_FLOOR_ID) !== subjectFloorId) continue
+    if (!isRoomStructurallyValid(state, otherId)) continue
+    const polyB = getRoomPolygon(state, otherId)
+    if (!polyB) continue
+    if (doRoomsOverlap(polyA, polyB)) return room.name
+  }
+  return null
+}
+
+export function hasRoomOverlap(state, roomId) {
+  return getOverlappingRoomName(state, roomId) !== null
+}
+
+// Returns ids of structurally valid, non-overlapping rooms.
+// All finish-gated totals and getTotalFloorArea filter THIS set — never raw
+// Object.keys(state.rooms).
+//
+// Floor scope: overlap is a same-floor concept only. The pairwise loop only
+// compares rooms on the same floorId. Both rooms in an overlapping pair are
+// excluded (so neither double-counts in the BOQ).
+export function getValidRoomIds(state) {
+  const rooms = state.rooms
+  const structuralIds = Object.keys(rooms).filter(id => isRoomStructurallyValid(state, id))
+  const polys = structuralIds.map(id => ({
+    id,
+    poly: getRoomPolygon(state, id),
+    floorId: rooms[id].floorId ?? DEFAULT_FLOOR_ID,
+  })).filter(r => r.poly)
+  const overlapExcluded = new Set()
+  for (let i = 0; i < polys.length; i++) {
+    for (let j = i + 1; j < polys.length; j++) {
+      if (polys[i].floorId !== polys[j].floorId) continue
+      if (doRoomsOverlap(polys[i].poly, polys[j].poly)) {
+        if (import.meta.env?.DEV)
+          // eslint-disable-next-line no-console
+          console.warn(`[topology] Rooms "${rooms[polys[i].id].name}" and "${rooms[polys[j].id].name}" overlap on floor ${polys[i].floorId} — both excluded.`)
+        overlapExcluded.add(polys[i].id)
+        overlapExcluded.add(polys[j].id)
+      }
+    }
+  }
+  return polys.filter(r => !overlapExcluded.has(r.id)).map(r => r.id)
+}
+
+// Generic: sum getRoomArea over valid rooms where predicate(room) is true.
+// Used by all finish-gated total selectors.
+export function sumRoomAreas(state, predicate) {
+  return r2(
+    getValidRoomIds(state)
+      .filter(id => predicate(state.rooms[id]))
+      .reduce((t, id) => t + getRoomArea(state, id), 0)
+  )
 }

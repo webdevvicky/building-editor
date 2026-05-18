@@ -8,7 +8,18 @@ import { getPresetFinishes, ALL_FINISHES, ROOM_PRESETS } from './roomPresets'
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { createStructuralSlice, DEFAULT_PROJECT_SETTINGS, DEFAULT_FLOOR_ID } from './structuralSlice'
 import { DEFAULT_LAYER_VISIBILITY } from './constants/layers'
-import { walkPolygonNodeOrder as walkPolygon, buildPlotPolygon } from './topology/rooms.js'
+import {
+  walkPolygonNodeOrder as walkPolygon,
+  buildPlotPolygon,
+  getRoomPolygon as topoGetRoomPolygon,
+  getRoomArea as topoGetRoomArea,
+  getRoomWallArea as topoGetRoomWallArea,
+  isRoomStructurallyValid as topoIsRoomStructurallyValid,
+  hasRoomOverlap as topoHasRoomOverlap,
+  getOverlappingRoomName as topoGetOverlappingRoomName,
+  getValidRoomIds as topoGetValidRoomIds,
+  sumRoomAreas as topoSumRoomAreas,
+} from './topology/rooms.js'
 
 const uid = () => crypto.randomUUID()
 
@@ -895,14 +906,7 @@ export const useStore = create((set, get) => ({
 
   // ── BOQ helpers — return feet / sq ft for display ─────────────────────
 
-  getRoomPolygon(roomId) {
-    const { rooms, walls, nodes } = get()
-    const room = rooms[roomId]
-    if (!room || room.wallIds.length < 3) return null
-    const nodeOrder = walkPolygon(room.wallIds, walls)
-    if (!nodeOrder) return null
-    return nodeOrder.map(id => nodes[id]).filter(Boolean)
-  },
+  getRoomPolygon(roomId) { return topoGetRoomPolygon(get(), roomId) },
 
   // Returns wall length in feet
   getWallLength(wallId) {
@@ -930,12 +934,7 @@ export const useStore = create((set, get) => ({
   },
 
   // Sum of net wall area for all walls in a room (virtual walls return 0 from getWallArea)
-  getRoomWallArea(roomId) {
-    const { rooms } = get()
-    const room = rooms[roomId]
-    if (!room) return 0
-    return Math.round(room.wallIds.reduce((t, wid) => t + get().getWallArea(wid), 0) * 100) / 100
-  },
+  getRoomWallArea(roomId) { return topoGetRoomWallArea(get(), roomId) },
 
   // Ceiling + all wall faces in sq ft — basis for per-room paint area
   getRoomPaintArea(roomId) {
@@ -996,102 +995,15 @@ export const useStore = create((set, get) => ({
     return result
   },
 
-  // Pure topology: walls exist + form a closed loop. No overlap check.
-  // Used as the filter inside overlap routines to avoid composing with itself.
-  isRoomStructurallyValid(roomId) {
-    const { rooms, walls } = get()
-    const room = rooms[roomId]
-    if (!room || room.wallIds.length < 3) return false
-    return walkPolygon(room.wallIds, walls) !== null
-  },
-
-  // Composite validity: structurally valid + does not overlap another structurally-valid room.
+  isRoomStructurallyValid(roomId) { return topoIsRoomStructurallyValid(get(), roomId) },
   isRoomValid(roomId) {
     return get().isRoomStructurallyValid(roomId) && !get().hasRoomOverlap(roomId)
   },
-
-  // Returns name of first structurally-valid room on the SAME FLOOR that
-  // overlaps roomId, or null. Rooms on other floors are never conflicts —
-  // a multi-storey building has overlapping footprints by design.
-  getOverlappingRoomName(roomId) {
-    const { rooms } = get()
-    const subject = rooms[roomId]
-    if (!subject) return null
-    const polyA = get().getRoomPolygon(roomId)
-    if (!polyA) return null
-    const subjectFloorId = subject.floorId ?? DEFAULT_FLOOR_ID
-    for (const [otherId, room] of Object.entries(rooms)) {
-      if (otherId === roomId) continue
-      if ((room.floorId ?? DEFAULT_FLOOR_ID) !== subjectFloorId) continue
-      if (!get().isRoomStructurallyValid(otherId)) continue
-      const polyB = get().getRoomPolygon(otherId)
-      if (!polyB) continue
-      if (doRoomsOverlap(polyA, polyB)) return room.name
-    }
-    return null
-  },
-
-  hasRoomOverlap(roomId) {
-    return get().getOverlappingRoomName(roomId) !== null
-  },
-
-  // Returns ids of structurally valid, non-overlapping rooms.
-  // All finish-gated totals and getTotalFloorArea filter THIS set — never raw Object.keys(rooms).
-  //
-  // Floor scope: overlap is a same-floor concept only. Two rooms with
-  // identical footprints on Floor 1 and Floor 2 are NOT a conflict — a
-  // multi-storey building is the expected case. The pairwise loop only
-  // compares rooms on the same floorId.
-  getValidRoomIds() {
-    const { rooms } = get()
-    const structuralIds = Object.keys(rooms).filter(id => get().isRoomStructurallyValid(id))
-    const polys = structuralIds.map(id => ({
-      id,
-      poly: get().getRoomPolygon(id),
-      floorId: rooms[id].floorId ?? DEFAULT_FLOOR_ID,
-    })).filter(r => r.poly)
-    const overlapExcluded = new Set()
-    for (let i = 0; i < polys.length; i++) {
-      for (let j = i + 1; j < polys.length; j++) {
-        if (polys[i].floorId !== polys[j].floorId) continue
-        if (doRoomsOverlap(polys[i].poly, polys[j].poly)) {
-          if (import.meta.env?.DEV)
-            console.warn(`[topology] Rooms "${rooms[polys[i].id].name}" and "${rooms[polys[j].id].name}" overlap on floor ${polys[i].floorId} — both excluded.`)
-          overlapExcluded.add(polys[i].id)
-          overlapExcluded.add(polys[j].id)
-        }
-      }
-    }
-    return polys.filter(r => !overlapExcluded.has(r.id)).map(r => r.id)
-  },
-
-  // Generic: sum getRoomArea over valid rooms where predicate(room) is true.
-  // Used by all finish-gated total selectors — avoids duplicating the filter+reduce pattern.
-  sumRoomAreas(predicate) {
-    const { rooms } = get()
-    return Math.round(
-      get().getValidRoomIds()
-        .filter(id => predicate(rooms[id]))
-        .reduce((t, id) => t + get().getRoomArea(id), 0)
-    * 100) / 100
-  },
-
-  // Returns room floor area in sq ft
-  getRoomArea(roomId) {
-    const { rooms, walls, nodes } = get()
-    const room = rooms[roomId]
-    if (!room || room.wallIds.length < 2) return 0
-    const nodeOrder = walkPolygon(room.wallIds, walls)
-    if (!nodeOrder || nodeOrder.length < 3) return 0
-    const pts = nodeOrder.map(id => nodes[id]).filter(Boolean)
-    let area = 0
-    for (let i = 0; i < pts.length; i++) {
-      const j = (i + 1) % pts.length
-      area += pts[i].x * pts[j].y - pts[j].x * pts[i].y
-    }
-    // area is in in² — divide by GRID_IN² (144) to get sq ft
-    return Math.round(Math.abs(area) / 2 / (GRID_IN * GRID_IN) * 100) / 100
-  },
+  getOverlappingRoomName(roomId) { return topoGetOverlappingRoomName(get(), roomId) },
+  hasRoomOverlap(roomId)         { return topoHasRoomOverlap(get(), roomId) },
+  getValidRoomIds()              { return topoGetValidRoomIds(get()) },
+  sumRoomAreas(predicate)        { return topoSumRoomAreas(get(), predicate) },
+  getRoomArea(roomId)            { return topoGetRoomArea(get(), roomId) },
 
   getTotalFloorArea() {
     return Math.round(
