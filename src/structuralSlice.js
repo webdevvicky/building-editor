@@ -32,6 +32,14 @@ import {
   getWallAdjacencyCount as topoGetWallAdjacencyCount,
   classifyWallBeamFlags as topoClassifyWallBeamFlags,
 } from './topology/walls.js'
+import {
+  resolveBeamEndpoint as topoResolveBeamEndpoint,
+  getDerivedWallBeams as topoGetDerivedWallBeams,
+  getAllBeams as topoGetAllBeams,
+} from './topology/beams.js'
+import {
+  getColumnHeightFt as topoGetColumnHeightFt,
+} from './topology/columns.js'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
@@ -50,8 +58,6 @@ function inferSlabRole(state, floorId) {
 
 // Reference-equality memo cells (one per cached selector). Single-store
 // assumption — one cell per module is sufficient. See src/topology/cache.js.
-const _derivedBeamsMemo = createMemo()
-const _allBeamsMemo    = createMemo()
 const _concreteMemo    = createMemo()
 const _masonryDedMemo  = createMemo()
 const _foundationMemo  = createMemo()
@@ -842,74 +848,11 @@ export const createStructuralSlice = (set, get, uid) => ({
   getWallAdjacencyCount: ()       => topoGetWallAdjacencyCount(get()),
   classifyWallBeamFlags: (wallId) => topoClassifyWallBeamFlags(get(), wallId),
 
-  // Returns in-memory WALL_DERIVED beam entities (NOT persisted in store).
-  // Memoized on {walls, nodes, columns, rooms}.
-  getDerivedWallBeams: () => {
-    const { walls, nodes, columns, rooms } = get()
-    return _derivedBeamsMemo([walls, nodes, columns, rooms], () => {
-      // Build nodeId → columnId map for attached columns
-      const nodeToColId = {}
-      for (const col of Object.values(columns)) {
-        if (col.attachedNodeId) nodeToColId[col.attachedNodeId] = col.id
-      }
+  // Wall-derived beams + merged-beams view delegate to topology.
+  getDerivedWallBeams: () => topoGetDerivedWallBeams(get()),
+  getAllBeams:         () => topoGetAllBeams(get()),
 
-      const result = []
-      for (const wall of Object.values(walls)) {
-        if (wall.isVirtual || wall.isPlot) continue
-        const flags = get().classifyWallBeamFlags(wall.id)
-        const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
-        if (!n1 || !n2) continue
-
-        for (const lvl of BEAM_LEVEL_REGISTRY) {
-          if (!flags[lvl.flagName]) continue
-          const fromRef = nodeToColId[wall.n1]
-            ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] }
-            : { type: 'POINT', x: n1.x, y: n1.y }
-          const toRef = nodeToColId[wall.n2]
-            ? { type: 'COLUMN', columnId: nodeToColId[wall.n2] }
-            : { type: 'POINT', x: n2.x, y: n2.y }
-          result.push({ id: `derived_${wall.id}_${lvl.id}`, endpoints: { from: fromRef, to: toRef }, level: lvl.id, source: 'WALL_DERIVED', sourceWallId: wall.id })
-        }
-      }
-      return result
-    })
-  },
-
-  // Merges EXPLICIT (persisted) + WALL_DERIVED (in-memory) beams into one list.
-  // All BOQ, canvas render, and CSV export consume this — single code path.
-  // Memoized on {beams, derived}.
-  getAllBeams: () => {
-    const { beams } = get()
-    const derived   = get().getDerivedWallBeams()
-    return _allBeamsMemo([beams, derived], () => [...Object.values(beams), ...derived])
-  },
-
-  // Fix 2: Column height = sum of floor heights from baseFloorId through topFloorId,
-  // plus plinth height on the base floor and slab thickness on the top floor.
-  // Single-floor column (base === top): plinth + floor + slab thickness (unchanged behavior).
-  getColumnHeightFt: (column) => {
-    const { projectSettings } = get()
-    const { floors = [], slabSettings } = projectSettings
-    if (floors.length === 0) {
-      // Pre-Stage 0 projects: fall back to legacy heights only.
-      const h = projectSettings.heights
-      return h.plinthHeightFt + h.floorHeightFt + (slabSettings.mainThicknessIn / 12)
-    }
-    const sorted = [...floors].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
-    const baseId = column.baseFloorId ?? sorted[0].id
-    const topId  = column.topFloorId  ?? baseId
-    const baseIdx = sorted.findIndex(f => f.id === baseId)
-    const topIdx  = sorted.findIndex(f => f.id === topId)
-    if (baseIdx === -1 || topIdx === -1) {
-      const h = projectSettings.heights
-      return h.plinthHeightFt + h.floorHeightFt + (slabSettings.mainThicknessIn / 12)
-    }
-    const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
-    let h = sorted[lo].plinthHeightFt || 0
-    for (let i = lo; i <= hi; i++) h += sorted[i].floorHeightFt || 0
-    h += slabSettings.mainThicknessIn / 12
-    return h
-  },
+  getColumnHeightFt: (column) => topoGetColumnHeightFt(get(), column),
 
   // Returns { [columnTypeId]: { count, columnHeightFt, sectionFt2, volFt3, label } }
   // Per-column height (Fix 2) — multi-span columns contribute their full span height.
@@ -1074,26 +1017,16 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Returns { plinth: { totalLenFt, widthIn, depthIn, volFt3 }, lintel: {...}, roof: {...} }
   // null entry for a level means no beams of that level exist.
   getBeamQuantities: () => {
-    const { columns, nodes, projectSettings } = get()
-    const { beamDimensions } = projectSettings
-    const allBeams = get().getAllBeams()
-
-    function endpointPos(ref) {
-      if (ref.type === 'COLUMN') {
-        const col = columns[ref.columnId]
-        if (!col) return null
-        if (col.attachedNodeId) { const nd = nodes[col.attachedNodeId]; return nd ?? null }
-        return { x: col.x, y: col.y }
-      }
-      return { x: ref.x, y: ref.y }
-    }
+    const state = get()
+    const { beamDimensions } = state.projectSettings
+    const allBeams = state.getAllBeams()
 
     const result = Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.id, null]))
     for (const beam of allBeams) {
       const dims = beamDimensions[beam.level]
       if (!dims) continue
-      const from = endpointPos(beam.endpoints.from)
-      const to   = endpointPos(beam.endpoints.to)
+      const from = topoResolveBeamEndpoint(state, beam.endpoints.from)
+      const to   = topoResolveBeamEndpoint(state, beam.endpoints.to)
       if (!from || !to) continue
       const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
       if (!result[beam.level]) result[beam.level] = { totalLenFt: 0, widthIn: dims.widthIn, depthIn: dims.depthIn, volFt3: 0 }
@@ -1268,22 +1201,13 @@ export const createStructuralSlice = (set, get, uid) => ({
     }
 
     // ── Beams: per-instance (explicit + wall-derived), drop excluded ───────
-    const endpointPos = (ref) => {
-      if (ref.type === 'COLUMN') {
-        const col = columns[ref.columnId]
-        if (!col) return null
-        if (col.attachedNodeId) { const nd = nodes[col.attachedNodeId]; return nd ?? null }
-        return { x: col.x, y: col.y }
-      }
-      return { x: ref.x, y: ref.y }
-    }
     let beamFt3 = 0
     for (const b of state.getAllBeams()) {
       if (exBeams.has(b.id)) continue
       const dims = beamDimensions[b.level]
       if (!dims) continue
-      const from = endpointPos(b.endpoints.from)
-      const to   = endpointPos(b.endpoints.to)
+      const from = topoResolveBeamEndpoint(state, b.endpoints.from)
+      const to   = topoResolveBeamEndpoint(state, b.endpoints.to)
       if (!from || !to) continue
       const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
       beamFt3 += lenFt * (dims.widthIn / 12) * (dims.depthIn / 12)

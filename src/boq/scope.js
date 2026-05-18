@@ -27,6 +27,7 @@ import {
 import { getColumnAreaFt2 } from '../lib/columnShapes'
 import { isColumnOnFloor, sortedFloorList } from '../topology/floor.js'
 import { getWallAdjacencyCount as topoGetWallAdjacencyCount, classifyWallBeamFlags as topoClassifyWallBeamFlags } from '../topology/walls.js'
+import { resolveBeamEndpoint as topoResolveBeamEndpoint, getDerivedWallBeams as topoGetDerivedWallBeams, getAllBeams as topoGetAllBeams } from '../topology/beams.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
@@ -100,14 +101,14 @@ export function scopeStateToFloor(state, floorId) {
     return total + Math.hypot(b.x - a.x, b.y - a.y) / 12
   }, 0)
 
-  // Wall-adjacency: scoped state has scoped rooms/walls, so topology helpers
-  // produce floor-scoped counts/classifications when called via the wrapper.
-  // We construct the scoped state shim early so these closures can use it;
-  // see the final return below — the returned object IS the shim, but we
-  // need the shim's rooms/walls fields in scope here. Build a partial shim.
-  const scopedShim = { rooms, walls }
-  const getWallAdjacencyCount = () => topoGetWallAdjacencyCount(scopedShim)
-  const classifyWallBeamFlags = (wallId) => topoClassifyWallBeamFlags(scopedShim, wallId)
+  // Wall-adjacency + beam-flag classification flow through topology against
+  // the scoped state (backfilled below — closures only fire at call time).
+  // The scoped state's rooms/walls references are stable for the lifetime of
+  // the wrapper, so the topology memo cache distinguishes scoped vs live calls
+  // correctly.
+  let scopedStateRef = null
+  const getWallAdjacencyCount = () => topoGetWallAdjacencyCount(scopedStateRef)
+  const classifyWallBeamFlags = (wallId) => topoClassifyWallBeamFlags(scopedStateRef, wallId)
 
   // ── Masonry quantities (scoped walls) ─────────────────────────────────
   const getMaterialQuantities = () => {
@@ -270,45 +271,18 @@ export function scopeStateToFloor(state, floorId) {
   }
   const getFootingQuantities = () => getFoundationQuantities().byColumnTypeInline
 
-  // Wall-derived beams scoped to scoped walls.
-  const getDerivedWallBeams = () => {
-    const nodeToColId = {}
-    for (const col of Object.values(columns)) {
-      if (col.attachedNodeId) nodeToColId[col.attachedNodeId] = col.id
-    }
-    const out = []
-    for (const wall of Object.values(walls)) {
-      if (wall.isVirtual || wall.isPlot) continue
-      const flags = classifyWallBeamFlags(wall.id)
-      const n1 = state.nodes[wall.n1], n2 = state.nodes[wall.n2]
-      if (!n1 || !n2) continue
-      for (const lvl of BEAM_LEVEL_REGISTRY) {
-        if (!flags[lvl.flagName]) continue
-        const fromRef = nodeToColId[wall.n1] ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] } : { type: 'POINT', x: n1.x, y: n1.y }
-        const toRef   = nodeToColId[wall.n2] ? { type: 'COLUMN', columnId: nodeToColId[wall.n2] } : { type: 'POINT', x: n2.x, y: n2.y }
-        out.push({ id: `derived_${wall.id}_${lvl.id}`, endpoints: { from: fromRef, to: toRef }, level: lvl.id, source: 'WALL_DERIVED', sourceWallId: wall.id })
-      }
-    }
-    return out
-  }
-  const getAllBeams = () => [...Object.values(beams), ...getDerivedWallBeams()]
+  // Wall-derived + merged beams via topology, against the scoped state above.
+  const getDerivedWallBeams = () => topoGetDerivedWallBeams(scopedStateRef)
+  const getAllBeams         = () => topoGetAllBeams(scopedStateRef)
 
   const getBeamQuantities = () => {
     const { beamDimensions } = state.projectSettings
-    const endpointPos = (ref) => {
-      if (ref.type === 'COLUMN') {
-        const col = columns[ref.columnId]
-        if (!col) return null
-        if (col.attachedNodeId) { const nd = state.nodes[col.attachedNodeId]; return nd ?? null }
-        return { x: col.x, y: col.y }
-      }
-      return { x: ref.x, y: ref.y }
-    }
     const result = Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.id, null]))
     for (const beam of getAllBeams()) {
       const dims = beamDimensions[beam.level]
       if (!dims) continue
-      const from = endpointPos(beam.endpoints.from), to = endpointPos(beam.endpoints.to)
+      const from = topoResolveBeamEndpoint(scopedStateRef, beam.endpoints.from)
+      const to   = topoResolveBeamEndpoint(scopedStateRef, beam.endpoints.to)
       if (!from || !to) continue
       const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
       if (!result[beam.level]) result[beam.level] = { totalLenFt: 0, widthIn: dims.widthIn, depthIn: dims.depthIn, volFt3: 0 }
@@ -475,22 +449,13 @@ export function scopeStateToFloor(state, floorId) {
     }
 
     // Beams (scoped explicit + scoped wall-derived)
-    const endpointPos = (ref) => {
-      if (ref.type === 'COLUMN') {
-        const col = columns[ref.columnId]
-        if (!col) return null
-        if (col.attachedNodeId) { const nd = state.nodes[col.attachedNodeId]; return nd ?? null }
-        return { x: col.x, y: col.y }
-      }
-      return { x: ref.x, y: ref.y }
-    }
     let beamFt3 = 0
     for (const b of getAllBeams()) {
       if (exBeams.has(b.id)) continue
       const dims = beamDimensions[b.level]
       if (!dims) continue
-      const from = endpointPos(b.endpoints.from)
-      const to   = endpointPos(b.endpoints.to)
+      const from = topoResolveBeamEndpoint(scopedStateRef, b.endpoints.from)
+      const to   = topoResolveBeamEndpoint(scopedStateRef, b.endpoints.to)
       if (!from || !to) continue
       const lenFt = Math.hypot(to.x - from.x, to.y - from.y) / 12
       beamFt3 += lenFt * (dims.widthIn / 12) * (dims.depthIn / 12)
@@ -585,7 +550,7 @@ export function scopeStateToFloor(state, floorId) {
   // Build the scoped state. Spread first so the live state's helpers
   // (projectSettings, nodes, formula helpers, etc.) are inherited; then
   // override with floor-scoped collections and re-implemented selectors.
-  return {
+  const scopedState = {
     ...state,
     walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
     // Per-entity helpers (delegate)
@@ -612,4 +577,8 @@ export function scopeStateToFloor(state, floorId) {
     // Floor scope marker (consumers can check)
     _scopedFloorId: floorId,
   }
+  // Backfill the topology forwarder so the closures above (declared before
+  // scopedState was constructed) can call topology with the scoped collections.
+  scopedStateRef = scopedState
+  return scopedState
 }

@@ -45,6 +45,7 @@ import {
   resolveSlabReinforcementSpecForSlab,
   resolveFootingReinforcementSpec,
 } from '../specs/resolution'
+import { resolveBeamEndpoint } from '../topology/beams.js'
 
 function r2(n) { return Math.round(n * 100) / 100 }
 
@@ -120,24 +121,12 @@ export function computeBBSQuantities(state) {
   const beamDims = projectSettings?.beamDimensions ?? {}
   const allBeams = state.getAllBeams?.() ?? Object.values(beams ?? {})
   const beamLengthsById = (() => {
-    // Reuse beam quantities so we don't duplicate endpoint geometry math.
-    // getBeamQuantities collapses by level, so we re-compute lengths here
-    // — but we can re-use the endpointPos logic via getAllBeams + state.nodes/columns.
+    // Endpoint resolution flows through the canonical topology resolver —
+    // single home for the COLUMN/POINT discriminated-union math.
     const lengths = new Map()
-    const nodesMap = state.nodes || {}
-    const colsMap  = state.columns || {}
-    const endpointPos = (ref) => {
-      if (ref.type === 'COLUMN') {
-        const col = colsMap[ref.columnId]
-        if (!col) return null
-        if (col.attachedNodeId) { const nd = nodesMap[col.attachedNodeId]; return nd ?? null }
-        return { x: col.x, y: col.y }
-      }
-      return { x: ref.x, y: ref.y }
-    }
     for (const b of allBeams) {
-      const from = endpointPos(b.endpoints.from)
-      const to   = endpointPos(b.endpoints.to)
+      const from = resolveBeamEndpoint(state, b.endpoints.from)
+      const to   = resolveBeamEndpoint(state, b.endpoints.to)
       if (!from || !to) continue
       lengths.set(b.id, Math.hypot(to.x - from.x, to.y - from.y) / 12)
     }
