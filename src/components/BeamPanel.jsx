@@ -11,38 +11,30 @@ import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { resolveBeamReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
+import { Panel } from './ui/Panel'
+import { Button } from './ui/Button'
+import { Field } from './ui/Field'
 
-const panelStyle = {
-  position: 'absolute', top: 56, left: 16,
-  background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-  padding: '12px 14px', zIndex: 10, minWidth: 240, fontSize: 13,
-  maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-}
-const rowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' }
-const fieldRow = { marginTop: 8 }
-const label    = { color: '#888', marginBottom: 2, fontSize: 11 }
-const deleteBtn = {
-  background: '#fff0f0', border: '1px solid #e74c3c', borderRadius: 4,
-  color: '#e74c3c', cursor: 'pointer', fontSize: 11, padding: '3px 8px',
-}
+const fieldRow = { marginTop: 'var(--space-2)' }
+const label    = { color: 'var(--color-text-muted)', marginBottom: 2, fontSize: 'var(--text-xs)' }
 
 const SOURCE_COLOR = {
-  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
-  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
-  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
-  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+  INSTANCE:        { bg: 'var(--color-success-bg)', fg: 'var(--color-success)' },
+  CLASS:           { bg: 'var(--color-primary-bg)', fg: 'var(--color-primary)' },
+  PROJECT_DEFAULT: { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' },
+  ESTIMATE:        { bg: 'var(--color-bg-muted)',   fg: 'var(--color-text-muted)' },
 }
 function resBadge(source) {
   const c = SOURCE_COLOR[source] ?? SOURCE_COLOR.ESTIMATE
   return {
-    marginTop: 4, padding: '4px 8px', borderRadius: 4,
-    fontSize: 11, background: c.bg, color: c.fg, lineHeight: 1.3,
+    marginTop: 'var(--space-1)',
+    padding: 'var(--space-1) var(--space-2)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: 'var(--text-xs)',
+    background: c.bg,
+    color: c.fg,
+    lineHeight: 1.3,
   }
-}
-const applyBtn = {
-  marginTop: 6, padding: '4px 10px', fontSize: 11,
-  background: '#fafafa', border: '1px solid #bbb', borderRadius: 4,
-  color: '#444', cursor: 'pointer', width: '100%',
 }
 
 export default function BeamPanel() {
@@ -102,50 +94,57 @@ export default function BeamPanel() {
   }
 
   return (
-    <div style={panelStyle}>
-      <div style={rowStyle}>
-        <strong>Beam</strong>
-        <button style={deleteBtn} onClick={handleDelete}>Delete</button>
+    <Panel
+      title="Beam"
+      onClose={() => selectBeam(null)}
+      width={260}
+      position={{ top: 56, left: 16 }}
+    >
+      <div style={{ marginBottom: 'var(--space-2)' }}>
+        <Button variant="danger" size="sm" onClick={handleDelete}>Delete</Button>
       </div>
 
       <div style={fieldRow}>
         <div style={label}>Class</div>
-        <div>{lvl?.label ?? beamClass}</div>
+        <div style={{ fontSize: 'var(--text-base)' }}>{lvl?.label ?? beamClass}</div>
       </div>
 
       {dims && (
         <div style={fieldRow}>
           <div style={label}>Section</div>
-          <div>{dims.widthIn}″ × {dims.depthIn}″</div>
+          <div style={{ fontSize: 'var(--text-base)' }}>{dims.widthIn}″ × {dims.depthIn}″</div>
         </div>
       )}
 
-      <div style={fieldRow}>
-        <div style={label}>Steel spec (BBS)</div>
+      <Field label="Steel spec (BBS)">
         <select
           value={beam.reinforcementSpecId ?? ''}
           onChange={e => setBeamReinforcementSpec(selectedBeamId, e.target.value || null)}
           onKeyDown={e => e.stopPropagation()}
-          style={{ width: '100%', fontSize: 13 }}
         >
           <option value="">— Inherit —</option>
           {beamSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
         </select>
-        <div style={resBadge(resolved.source)}>
-          <span style={{ fontWeight: 600 }}>{resolved.specLabel}</span>
-          <span style={{ opacity: 0.75 }}> · {humanizeAssignmentSource(resolved.source)}</span>
-        </div>
-        <button
-          style={applyBtn}
+      </Field>
+      <div style={resBadge(resolved.source)}>
+        <span style={{ fontWeight: 'var(--weight-semibold)' }}>{resolved.specLabel}</span>
+        <span style={{ opacity: 0.75 }}> · {humanizeAssignmentSource(resolved.source)}</span>
+      </div>
+      <div style={{ marginTop: 'var(--space-2)' }}>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={handleApplyToMatching}
           title="Copy this beam's spec to all other beams of the same class"
-        >Apply to matching beams</button>
-        {beamSpecs.length === 0 && (
-          <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>
-            Open BBS panel to define beam specs.
-          </div>
-        )}
+        >
+          Apply to matching beams
+        </Button>
       </div>
-    </div>
+      {beamSpecs.length === 0 && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+          Open BBS panel to define beam specs.
+        </div>
+      )}
+    </Panel>
   )
 }

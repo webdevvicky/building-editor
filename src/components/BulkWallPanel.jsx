@@ -1,4 +1,6 @@
 import { useStore } from '../store'
+import { Panel } from './ui/Panel'
+import { Field } from './ui/Field'
 
 export default function BulkWallPanel() {
   const selectedWallIds  = useStore(s => s.selectedWallIds)
@@ -32,55 +34,52 @@ export default function BulkWallPanel() {
     if (t > 0) setBulkWallProp(selectedWallIds, 'thickness', t)
   }
 
-  const row = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }
-  const inputStyle = { width: 60, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13 }
-  const unit = { color: '#999', fontSize: 11 }
-  const checkLabel = (active) => ({ color: active ? '#333' : '#555', fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13 })
+  const checkLabel = (active) => ({
+    color: active ? 'var(--color-text)' : 'var(--color-text-secondary)',
+    fontWeight: active ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+    cursor: 'pointer',
+    fontSize: 'var(--text-sm)',
+  })
+
+  const title = (
+    <div>
+      <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-warning)' }}>
+        {selected.length} walls selected
+      </div>
+      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2, fontWeight: 'var(--weight-regular)' }}>
+        Ctrl+click to add/remove
+      </div>
+    </div>
+  )
 
   return (
-    <div style={{
-      position: 'absolute', top: 56, left: 16,
-      background: '#fff', border: '2px solid #e67e22', borderRadius: 8,
-      padding: '12px 14px', zIndex: 10, minWidth: 230, fontSize: 13,
-    }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div>
-          <span style={{ fontWeight: 700, color: '#e67e22' }}>{selected.length} walls selected</span>
-          <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>Ctrl+click to add/remove</div>
-        </div>
-        <button onClick={cancelAction}
-          style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>
-          ×
-        </button>
-      </div>
-
+    <Panel
+      title={title}
+      onClose={cancelAction}
+      width={260}
+      position={{ top: 56, left: 16 }}
+      className="ui-panel--bulk"
+    >
       {/* Height */}
-      <div style={row}>
-        <label style={{ color: '#555', width: 70 }}>Height</label>
+      <Field label="Height" inline hint="ft">
         <input type="number" defaultValue={uniformHeight} placeholder={heights.length > 1 ? 'mixed' : ''} min={1}
           onBlur={e => applyHeight(e.target.value)}
           onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') applyHeight(e.target.value) }}
-          style={inputStyle}
         />
-        <span style={unit}>ft</span>
-      </div>
+      </Field>
 
       {/* Thickness */}
-      <div style={row}>
-        <label style={{ color: '#555', width: 70 }}>Thickness</label>
+      <Field label="Thickness" inline hint="ft">
         <input type="number" defaultValue={uniformThick} placeholder={thicknesses.length > 1 ? 'mixed' : ''} min={0.1} step={0.1}
           onBlur={e => applyThickness(e.target.value)}
           onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') applyThickness(e.target.value) }}
-          style={inputStyle}
         />
-        <span style={unit}>ft</span>
-      </div>
+      </Field>
 
-      <div style={{ borderTop: '1px solid #eee', margin: '10px 0' }} />
+      <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-3) 0' }} />
 
       {/* Plot boundary */}
-      <div style={{ ...row, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
         <input type="checkbox" id="bulkPlot"
           checked={allPlot}
           ref={el => { if (el) el.indeterminate = anyPlot && !allPlot }}
@@ -91,7 +90,7 @@ export default function BulkWallPanel() {
       </div>
 
       {/* Virtual */}
-      <div style={{ ...row, marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
         <input type="checkbox" id="bulkVirtual"
           checked={allVirtual}
           ref={el => { if (el) el.indeterminate = anyVirtual && !allVirtual }}
@@ -101,9 +100,9 @@ export default function BulkWallPanel() {
         <label htmlFor="bulkVirtual" style={checkLabel(allVirtual)}>Virtual wall (open plan)</label>
       </div>
 
-      <div style={{ marginTop: 10, fontSize: 11, color: '#aaa' }}>
+      <div style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
         Press Esc or click empty canvas to deselect
       </div>
-    </div>
+    </Panel>
   )
 }

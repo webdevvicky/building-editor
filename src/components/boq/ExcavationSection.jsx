@@ -13,7 +13,7 @@ export default function ExcavationSection({ lines, rates, onRateChange, openId, 
   const totalLine = { qty: Math.round(totalFt3 * 100) / 100, unit: 'ft³' }
 
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div className="boq-group">
       <SectionHeader title="Excavation" />
       {lines.map(line => (
         <BoqSubRow key={line.id} line={line} labelOverride={stripPrefix(line)}

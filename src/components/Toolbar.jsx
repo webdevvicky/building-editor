@@ -1,51 +1,38 @@
 import { useRef } from 'react'
+import {
+  Pencil,
+  MousePointer2,
+  Scissors,
+  Hexagon,
+  Columns3,
+  RectangleHorizontal,
+  LayoutGrid,
+  Anchor,
+  Stamp,
+  ArrowDownUp,
+  Droplet,
+  Container,
+  Cylinder,
+  Building2,
+  Ruler,
+  Settings,
+  EyeOff,
+  FolderOpen,
+  Save,
+  Upload,
+  Download,
+  Undo2,
+  Redo2,
+} from 'lucide-react'
 import { useStore } from '../store'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
+import { Button } from './ui/Button'
+import './Toolbar.css'
 
-const TOOLS = [
-  { id: 'draw',   label: '✏ Draw' },
-  { id: 'select', label: '↖ Select' },
-  { id: 'split',  label: '✂ Split' },
-  { id: 'room',   label: '⬡ Room' },
-  { id: 'stairs',        label: '⬜ Stairs' },
-  { id: 'lift',          label: '⬛ Lift' },
-  { id: 'sump',          label: '⬜ Sump' },
-  { id: 'overhead_tank', label: '⬜ OHT' },
-  { id: 'septic_tank',   label: '⬜ Septic' },
-  { id: 'column',        label: '⬛ Column' },
-  { id: 'beam',          label: '— Beam' },
-  { id: 'slabs',         label: '▦ Slabs' },
-  { id: 'foundations',   label: '▭ Foundations' },
-  { id: 'floors',        label: '▤ Floors' },
-  { id: 'bbs',           label: '∥ BBS' },
-  { id: 'settings',      label: '⚙ Settings' },
-]
-
-const btn = (active, color) => ({
-  padding: '6px 14px',
-  borderRadius: 6,
-  border: `1px solid ${color || '#ccc'}`,
-  background: active ? (color || '#333') : '#fff',
-  color: active ? '#fff' : (color || '#333'),
-  cursor: 'pointer',
-  fontWeight: 500,
-  fontSize: 13,
-})
-
-const actionBtn = {
-  padding: '6px 14px',
-  borderRadius: 6,
-  border: '1px solid #ccc',
-  background: '#fff',
-  color: '#333',
-  cursor: 'pointer',
-  fontWeight: 500,
-  fontSize: 13,
-}
-
-const divider = <div style={{ width: 1, background: '#ddd', margin: '0 4px' }} />
+const ICON_SIZE = 14
+const ICON_STROKE = 2
 
 export default function Toolbar() {
   const activeTool          = useStore(s => s.activeTool)
@@ -54,10 +41,6 @@ export default function Toolbar() {
   const unit                = useStore(s => s.unit)
   const history             = useStore(s => s.history)
   const future              = useStore(s => s.future)
-  const nodes               = useStore(s => s.nodes)
-  const walls               = useStore(s => s.walls)
-  const rooms               = useStore(s => s.rooms)
-  const stamps              = useStore(s => s.stamps)
   const setTool             = useStore(s => s.setTool)
   const toggleDrawVirtual   = useStore(s => s.toggleDrawVirtual)
   const toggleShowDimensions = useStore(s => s.toggleShowDimensions)
@@ -68,7 +51,7 @@ export default function Toolbar() {
 
   const fileInputRef = useRef(null)
 
-  function handleSave() {
+  function handleExportJson() {
     const s = useStore.getState()
     const data = JSON.stringify({
       version: 6, unit: 'inch',
@@ -98,81 +81,170 @@ export default function Toolbar() {
     e.target.value = ''
   }
 
+  function handleSaveProject() {
+    const id = getCurrentProjectId()
+    if (!id) { setTool('projects'); return }
+    const s = useStore.getState()
+    const ok = saveCurrent(id, {
+      version: 7, nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
+      columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
+      foundations: s.foundations, projectSettings: s.projectSettings,
+    })
+    if (ok === false) toast.error('Could not save — storage quota exceeded.')
+    else toast.success('Project saved.')
+  }
+
+  // Helper: tool button (icon-only, primary when active, ghost otherwise)
+  const toolBtn = (toolId, Icon, title) => (
+    <Button
+      size="sm"
+      variant={activeTool === toolId ? 'primary' : 'ghost'}
+      title={title}
+      onClick={() => setTool(toolId)}
+    >
+      <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+    </Button>
+  )
+
   return (
-    <div style={{
-      position: 'absolute', top: 12, left: 12,
-      display: 'flex', gap: 6, zIndex: 10, flexWrap: 'wrap',
-    }}>
-      {/* Undo / Redo */}
-      <button onClick={undo} disabled={!history.length} title="Undo (Ctrl+Z)"
-        style={{ ...actionBtn, opacity: history.length ? 1 : 0.4, padding: '6px 10px' }}>↩</button>
-      <button onClick={redo} disabled={!future.length} title="Redo (Ctrl+Y)"
-        style={{ ...actionBtn, opacity: future.length ? 1 : 0.4, padding: '6px 10px' }}>↪</button>
-
-      {divider}
-
-      {/* Tool buttons */}
-      {TOOLS.map(t => (
-        <button key={t.id} onClick={() => setTool(t.id)} style={btn(activeTool === t.id)}>
-          {t.label}
-        </button>
-      ))}
-
-      {/* Virtual toggle — only when Draw is active */}
-      {activeTool === 'draw' && <>
-        {divider}
-        <button onClick={toggleDrawVirtual} title="Draw open-plan boundary lines (excluded from BOQ)"
-          style={{ ...btn(drawVirtual, '#888'), border: '1px dashed #999' }}>
-          ┅ Virtual
-        </button>
-      </>}
-
-      {divider}
-
-      {/* Dimensions toggle */}
-      <button onClick={toggleShowDimensions} title="Show/hide wall dimensions"
-        style={btn(showDimensions, '#4a90e2')}>
-        📐 Dims
-      </button>
-
-      {/* Unit toggle */}
-      <div style={{ display: 'flex', border: '1px solid #ccc', borderRadius: 6, overflow: 'hidden' }}>
-        <button onClick={() => setUnit('ft')}
-          style={{ padding: '6px 10px', background: unit === 'ft' ? '#333' : '#fff',
-            color: unit === 'ft' ? '#fff' : '#333', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}>
-          ft
-        </button>
-        <button onClick={() => setUnit('m')}
-          style={{ padding: '6px 10px', background: unit === 'm' ? '#333' : '#fff',
-            color: unit === 'm' ? '#fff' : '#333', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500,
-            borderLeft: '1px solid #ccc' }}>
-          m
-        </button>
+    <div className="toolbar">
+      {/* Cluster 1 — Draw */}
+      <div className="toolbar-cluster">
+        {toolBtn('draw',   Pencil,         'Draw walls (D)')}
+        {toolBtn('select', MousePointer2,  'Select (S)')}
+        {toolBtn('split',  Scissors,       'Split wall')}
+        {toolBtn('room',   Hexagon,        'Room (R)')}
       </div>
 
-      {divider}
+      <div className="toolbar-divider" />
 
-      {/* Projects (Phase 2.0) — multi-project localStorage with autosave */}
-      <button style={actionBtn} onClick={() => setTool('projects')} title="Open project list">📁 Projects</button>
-      <button style={actionBtn} title="Save current project (autosaved every 30s)"
-        onClick={() => {
-          const id = getCurrentProjectId()
-          if (!id) { setTool('projects'); return }
-          const s = useStore.getState()
-          const ok = saveCurrent(id, {
-            version: 7, nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
-            columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases,
-            foundations: s.foundations, projectSettings: s.projectSettings,
-          })
-          if (ok === false) toast.error('Could not save — storage quota exceeded.')
-          else toast.success('Project saved.')
-        }}
-      >💾 Save</button>
+      {/* Cluster 2 — Structural & Civil */}
+      <div className="toolbar-cluster">
+        {toolBtn('column',        Columns3,            'Column')}
+        {toolBtn('beam',          RectangleHorizontal, 'Beam')}
+        {toolBtn('slabs',         LayoutGrid,          'Slabs')}
+        {toolBtn('foundations',   Anchor,              'Foundations')}
+        {toolBtn('stairs',        Stamp,               'Stairs')}
+        {toolBtn('lift',          ArrowDownUp,         'Lift')}
+        {toolBtn('sump',          Droplet,             'Sump')}
+        {toolBtn('overhead_tank', Container,           'Overhead tank')}
+        {toolBtn('septic_tank',   Cylinder,            'Septic tank')}
+      </div>
 
-      {/* Legacy JSON Save / Load — retained for portability */}
-      <button style={actionBtn} onClick={handleSave} title="Download project as JSON">⇩ JSON</button>
-      <button style={actionBtn} onClick={() => fileInputRef.current.click()} title="Load project from JSON">⇪ JSON</button>
-      <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleLoadFile}/>
+      <div className="toolbar-divider" />
+
+      {/* Cluster 3 — View & Settings */}
+      <div className="toolbar-cluster">
+        {toolBtn('floors',   Building2, 'Floors')}
+        {toolBtn('bbs',      Ruler,     'BBS')}
+        {toolBtn('settings', Settings,  'Settings')}
+
+        <Button
+          size="sm"
+          variant={showDimensions ? 'primary' : 'ghost'}
+          title="Show/hide wall dimensions"
+          onClick={toggleShowDimensions}
+        >
+          <Ruler size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant={drawVirtual ? 'primary' : 'ghost'}
+          title="Draw open-plan boundary lines (excluded from BOQ)"
+          onClick={toggleDrawVirtual}
+        >
+          <EyeOff size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <div className="toolbar-segmented">
+          <Button
+            size="sm"
+            variant={unit === 'ft' ? 'primary' : 'ghost'}
+            title="Display units in feet"
+            onClick={() => setUnit('ft')}
+          >
+            ft
+          </Button>
+          <Button
+            size="sm"
+            variant={unit === 'm' ? 'primary' : 'ghost'}
+            title="Display units in metres"
+            onClick={() => setUnit('m')}
+          >
+            m
+          </Button>
+        </div>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      {/* Cluster 4 — Project */}
+      <div className="toolbar-cluster">
+        <Button
+          size="sm"
+          variant={activeTool === 'projects' ? 'primary' : 'ghost'}
+          title="Open project list"
+          onClick={() => setTool('projects')}
+        >
+          <FolderOpen size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          title="Save project (Ctrl+S)"
+          onClick={handleSaveProject}
+        >
+          <Save size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          title="Import project from JSON"
+          onClick={() => fileInputRef.current.click()}
+        >
+          <Upload size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          title="Export project as JSON"
+          onClick={handleExportJson}
+        >
+          <Download size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!history.length}
+          title="Undo (Ctrl+Z)"
+          onClick={undo}
+        >
+          <Undo2 size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!future.length}
+          title="Redo (Ctrl+Y)"
+          onClick={redo}
+        >
+          <Redo2 size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+        </Button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          style={{ display: 'none' }}
+          onChange={handleLoadFile}
+        />
+      </div>
     </div>
   )
 }

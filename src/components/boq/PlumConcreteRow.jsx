@@ -6,7 +6,7 @@ export default function PlumConcreteRow({ lines, rates, onRateChange, openId, on
   if (!lines || lines.length === 0) return null
 
   return (
-    <div style={{ marginBottom: 8 }}>
+    <div className="boq-group">
       {lines.map(line => (
         <BoqRow key={line.id} line={line}
           rates={rates} onRateChange={onRateChange}

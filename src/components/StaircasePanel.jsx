@@ -1,30 +1,18 @@
 import { useStore } from '../store'
-
-const panelStyle = {
-  position: 'absolute', top: 56, left: 16,
-  background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-  padding: '12px 14px', zIndex: 10, minWidth: 220, fontSize: 13,
-  maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-}
-
-const fieldRow = { marginTop: 8 }
-const label = { color: '#888', marginBottom: 2, fontSize: 11 }
-
-const inputStyle = { width: '100%', fontSize: 13, boxSizing: 'border-box' }
+import { Panel } from './ui/Panel'
+import { Field } from './ui/Field'
 
 function NumField({ fieldLabel, value, fieldKey, min, onUpdate }) {
   return (
-    <div style={fieldRow}>
-      <div style={label}>{fieldLabel}</div>
+    <Field label={fieldLabel}>
       <input
         type="number"
-        style={inputStyle}
         value={value}
         min={min}
         onKeyDown={e => e.stopPropagation()}
         onChange={e => onUpdate({ [fieldKey]: parseFloat(e.target.value) })}
       />
-    </div>
+    </Field>
   )
 }
 
@@ -34,6 +22,7 @@ export default function StaircasePanel() {
   const staircases      = useStore(s => s.staircases)
   const updateStaircase = useStore(s => s.updateStaircase)
   const projectSettings = useStore(s => s.projectSettings)
+  const selectStamp     = useStore(s => s.selectStamp)
 
   if (!selectedStampId) return null
   if (stamps[selectedStampId]?.type !== 'stairs') return null
@@ -42,10 +31,14 @@ export default function StaircasePanel() {
 
   if (!sc) {
     return (
-      <div style={panelStyle}>
-        <strong>Staircase Details</strong>
-        <div style={{ marginTop: 8, color: '#999' }}>No staircase data</div>
-      </div>
+      <Panel
+        title="Staircase Details"
+        onClose={() => selectStamp(null)}
+        width={260}
+        position={{ top: 56, left: 16 }}
+      >
+        <div style={{ color: 'var(--color-text-muted)' }}>No staircase data</div>
+      </Panel>
     )
   }
 
@@ -60,47 +53,44 @@ export default function StaircasePanel() {
   const isMultiFloor = floors.length > 1
 
   return (
-    <div style={panelStyle}>
-      <strong>Staircase Details</strong>
-
-      <div style={fieldRow}>
-        <div style={label}>Type</div>
+    <Panel
+      title="Staircase Details"
+      onClose={() => selectStamp(null)}
+      width={260}
+      position={{ top: 56, left: 16 }}
+    >
+      <Field label="Type">
         <select
           value={sc.type}
-          style={{ width: '100%', fontSize: 13 }}
           onKeyDown={e => e.stopPropagation()}
           onChange={e => update({ type: e.target.value })}
         >
           <option value="DOG_LEGGED">Dog-Legged (2 flights + landing)</option>
           <option value="STRAIGHT">Straight</option>
         </select>
-      </div>
+      </Field>
 
       {/* From / To floor pickers — Phase 1.6d schema slot; UI only renders meaningfully when multi-floor. */}
       {isMultiFloor && (
         <>
-          <div style={fieldRow}>
-            <div style={label}>From floor</div>
+          <Field label="From floor">
             <select
               value={sc.fromFloorId ?? floors[0]?.id}
-              style={{ width: '100%', fontSize: 13 }}
               onKeyDown={e => e.stopPropagation()}
               onChange={e => update({ fromFloorId: e.target.value })}
             >
               {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
-          </div>
-          <div style={fieldRow}>
-            <div style={label}>To floor</div>
+          </Field>
+          <Field label="To floor">
             <select
               value={sc.toFloorId ?? floors[0]?.id}
-              style={{ width: '100%', fontSize: 13 }}
               onKeyDown={e => e.stopPropagation()}
               onChange={e => update({ toFloorId: e.target.value })}
             >
               {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
-          </div>
+          </Field>
         </>
       )}
 
@@ -114,16 +104,22 @@ export default function StaircasePanel() {
       <NumField fieldLabel="Flight width (ft)"   fieldKey="flightWidthFt"   value={sc.flightWidthFt}   min={1}   onUpdate={update} />
 
       {/* Derived metrics — verifies dog-legged formula at a glance */}
-      <div style={{ ...fieldRow, padding: '8px', background: '#f8f8f8', borderRadius: 4, fontSize: 11 }}>
-        <div style={{ color: '#555' }}>Total steps: <strong>{totalSteps}</strong></div>
-        <div style={{ color: '#555' }}>Total rise: <strong>{Math.round(totalRiseFt * 100) / 100} ft</strong></div>
-        <div style={{ color: '#555' }}>Total run: <strong>{Math.round(totalRunFt * 100) / 100} ft</strong></div>
+      <div style={{
+        marginTop: 'var(--space-2)',
+        padding: 'var(--space-2)',
+        background: 'var(--color-bg-muted)',
+        borderRadius: 'var(--radius-sm)',
+        fontSize: 'var(--text-xs)',
+      }}>
+        <div style={{ color: 'var(--color-text-secondary)' }}>Total steps: <strong>{totalSteps}</strong></div>
+        <div style={{ color: 'var(--color-text-secondary)' }}>Total rise: <strong>{Math.round(totalRiseFt * 100) / 100} ft</strong></div>
+        <div style={{ color: 'var(--color-text-secondary)' }}>Total run: <strong>{Math.round(totalRunFt * 100) / 100} ft</strong></div>
         {sc.type === 'DOG_LEGGED' && (
-          <div style={{ color: '#888', marginTop: 4, fontSize: 10 }}>
+          <div style={{ color: 'var(--color-text-muted)', marginTop: 'var(--space-1)', fontSize: 'var(--text-xs)' }}>
             Dog-legged: 2 flights with mid-landing; volume = waist slab (inclined) + landings.
           </div>
         )}
       </div>
-    </div>
+    </Panel>
   )
 }

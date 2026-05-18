@@ -1,85 +1,92 @@
 import { useStore } from '../store'
 import { resolveSlabReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
-
-const overlay = {
-  position: 'fixed', top: '50%', left: '50%',
-  transform: 'translate(-50%, -50%)', zIndex: 100,
-  width: 420, background: '#fff', borderRadius: 8,
-  padding: 20, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-  maxHeight: '80vh', overflowY: 'auto', fontSize: 13,
-}
-
-const headerRow = {
-  display: 'flex', justifyContent: 'space-between',
-  alignItems: 'center', marginBottom: 14,
-}
-
-const closeBtn = {
-  background: 'none', border: 'none', fontSize: 18,
-  cursor: 'pointer', color: '#555', lineHeight: 1, padding: '0 4px',
-}
+import { Modal } from './ui/Modal.jsx'
+import { Button } from './ui/Button.jsx'
 
 const sectionHead = {
-  fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-  color: '#aaa', letterSpacing: 0.5, marginBottom: 6, marginTop: 14,
+  fontSize: 'var(--text-xs)',
+  fontWeight: 'var(--weight-bold)',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-muted)',
+  letterSpacing: 0.5,
+  marginBottom: 'var(--space-2)',
+  marginTop: 'var(--space-4)',
 }
 
 const slabCard = {
-  border: '1px solid #e0e0e0', borderRadius: 6,
-  padding: '10px 12px', marginBottom: 10,
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-md)',
+  padding: 'var(--space-3) var(--space-3)',
+  marginBottom: 'var(--space-3)',
+  background: 'var(--color-surface)',
 }
 
 const inlineRow = {
-  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-2)',
+  marginBottom: 'var(--space-2)',
 }
 
 const chip = {
-  display: 'inline-flex', alignItems: 'center', gap: 4,
-  padding: '2px 8px', borderRadius: 12, fontSize: 11,
-  marginRight: 4, marginBottom: 4,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 'var(--space-1)',
+  padding: '2px var(--space-2)',
+  borderRadius: 'var(--radius-full)',
+  fontSize: 'var(--text-xs)',
+  fontWeight: 'var(--weight-medium)',
+  marginRight: 'var(--space-1)',
+  marginBottom: 'var(--space-1)',
 }
 
-// Supported slab types with BOQ calculations. BALCONY and TERRACE removed — they had
-// no quantity calculation path and produced silent zero output. Add back when a proper
-// calculation pipeline exists for them.
 const TYPE_COLORS = {
-  MAIN:   { background: '#e8f5e9', color: '#2e7d32' },
-  SUNKEN: { background: '#e3f2fd', color: '#1565c0' },
+  MAIN:   { background: 'var(--color-success-bg)', color: 'var(--color-success)' },
+  SUNKEN: { background: 'var(--color-primary-bg)', color: 'var(--color-primary)' },
 }
 
-const numInput = { width: 60, fontSize: 13 }
-
-const addBtn = {
-  marginTop: 12, padding: '6px 14px', fontSize: 12,
-  background: '#f5f5f5', border: '1px solid #ccc',
-  borderRadius: 4, cursor: 'pointer',
+const numInput = {
+  width: 60,
+  fontSize: 'var(--text-base)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
 }
 
-const assignSelect = { fontSize: 12, marginLeft: 4 }
+const labelStyle = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }
+
+const selectStyle = {
+  fontSize: 'var(--text-sm)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
 
 const SLAB_SOURCE_COLOR = {
-  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
-  TYPE:            { bg: '#e3f2fd', fg: '#1565c0' },
-  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
-  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
-  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+  INSTANCE:        { bg: 'var(--color-success-bg)', fg: 'var(--color-success)' },
+  TYPE:            { bg: 'var(--color-primary-bg)', fg: 'var(--color-primary)' },
+  CLASS:           { bg: 'var(--color-primary-bg)', fg: 'var(--color-primary)' },
+  PROJECT_DEFAULT: { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' },
+  ESTIMATE:        { bg: 'var(--color-bg-muted)',   fg: 'var(--color-text-muted)' },
 }
 function slabResBadge(source) {
   const c = SLAB_SOURCE_COLOR[source] ?? SLAB_SOURCE_COLOR.ESTIMATE
-  return { marginTop: 2, padding: '3px 7px', borderRadius: 4, fontSize: 10,
-           background: c.bg, color: c.fg, display: 'inline-block', lineHeight: 1.3 }
-}
-const slabApplyBtn = {
-  marginTop: 4, padding: '2px 8px', fontSize: 10,
-  background: '#fafafa', border: '1px solid #bbb', borderRadius: 3,
-  color: '#444', cursor: 'pointer',
-}
-
-const delBtn = {
-  background: '#fff0f0', border: '1px solid #e74c3c',
-  borderRadius: 4, color: '#e74c3c', cursor: 'pointer',
-  fontSize: 11, padding: '2px 7px', marginLeft: 'auto',
+  return {
+    marginTop: 'var(--space-1)',
+    padding: '3px var(--space-2)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: 'var(--text-xs)',
+    background: c.bg,
+    color: c.fg,
+    display: 'inline-block',
+    lineHeight: 1.3,
+    fontWeight: 'var(--weight-medium)',
+  }
 }
 
 export default function SlabPanel() {
@@ -97,7 +104,8 @@ export default function SlabPanel() {
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
   const projectSettings = useStore(s => s.projectSettings)
 
-  if (activeTool !== 'slabs') return null
+  const open = activeTool === 'slabs'
+  const onClose = () => setTool('select')
 
   const slabList = Object.values(slabs)
   const mainSlab = slabList.find(s => s.type === 'MAIN')
@@ -107,20 +115,26 @@ export default function SlabPanel() {
   const unassigned  = validIds.filter(id => !assignedIds.has(id))
 
   return (
-    <div style={overlay}>
-      <div style={headerRow}>
-        <strong style={{ fontSize: 15 }}>Slab Management</strong>
-        <button style={closeBtn} onClick={() => setTool('select')}>×</button>
-      </div>
-
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Slab Management"
+      width={520}
+      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+    >
       {slabList.length === 0 ? (
         <div>
-          <div style={{ color: '#666', marginBottom: 12 }}>
+          <div
+            style={{
+              color: 'var(--color-text-secondary)',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
             No slabs configured. Click below to auto-initialize from room types.
           </div>
-          <button style={{ ...addBtn, background: '#e8f5e9', borderColor: '#81c784' }} onClick={autoInitSlabs}>
+          <Button variant="primary" size="sm" onClick={autoInitSlabs}>
             Auto-Init Slabs
-          </button>
+          </Button>
         </div>
       ) : (
         slabList.map(slab => {
@@ -130,14 +144,20 @@ export default function SlabPanel() {
             <div key={slab.id} style={slabCard}>
               <div style={inlineRow}>
                 <span style={{ ...chip, ...badge }}>{slab.type}</span>
-                <span style={{ color: '#888', fontSize: 11 }}>×{slab.thicknessIn} in</span>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
+                  ×{slab.thicknessIn} in
+                </span>
                 {canDelete && (
-                  <button style={delBtn} onClick={() => deleteSlab(slab.id)}>Delete</button>
+                  <div style={{ marginLeft: 'auto' }}>
+                    <Button variant="danger" size="sm" onClick={() => deleteSlab(slab.id)}>
+                      Delete
+                    </Button>
+                  </div>
                 )}
               </div>
 
               <div style={inlineRow}>
-                <label style={{ fontSize: 11, color: '#888' }}>Thickness (in)</label>
+                <label style={labelStyle}>Thickness (in)</label>
                 <input
                   type="number" min={1} style={numInput}
                   value={slab.thicknessIn}
@@ -146,7 +166,9 @@ export default function SlabPanel() {
                 />
                 {slab.type === 'SUNKEN' && (
                   <>
-                    <label style={{ fontSize: 11, color: '#888', marginLeft: 8 }}>Sink depth (in)</label>
+                    <label style={{ ...labelStyle, marginLeft: 'var(--space-2)' }}>
+                      Sink depth (in)
+                    </label>
                     <input
                       type="number" min={0} style={numInput}
                       value={slab.sinkDepthIn}
@@ -187,22 +209,26 @@ export default function SlabPanel() {
                   })
                 }
                 return (
-                  <div style={{ marginBottom: 6 }}>
+                  <div style={{ marginBottom: 'var(--space-2)' }}>
                     <div style={inlineRow}>
-                      <label style={{ fontSize: 11, color: '#888' }}>Steel spec</label>
+                      <label style={labelStyle}>Steel spec</label>
                       <select
                         value={slab.reinforcementSpecId ?? ''}
                         onKeyDown={e => e.stopPropagation()}
                         onChange={e => setSlabReinforcementSpec(slab.id, e.target.value || null)}
-                        style={{ fontSize: 12 }}
+                        style={selectStyle}
                       >
                         <option value="">— Inherit —</option>
                         {slabSpecs.map(sp => <option key={sp.id} value={sp.id}>{sp.label}</option>)}
                       </select>
-                      <button style={slabApplyBtn} onClick={handleApply}
-                              title="Copy this spec to all other slabs with the same role">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleApply}
+                        title="Copy this spec to all other slabs with the same role"
+                      >
                         Apply to matching
-                      </button>
+                      </Button>
                     </div>
                     <div style={slabResBadge(resolved.source)}>
                       {resolved.specLabel} · {humanizeAssignmentSource(resolved.source)}
@@ -213,25 +239,61 @@ export default function SlabPanel() {
 
               {/* Role badge — Fix 3 */}
               {slab.role && (
-                <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>
-                  Role: <strong style={{ color: '#555' }}>{slab.role}</strong>
+                <div
+                  style={{
+                    fontSize: 'var(--text-xs)',
+                    color: 'var(--color-text-muted)',
+                    marginBottom: 'var(--space-1)',
+                  }}
+                >
+                  Role:{' '}
+                  <strong style={{ color: 'var(--color-text-secondary)' }}>{slab.role}</strong>
                 </div>
               )}
 
               {slab.roomIds.length > 0 && (
-                <div style={{ marginTop: 4 }}>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Rooms</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                <div style={{ marginTop: 'var(--space-1)' }}>
+                  <div
+                    style={{
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--color-text-muted)',
+                      marginBottom: 'var(--space-1)',
+                    }}
+                  >
+                    Rooms
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
                     {slab.roomIds.map(rid => {
                       const roomName = rooms[rid]?.name ?? rid
                       const otherSlabs = slabList.filter(s => s.id !== slab.id)
                       return (
-                        <div key={rid} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                          <span style={{ ...chip, background: '#f5f5f5', color: '#333' }}>
+                        <div
+                          key={rid}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            marginBottom: 'var(--space-1)',
+                          }}
+                        >
+                          <span
+                            style={{
+                              ...chip,
+                              background: 'var(--color-bg-muted)',
+                              color: 'var(--color-text)',
+                            }}
+                          >
                             {roomName}
                             {mainSlab && mainSlab.id !== slab.id && (
                               <button
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#e74c3c', fontSize: 11, padding: 0, lineHeight: 1 }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--color-error)',
+                                  fontSize: 'var(--text-xs)',
+                                  padding: 0,
+                                  lineHeight: 1,
+                                }}
                                 title="Move back to MAIN slab"
                                 onClick={() => assignRoomToSlab(rid, mainSlab.id)}
                               >×</button>
@@ -239,7 +301,7 @@ export default function SlabPanel() {
                           </span>
                           {otherSlabs.length > 0 && (
                             <select
-                              style={assignSelect}
+                              style={{ ...selectStyle, marginLeft: 'var(--space-1)' }}
                               value=""
                               onKeyDown={e => e.stopPropagation()}
                               onChange={e => { if (e.target.value) assignRoomToSlab(rid, e.target.value) }}
@@ -262,24 +324,24 @@ export default function SlabPanel() {
       )}
 
       {slabList.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-          <button style={addBtn} onClick={() => addSlab('MAIN', [], 5, 0)}>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+          <Button variant="secondary" size="sm" onClick={() => addSlab('MAIN', [], 5, 0)}>
             + Main slab
-          </button>
-          <button style={addBtn} onClick={() => addSlab('SUNKEN', [], 5, 4)}>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => addSlab('SUNKEN', [], 5, 4)}>
             + Sunken slab
-          </button>
+          </Button>
         </div>
       )}
 
       {unassigned.length > 0 && (
-        <div style={{ marginTop: 14 }}>
+        <div style={{ marginTop: 'var(--space-4)' }}>
           <div style={sectionHead}>Unassigned rooms</div>
           {unassigned.map(rid => (
-            <div key={rid} style={{ ...inlineRow, marginBottom: 6 }}>
+            <div key={rid} style={{ ...inlineRow, marginBottom: 'var(--space-2)' }}>
               <span style={{ flex: 1 }}>{rooms[rid]?.name ?? rid}</span>
               <select
-                style={{ fontSize: 12 }}
+                style={selectStyle}
                 value=""
                 onKeyDown={e => e.stopPropagation()}
                 onChange={e => { if (e.target.value) assignRoomToSlab(rid, e.target.value) }}
@@ -293,6 +355,6 @@ export default function SlabPanel() {
           ))}
         </div>
       )}
-    </div>
+    </Modal>
   )
 }

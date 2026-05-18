@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { Button } from './ui/Button.jsx'
 
 const wrap = {
   position: 'absolute',
@@ -8,40 +9,29 @@ const wrap = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  gap: 4,
-  zIndex: 10,
+  gap: 'var(--space-1)',
+  zIndex: 'var(--z-panel)',
   pointerEvents: 'none',
 }
 
 const row = {
   display: 'flex',
-  gap: 4,
-  background: '#fff',
-  padding: 4,
-  borderRadius: 8,
-  border: '1px solid #ddd',
-  boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+  gap: 'var(--space-1)',
+  background: 'var(--color-surface)',
+  padding: 'var(--space-1)',
+  borderRadius: 'var(--radius-full)',
+  border: '1px solid var(--color-border)',
+  boxShadow: 'var(--shadow-sm)',
   pointerEvents: 'auto',
 }
 
-const tabBtn = (active) => ({
-  padding: '4px 10px',
-  borderRadius: 6,
-  border: '1px solid #ccc',
-  background: active ? '#333' : '#fff',
-  color: active ? '#fff' : '#333',
-  cursor: 'pointer',
-  fontWeight: 500,
-  fontSize: 12,
-  lineHeight: 1.2,
-})
-
 const caption = {
-  fontSize: 10,
-  color: '#888',
-  background: 'rgba(255,255,255,0.85)',
-  padding: '1px 6px',
-  borderRadius: 4,
+  fontSize: 'var(--text-xs)',
+  color: 'var(--color-text-muted)',
+  background: 'var(--color-surface)',
+  padding: '1px var(--space-2)',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--color-border)',
 }
 
 export default function FloorSwitcher() {
@@ -61,16 +51,20 @@ export default function FloorSwitcher() {
   return (
     <div style={wrap}>
       <div style={row}>
-        {floors.map(f => (
-          <button
-            key={f.id}
-            onClick={() => setCurrentFloorId(f.id)}
-            style={tabBtn(f.id === currentFloorId)}
-            title={`Switch to ${f.label}`}
-          >
-            {f.label}
-          </button>
-        ))}
+        {floors.map(f => {
+          const active = f.id === currentFloorId
+          return (
+            <Button
+              key={f.id}
+              variant={active ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setCurrentFloorId(f.id)}
+              title={`Switch to ${f.label}`}
+            >
+              {f.label}
+            </Button>
+          )
+        })}
       </div>
       <div style={caption}>Floor {displayIdx} / {floors.length}</div>
     </div>

@@ -25,9 +25,11 @@ import { runValidation } from '../validation/engine'
 import { exportBoqPdf } from '../export/pdf'
 import { exportBoqExcel } from '../export/excel'
 import { toast } from './ui/Toast'
+import { Button } from './ui/Button'
 import {
-  BoqRow, BoqSubRow, SectionHeader, SubSectionHeader, fmtLineQty,
+  BoqRow, BoqSubRow, SectionHeader, SubSectionHeader, InfoIcon, fmtLineQty,
 } from './boq/BoqRow'
+import './boq/boq.css'
 
 // ── module-level helpers ──────────────────────────────────────────────────────
 
@@ -142,82 +144,41 @@ function getFormulaData(id, state) {
   return null
 }
 
-// ── display components ────────────────────────────────────────────────────────
+// ── small presentational helpers ─────────────────────────────────────────────
 
-const COL = '1fr 68px 88px 70px'
-const GAP = 3
-
-function Row({ label, value, infoId, openId, onInfoClick }) {
+function InfoRow({ label, value, infoId, openId, onInfoClick }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ color: '#555' }}>{label}</span>
+    <div className="boq-info-row">
+      <div className="boq-info-label">
+        <span>{label}</span>
         {infoId && <InfoIcon id={infoId} openId={openId} onInfoClick={onInfoClick} />}
       </div>
-      <span style={{ fontWeight: 600 }}>{value}</span>
+      <span className="boq-info-value">{value}</span>
     </div>
-  )
-}
-
-function InfoIcon({ id, openId, onInfoClick }) {
-  return (
-    <button
-      data-info-btn=""
-      onClick={e => onInfoClick(id, e)}
-      title="Show formula"
-      style={{
-        background: 'none', border: 'none', cursor: 'pointer',
-        fontSize: 12, color: openId === id ? '#555' : '#bbb',
-        padding: '0 1px', lineHeight: 1, flexShrink: 0,
-      }}
-    >ⓘ</button>
   )
 }
 
 function FormulaPopover({ data, pos, popoverRef }) {
   if (!data || !pos) return null
   return (
-    <div ref={popoverRef} style={{
-      position: 'fixed',
-      top: pos.top,
-      left: Math.max(8, pos.left),
-      width: 240,
-      background: '#fff',
-      border: '1px solid #ddd',
-      borderRadius: 6,
-      padding: '10px 12px',
-      zIndex: 200,
-      boxShadow: '0 2px 14px rgba(0,0,0,0.16)',
-      fontSize: 11,
-      lineHeight: 1.5,
+    <div ref={popoverRef} className="boq-popover" style={{
+      top: pos.top, left: Math.max(8, pos.left),
     }}>
-      <div style={{ fontWeight: 700, color: '#333', marginBottom: 6, fontSize: 12 }}>{data.title}</div>
-      <div style={{ borderTop: '1px solid #f0f0f0', marginBottom: 6 }} />
+      <div className="boq-popover-title">{data.title}</div>
+      <div className="boq-popover-divider" />
       {data.steps.map((step, i) => (
-        <div key={i} style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          gap: 8,
-          marginBottom: 3,
-          fontWeight: step.bold ? 700 : 400,
-          ...(step.bold ? { borderTop: '1px solid #f0f0f0', paddingTop: 4, marginTop: 4 } : {}),
-        }}>
-          <span style={{ color: step.bold ? '#333' : '#666', flex: 1 }}>{step.label}</span>
-          <span style={{ color: step.bold ? '#111' : '#444', whiteSpace: 'nowrap' }}>{step.value}</span>
+        <div key={i} className={`boq-popover-step${step.bold ? ' boq-popover-step--bold' : ''}`}>
+          <span className="boq-popover-step-label">{step.label}</span>
+          <span className="boq-popover-step-value">{step.value}</span>
         </div>
       ))}
-      {data.note && (
-        <div style={{
-          marginTop: 8, borderTop: '1px solid #f0f0f0', paddingTop: 6,
-          color: '#aaa', fontStyle: 'italic', fontSize: 10, lineHeight: 1.4,
-        }}>
-          {data.note}
-        </div>
-      )}
+      {data.note && <div className="boq-popover-note">{data.note}</div>}
     </div>
   )
 }
+
+// Validation issue → store action mapping. Click navigates to/selects the entity.
+const SELECTABLE_ENTITY_TYPES = new Set(['wall', 'room', 'column', 'beam', 'stamp'])
 
 // ── main component ────────────────────────────────────────────────────────────
 
@@ -238,6 +199,12 @@ export default function BOQPanel() {
   const projectSettings = useStore(s => s.projectSettings)
   const unit            = useStore(s => s.unit)
   const currentFloorId  = useStore(s => s.currentFloorId)
+  // Selection actions for clickable validation issues.
+  const selectWall   = useStore(s => s.selectWall)
+  const selectRoom   = useStore(s => s.selectRoom)
+  const selectColumn = useStore(s => s.selectColumn)
+  const selectBeam   = useStore(s => s.selectBeam)
+  const selectStamp  = useStore(s => s.selectStamp)
   // Force re-render on subscription touches; data reads happen via getState().
   void walls; void nodes; void rooms; void stamps
   void columns; void beams; void slabs; void staircases; void foundations
@@ -375,7 +342,7 @@ export default function BOQPanel() {
     e.stopPropagation()
     if (openPopoverId === id) { setOpenPopoverId(null); return }
     const rect = e.currentTarget.getBoundingClientRect()
-    setPopoverPos({ top: rect.top, left: rect.left - 248 })
+    setPopoverPos({ top: rect.top, left: rect.left - 268 })
     setOpenPopoverId(id)
   }
 
@@ -441,6 +408,17 @@ export default function BOQPanel() {
     }
   }
 
+  function handleIssueClick(issue) {
+    if (!issue.entityId || !SELECTABLE_ENTITY_TYPES.has(issue.entityType)) return
+    switch (issue.entityType) {
+      case 'wall':   selectWall(issue.entityId); break
+      case 'room':   selectRoom(issue.entityId); break
+      case 'column': selectColumn(issue.entityId); break
+      case 'beam':   selectBeam(issue.entityId); break
+      case 'stamp':  selectStamp(issue.entityId); break
+    }
+  }
+
   // Unit-aware area / length display for the summary section.
   function fmtLen(ft) {
     if (unit === 'm') return `${Math.round(ft * 0.3048 * 100) / 100} m`
@@ -455,78 +433,67 @@ export default function BOQPanel() {
   // (stamp type is the group header).
   const stripStampPrefix = (l) => l.label.replace(/^(?:Sump|Septic Tank)\s+[–—-]\s*/, '')
 
+  const hasErrors = validation.counts.errors > 0
+  const hasCostValue = totalCost !== null && totalCost !== undefined
+
   return (
     <div
+      className="boq-panel"
       onScroll={() => openPopoverId && setOpenPopoverId(null)}
-      style={{
-        position: 'absolute', bottom: 16, right: 16,
-        background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-        padding: '12px 16px', zIndex: 10, minWidth: 380, fontSize: 13,
-        maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-      }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <div style={{ fontWeight: 700, color: '#333' }}>BOQ Summary</div>
+      <div className="boq-panel-header">
+        <div className="boq-panel-title">BOQ Summary</div>
         {isMultiFloor && (
-          <div style={{ display: 'flex', gap: 2, fontSize: 10 }}>
+          <div className="boq-floor-toggle">
             <button
               onClick={() => setFloorScope('current')}
-              style={{
-                padding: '2px 8px', border: '1px solid #ccc', borderRadius: 4,
-                background: floorScope === 'current' ? '#333' : '#fff',
-                color:      floorScope === 'current' ? '#fff' : '#555',
-                cursor: 'pointer', fontWeight: 500,
-              }}
+              className={floorScope === 'current' ? 'is-active' : ''}
             >This floor</button>
             <button
               onClick={() => setFloorScope('all')}
-              style={{
-                padding: '2px 8px', border: '1px solid #ccc', borderRadius: 4,
-                background: floorScope === 'all' ? '#333' : '#fff',
-                color:      floorScope === 'all' ? '#fff' : '#555',
-                cursor: 'pointer', fontWeight: 500,
-              }}
+              className={floorScope === 'all' ? 'is-active' : ''}
             >All floors</button>
           </div>
         )}
       </div>
-      <div style={{ fontSize: 11, fontStyle: 'italic', color: '#aaa', marginBottom: 10 }}>
+      <div className="boq-panel-disclaimer">
         Preview pricing — for estimation only. Final rates from ERP product catalog.
       </div>
 
       {/* Informational structure */}
-      <Row label="Walls"        value={wallCount} />
-      <Row label="Total length" value={fmtLen(totalLenFt)} />
-      <Row label="Wall area"    value={fmtArea(totalWallArea)}
+      <InfoRow label="Walls"        value={wallCount} />
+      <InfoRow label="Total length" value={fmtLen(totalLenFt)} />
+      <InfoRow label="Wall area"    value={fmtArea(totalWallArea)}
         infoId="wallArea" openId={openPopoverId} onInfoClick={handleInfoClick} />
-      <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
-      <Row label="Floor area" value={fmtArea(totalFloorArea)} />
-      <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
+      <hr className="boq-divider" />
+      <InfoRow label="Floor area" value={fmtArea(totalFloorArea)} />
+      <hr className="boq-divider" />
 
       {/* Column headers for priceable section */}
-      <div style={{ display: 'grid', gridTemplateColumns: COL, gap: GAP, fontSize: 10, color: '#aaa', marginBottom: 6 }}>
-        <span />
-        <span style={{ textAlign: 'right' }}>Qty</span>
-        <span style={{ textAlign: 'right', paddingRight: 4 }}>Rate</span>
-        <span style={{ textAlign: 'right' }}>Cost</span>
+      <div className="boq-col-header">
+        <span>Item</span>
+        <span>Qty</span>
+        <span>Rate</span>
+        <span>Cost</span>
       </div>
 
       {/* Flooring */}
       {flooringLine && (
-        <BoqRow line={flooringLine}
-          rates={rates} onRateChange={setRate}
-          openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+        <div className="boq-group">
+          <BoqRow line={flooringLine}
+            rates={rates} onRateChange={setRate}
+            openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+        </div>
       )}
 
       {/* Masonry — per material type */}
       {hasMasonry && (
-        <>
-          <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
+        <div className="boq-group">
           <SectionHeader title="Masonry" />
           {[...masonryByMaterial.entries()].map(([matKey, lines]) => {
             const mat = MATERIAL_LIBRARY[matKey]
             return (
-              <div key={matKey} style={{ marginBottom: 10 }}>
+              <div key={matKey} className="boq-section">
                 <SubSectionHeader title={mat?.name ?? matKey} />
                 {lines.map(line => (
                   <BoqSubRow key={line.id} line={line}
@@ -537,8 +504,7 @@ export default function BOQPanel() {
               </div>
             )
           })}
-          <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
-        </>
+        </div>
       )}
 
       {/* Structural BOQ (RCC + Steel + Concrete Materials + Staircase) */}
@@ -572,20 +538,23 @@ export default function BOQPanel() {
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
 
       {/* Plaster, Paint, Waterproofing, Roofing — other finishes */}
-      {otherFinishLines.map(line => (
-        <BoqRow key={line.id} line={line}
-          rates={rates} onRateChange={setRate}
-          openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
-      ))}
+      {otherFinishLines.length > 0 && (
+        <div className="boq-group">
+          {otherFinishLines.map(line => (
+            <BoqRow key={line.id} line={line}
+              rates={rates} onRateChange={setRate}
+              openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit} />
+          ))}
+        </div>
+      )}
 
       {/* Civil works */}
       {hasCivil && (
-        <>
-          <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
+        <div className="boq-group">
           <SectionHeader title="Civil Works" />
 
           {sumpLines.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
+            <div className="boq-section">
               <SubSectionHeader title="Sump" suffix={`×${sumps.length}`} />
               {sumpLines.map(line => (
                 <BoqSubRow key={line.id} line={line}
@@ -597,7 +566,7 @@ export default function BOQPanel() {
           )}
 
           {septicLines.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
+            <div className="boq-section">
               <SubSectionHeader title="Septic Tank" suffix={`×${septics.length}`} />
               {septicLines.map(line => (
                 <BoqSubRow key={line.id} line={line}
@@ -609,66 +578,56 @@ export default function BOQPanel() {
           )}
 
           {ohts.length > 0 && (
-            <Row label="OHT" value={`${ohts.length} unit${ohts.length > 1 ? 's' : ''}`} />
+            <InfoRow label="OHT" value={`${ohts.length} unit${ohts.length > 1 ? 's' : ''}`} />
           )}
-        </>
+        </div>
       )}
 
       {/* Total cost — always rendered */}
-      <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 13 }}>
-        <span style={{ color: '#333' }}>Total cost estimate</span>
-        <span style={{ color: totalCost !== null ? '#222' : '#aaa' }}>{fmtCost(totalCost)}</span>
+      <div className="boq-total-row">
+        <span className="boq-total-label">Total cost estimate</span>
+        <span className={`boq-total-amount${hasCostValue ? '' : ' boq-total-amount--empty'}`}>
+          {fmtCost(totalCost)}
+        </span>
       </div>
 
       {/* Validation footer */}
       {validation.counts.total > 0 && (
-        <div style={{
-          marginTop: 10, padding: '6px 8px', borderRadius: 4,
-          background: validation.counts.errors > 0 ? '#fff0f0' : '#fff8e6',
-          border: `1px solid ${validation.counts.errors > 0 ? '#e74c3c' : '#e0b020'}`,
-          fontSize: 11, color: '#555', lineHeight: 1.5,
-        }}>
-          <div style={{ fontWeight: 700, marginBottom: 4, color: validation.counts.errors > 0 ? '#c0392b' : '#a07000' }}>
-            ⚠ {validation.counts.total} validation {validation.counts.total === 1 ? 'issue' : 'issues'}
-            {validation.counts.errors > 0 ? ` (${validation.counts.errors} error${validation.counts.errors > 1 ? 's' : ''})` : ''}
+        <div className={`boq-validation-footer${hasErrors ? ' boq-validation-footer--error' : ''}`}>
+          <div className="boq-validation-title">
+            {validation.counts.total} validation {validation.counts.total === 1 ? 'issue' : 'issues'}
+            {hasErrors && ` (${validation.counts.errors} error${validation.counts.errors > 1 ? 's' : ''})`}
           </div>
-          {validation.issues.slice(0, 5).map((iss, i) => (
-            <div key={i} style={{ fontSize: 10, color: '#666' }}>
-              · [{iss.severity}] {iss.message}
-            </div>
-          ))}
+          {validation.issues.slice(0, 5).map((iss, i) => {
+            const selectable = !!iss.entityId && SELECTABLE_ENTITY_TYPES.has(iss.entityType)
+            const sevClass = iss.severity === 'error'   ? 'boq-validation-severity--error'
+                           : iss.severity === 'warning' ? 'boq-validation-severity--warning'
+                           : 'boq-validation-severity--info'
+            return (
+              <button
+                key={i}
+                type="button"
+                className="boq-validation-issue"
+                data-no-target={selectable ? undefined : ''}
+                onClick={() => selectable && handleIssueClick(iss)}
+                title={selectable ? `Select ${iss.entityType}` : undefined}
+              >
+                <span className={`boq-validation-severity ${sevClass}`}>{iss.severity}</span>
+                <span className="boq-validation-message">{iss.message}</span>
+              </button>
+            )
+          })}
           {validation.issues.length > 5 && (
-            <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>… +{validation.issues.length - 5} more</div>
+            <div className="boq-validation-overflow">+{validation.issues.length - 5} more</div>
           )}
         </div>
       )}
 
       {/* Export buttons */}
-      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-        <button
-          onClick={handleExportCSV}
-          style={{
-            flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
-            background: '#f5f5f5', border: '1px solid #ccc', borderRadius: 4, color: '#333',
-          }}
-        >CSV</button>
-        <button
-          onClick={handleExportPDF}
-          style={{
-            flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
-            background: '#fff8e6', border: '1px solid #e0b020', borderRadius: 4, color: '#7a5400',
-            fontWeight: 600,
-          }}
-        >📄 PDF</button>
-        <button
-          onClick={handleExportExcel}
-          style={{
-            flex: 1, padding: '6px 0', fontSize: 11, cursor: 'pointer',
-            background: '#e8f5e9', border: '1px solid #81c784', borderRadius: 4, color: '#2e7d32',
-            fontWeight: 600,
-          }}
-        >📊 Excel</button>
+      <div className="boq-actions">
+        <Button variant="secondary" size="sm" onClick={handleExportCSV}>CSV</Button>
+        <Button variant="secondary" size="sm" onClick={handleExportPDF}>PDF</Button>
+        <Button variant="secondary" size="sm" onClick={handleExportExcel}>Excel</Button>
       </div>
 
       <FormulaPopover data={formulaData} pos={popoverPos} popoverRef={popoverRef} />

@@ -2,57 +2,33 @@ import { useStore } from '../store'
 import { getColumnDimLabel } from '../lib/columnShapes'
 import { resolveColumnReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
-
-const panelStyle = {
-  position: 'absolute', top: 56, left: 16,
-  background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-  padding: '12px 14px', zIndex: 10, minWidth: 220, fontSize: 13,
-  maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-}
+import { Panel } from './ui/Panel'
+import { Button } from './ui/Button'
+import { Field } from './ui/Field'
 
 const rowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' }
 
-const deleteBtn = {
-  background: '#fff0f0', border: '1px solid #e74c3c', borderRadius: 4,
-  color: '#e74c3c', cursor: 'pointer', fontSize: 11, padding: '3px 8px',
-}
-
-const attachedBadge = {
-  fontSize: 10, padding: '2px 6px', borderRadius: 3,
-  background: '#e8f0f8', color: '#2471a3',
-}
-
-const standaloneBadge = {
-  fontSize: 10, padding: '2px 6px', borderRadius: 3,
-  background: '#f0f0f0', color: '#555',
-}
-
-const detachBtn = {
-  background: '#fff', border: '1px solid #aaa', borderRadius: 4,
-  color: '#555', cursor: 'pointer', fontSize: 11, padding: '3px 8px',
-}
-
-const fieldRow = { marginTop: 8 }
-const label = { color: '#888', marginBottom: 2, fontSize: 11 }
+const fieldRow = { marginTop: 'var(--space-2)' }
+const label = { color: 'var(--color-text-muted)', marginBottom: 2, fontSize: 'var(--text-xs)' }
 
 const SOURCE_COLOR = {
-  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
-  TYPE:            { bg: '#e3f2fd', fg: '#1565c0' },
-  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
-  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
-  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+  INSTANCE:        { bg: 'var(--color-success-bg)',  fg: 'var(--color-success)' },
+  TYPE:            { bg: 'var(--color-primary-bg)',  fg: 'var(--color-primary)' },
+  CLASS:           { bg: 'var(--color-primary-bg)',  fg: 'var(--color-primary)' },
+  PROJECT_DEFAULT: { bg: 'var(--color-warning-bg)',  fg: 'var(--color-warning)' },
+  ESTIMATE:        { bg: 'var(--color-bg-muted)',    fg: 'var(--color-text-muted)' },
 }
 function resolutionBadge(source) {
   const c = SOURCE_COLOR[source] ?? SOURCE_COLOR.ESTIMATE
   return {
-    marginTop: 4, padding: '4px 8px', borderRadius: 4,
-    fontSize: 11, background: c.bg, color: c.fg, lineHeight: 1.3,
+    marginTop: 'var(--space-1)',
+    padding: 'var(--space-1) var(--space-2)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: 'var(--text-xs)',
+    background: c.bg,
+    color: c.fg,
+    lineHeight: 1.3,
   }
-}
-const applyBtn = {
-  marginTop: 6, padding: '4px 10px', fontSize: 11,
-  background: '#fafafa', border: '1px solid #bbb', borderRadius: 4,
-  color: '#444', cursor: 'pointer', width: '100%',
 }
 
 export default function ColumnPanel() {
@@ -94,44 +70,58 @@ export default function ColumnPanel() {
   }
 
   return (
-    <div style={panelStyle}>
-      <div style={rowStyle}>
-        <strong>Column</strong>
-        <button style={deleteBtn} onClick={handleDelete}>Delete</button>
+    <Panel
+      title="Column"
+      onClose={() => selectColumn(null)}
+      width={260}
+      position={{ top: 56, left: 16 }}
+    >
+      <div style={{ marginBottom: 'var(--space-2)' }}>
+        <Button variant="danger" size="sm" onClick={handleDelete}>Delete</Button>
       </div>
 
-      <div style={fieldRow}>
-        <div style={label}>Type</div>
+      <Field label="Type">
         <select
           value={column.columnTypeId}
           onChange={e => setColumnType(selectedColumnId, e.target.value)}
-          style={{ width: '100%', fontSize: 13 }}
         >
           {columnTypes.map(t => (
             <option key={t.id} value={t.id}>{t.label}</option>
           ))}
         </select>
-      </div>
+      </Field>
 
       <div style={fieldRow}>
         <div style={label}>Position</div>
-        <div>{xFt} ft, {yFt} ft</div>
+        <div style={{ fontSize: 'var(--text-base)' }}>{xFt} ft, {yFt} ft</div>
       </div>
 
       <div style={{ ...fieldRow, ...rowStyle }}>
         {column.attachedNodeId !== null ? (
           <>
-            <span style={attachedBadge}>Attached to node</span>
-            <button style={detachBtn} onClick={() => detachColumn(selectedColumnId)}>Detach</button>
+            <span style={{
+              fontSize: 'var(--text-xs)',
+              padding: '2px var(--space-2)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--color-primary-bg)',
+              color: 'var(--color-primary)',
+            }}>Attached to node</span>
+            <Button variant="secondary" size="sm" onClick={() => detachColumn(selectedColumnId)}>Detach</Button>
           </>
         ) : (
-          <span style={standaloneBadge}>Standalone</span>
+          <span style={{
+            fontSize: 'var(--text-xs)',
+            padding: '2px var(--space-2)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-bg-muted)',
+            color: 'var(--color-text-secondary)',
+          }}>Standalone</span>
         )}
       </div>
 
       <div style={fieldRow}>
         <div style={label}>Dimensions</div>
-        <div>{dimLabel}</div>
+        <div style={{ fontSize: 'var(--text-base)' }}>{dimLabel}</div>
       </div>
 
       {/* Phase 1.9 — base / top floor pickers (multi-floor only) */}
@@ -142,28 +132,24 @@ export default function ColumnPanel() {
         const topId  = column.topFloorId  ?? baseId
         return (
           <>
-            <div style={fieldRow}>
-              <div style={label}>Base floor</div>
+            <Field label="Base floor">
               <select
                 value={baseId}
                 onChange={e => setColumnFloorSpan(selectedColumnId, e.target.value, topId)}
                 onKeyDown={e => e.stopPropagation()}
-                style={{ width: '100%', fontSize: 13 }}
               >
                 {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
-            </div>
-            <div style={fieldRow}>
-              <div style={label}>Top floor</div>
+            </Field>
+            <Field label="Top floor">
               <select
                 value={topId}
                 onChange={e => setColumnFloorSpan(selectedColumnId, baseId, e.target.value)}
                 onKeyDown={e => e.stopPropagation()}
-                style={{ width: '100%', fontSize: 13 }}
               >
                 {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
-            </div>
+            </Field>
           </>
         )
       })()}
@@ -196,32 +182,37 @@ export default function ColumnPanel() {
           })
         }
         return (
-          <div style={fieldRow}>
-            <div style={label}>Steel spec (BBS)</div>
-            <select
-              value={column.reinforcementSpecId ?? ''}
-              onChange={e => setColumnReinforcementSpec(selectedColumnId, e.target.value || null)}
-              onKeyDown={e => e.stopPropagation()}
-              style={{ width: '100%', fontSize: 13 }}
-            >
-              <option value="">— Inherit —</option>
-              {colSpecs.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
+          <>
+            <Field label="Steel spec (BBS)">
+              <select
+                value={column.reinforcementSpecId ?? ''}
+                onChange={e => setColumnReinforcementSpec(selectedColumnId, e.target.value || null)}
+                onKeyDown={e => e.stopPropagation()}
+              >
+                <option value="">— Inherit —</option>
+                {colSpecs.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </Field>
             <div style={resolutionBadge(resolved.source)}>
-              <span style={{ fontWeight: 600 }}>{resolved.specLabel}</span>
+              <span style={{ fontWeight: 'var(--weight-semibold)' }}>{resolved.specLabel}</span>
               <span style={{ opacity: 0.75 }}> · {humanizeAssignmentSource(resolved.source)}</span>
             </div>
-            <button
-              style={applyBtn}
-              onClick={handleApplyToMatching}
-              title="Copy this column's spec to all other columns of the same type"
-            >Apply to matching columns</button>
+            <div style={{ marginTop: 'var(--space-2)' }}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleApplyToMatching}
+                title="Copy this column's spec to all other columns of the same type"
+              >
+                Apply to matching columns
+              </Button>
+            </div>
             {colSpecs.length === 0 && (
-              <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
                 Open BBS panel to define column specs.
               </div>
             )}
-          </div>
+          </>
         )
       })()}
 
@@ -230,11 +221,18 @@ export default function ColumnPanel() {
         const fdn = getFoundationForColumn(selectedColumnId)
         if (!fdn) return null
         return (
-          <div style={{ ...fieldRow, padding: '6px 8px', background: '#f0f7ff', borderRadius: 4, fontSize: 11, color: '#2471a3' }}>
+          <div style={{
+            ...fieldRow,
+            padding: 'var(--space-2)',
+            background: 'var(--color-primary-bg)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-primary)',
+          }}>
             Attached to foundation: <strong>{fdn.label ?? fdn.type}</strong>
           </div>
         )
       })()}
-    </div>
+    </Panel>
   )
 }

@@ -1,82 +1,67 @@
 import { useStore } from '../store'
-
-const overlay = {
-  position: 'fixed', top: '50%', left: '50%',
-  transform: 'translate(-50%, -50%)', zIndex: 100,
-  width: 480, maxHeight: '80vh', overflowY: 'auto',
-  background: '#fff', borderRadius: 8,
-  padding: 20, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-  fontSize: 13,
-}
-
-const headerRow = {
-  display: 'flex', justifyContent: 'space-between',
-  alignItems: 'center', marginBottom: 16,
-}
-
-const closeBtn = {
-  background: 'none', border: 'none', fontSize: 18,
-  cursor: 'pointer', color: '#555', lineHeight: 1, padding: '0 4px',
-}
+import { Modal } from './ui/Modal.jsx'
+import { Button } from './ui/Button.jsx'
 
 const floorCard = {
-  border: '1px solid #eee',
-  borderRadius: 4,
-  padding: '8px 10px',
-  marginBottom: 8,
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: 'var(--space-2) var(--space-3)',
+  marginBottom: 'var(--space-2)',
 }
 
 const cardHeaderRow = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  marginBottom: 8,
+  gap: 'var(--space-2)',
+  marginBottom: 'var(--space-2)',
 }
 
 const labelInput = {
-  fontSize: 12,
-  fontWeight: 600,
-  border: '1px solid #ddd',
-  borderRadius: 3,
-  padding: '2px 6px',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 'var(--weight-semibold)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
   flex: 1,
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
 }
 
 const seqBadge = {
-  fontSize: 10,
-  color: '#888',
-  background: '#f4f4f4',
-  borderRadius: 3,
-  padding: '2px 6px',
-  fontWeight: 600,
+  fontSize: 'var(--text-xs)',
+  color: 'var(--color-text-muted)',
+  background: 'var(--color-bg-muted)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  fontWeight: 'var(--weight-semibold)',
 }
 
-const deleteBtnStyle = (disabled) => ({
-  background: disabled ? '#f8f8f8' : '#fff0f0',
-  border: `1px solid ${disabled ? '#ddd' : '#e74c3c'}`,
-  borderRadius: 3,
-  color: disabled ? '#bbb' : '#e74c3c',
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  fontSize: 10,
-  padding: '2px 6px',
-})
-
-const fieldRow = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }
-const lbl     = { color: '#666', minWidth: 160, fontSize: 12 }
-const numInput = { width: 72, fontSize: 13 }
-
-const addBtn = {
-  fontSize: 12,
-  background: '#f0f7ff',
-  border: '1px solid #3498db',
-  borderRadius: 4,
-  color: '#2471a3',
-  cursor: 'pointer',
-  padding: '6px 12px',
-  marginTop: 8,
+const fieldRow = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-2)',
+  marginBottom: 'var(--space-2)',
+}
+const lbl = {
+  color: 'var(--color-text-secondary)',
+  minWidth: 160,
+  fontSize: 'var(--text-sm)',
+}
+const numInput = {
+  width: 72,
+  fontSize: 'var(--text-base)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
 }
 
-const hint = { fontSize: 10, color: '#aaa', marginTop: 6 }
+const hint = {
+  fontSize: 'var(--text-xs)',
+  color: 'var(--color-text-muted)',
+  marginTop: 'var(--space-2)',
+}
 
 function entityCounts(entities) {
   return {
@@ -117,7 +102,8 @@ export default function FloorsManagerPanel() {
   const currentFloorId     = useStore(s => s.currentFloorId)
   const setCurrentFloorId  = useStore(s => s.setCurrentFloorId)
 
-  if (activeTool !== 'floors') return null
+  const open = activeTool === 'floors'
+  const onClose = () => setTool('select')
 
   const floors = [...(projectSettings?.floors ?? [])].sort(
     (a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)
@@ -136,14 +122,21 @@ export default function FloorsManagerPanel() {
   }
 
   return (
-    <div style={overlay}>
-      <div style={headerRow}>
-        <strong style={{ fontSize: 15 }}>Floors</strong>
-        <button style={closeBtn} onClick={() => setTool('select')}>×</button>
-      </div>
-
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Floors"
+      width={480}
+      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+    >
       {floors.length === 0 && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
+        <div
+          style={{
+            fontSize: 'var(--text-sm)',
+            color: 'var(--color-text-muted)',
+            marginBottom: 'var(--space-2)',
+          }}
+        >
           No floors defined. Add one below.
         </div>
       )}
@@ -173,12 +166,15 @@ export default function FloorsManagerPanel() {
                 onKeyDown={e => e.stopPropagation()}
                 onChange={e => updateFloor(f.id, { label: e.target.value })}
               />
-              <button
-                style={deleteBtnStyle(deleteDisabled)}
+              <Button
+                variant="danger"
+                size="sm"
                 disabled={deleteDisabled}
                 title={tooltip}
                 onClick={() => handleRemove(f)}
-              >✕</button>
+              >
+                ✕
+              </Button>
             </div>
 
             <div style={fieldRow}>
@@ -220,12 +216,14 @@ export default function FloorsManagerPanel() {
                 }}
               />
               {slabOverride == null && (
-                <span style={{ fontSize: 10, color: '#aaa' }}>(project default)</span>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  (project default)
+                </span>
               )}
             </div>
 
             {blocked && (
-              <div style={{ fontSize: 10, color: '#888' }}>
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                 Contains: {summarizeCounts(counts)}
               </div>
             )}
@@ -233,12 +231,14 @@ export default function FloorsManagerPanel() {
         )
       })}
 
-      <button style={addBtn} onClick={() => addFloor()}>+ Add floor</button>
+      <Button variant="primary" size="sm" onClick={() => addFloor()}>
+        + Add floor
+      </Button>
 
       <div style={hint}>
         Floors are listed in build order (lowest sequence first). Use the canvas
         floor switcher to move between floors while editing.
       </div>
-    </div>
+    </Modal>
   )
 }

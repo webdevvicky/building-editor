@@ -8,102 +8,128 @@
 import { useStore } from '../store'
 import { resolveFootingReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
+import { Modal } from './ui/Modal.jsx'
+import { Button } from './ui/Button.jsx'
 
 const FOUNDATION_TYPES = ['ISOLATED', 'COMBINED', 'RAFT', 'STRIP', 'PILE']
 
 const TYPE_COLORS = {
-  ISOLATED: { background: '#e8f5e9', color: '#2e7d32' },
-  COMBINED: { background: '#e3f2fd', color: '#1565c0' },
-  RAFT:     { background: '#fff3e0', color: '#e65100' },
-  STRIP:    { background: '#f3e5f5', color: '#6a1b9a' },
-  PILE:     { background: '#fce4ec', color: '#ad1457' },
-}
-
-const overlay = {
-  position: 'fixed', top: '50%', left: '50%',
-  transform: 'translate(-50%, -50%)', zIndex: 100,
-  width: 480, maxHeight: '80vh', overflowY: 'auto',
-  background: '#fff', borderRadius: 8,
-  padding: 20, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-  fontSize: 13,
-}
-
-const headerRow = {
-  display: 'flex', justifyContent: 'space-between',
-  alignItems: 'center', marginBottom: 16,
-}
-
-const closeBtn = {
-  background: 'none', border: 'none', fontSize: 18,
-  cursor: 'pointer', color: '#555', lineHeight: 1, padding: '0 4px',
+  ISOLATED: { background: 'var(--color-success-bg)', color: 'var(--color-success)' },
+  COMBINED: { background: 'var(--color-primary-bg)', color: 'var(--color-primary)' },
+  RAFT:     { background: 'var(--color-warning-bg)', color: 'var(--color-warning)' },
+  STRIP:    { background: 'var(--color-bg-muted)',   color: 'var(--color-text-secondary)' },
+  PILE:     { background: 'var(--color-error-bg)',   color: 'var(--color-error)' },
 }
 
 const sectionHead = {
-  fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-  color: '#aaa', letterSpacing: 0.5, marginBottom: 6, marginTop: 16,
+  fontSize: 'var(--text-xs)',
+  fontWeight: 'var(--weight-bold)',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-muted)',
+  letterSpacing: 0.5,
+  marginBottom: 'var(--space-2)',
+  marginTop: 'var(--space-4)',
 }
 
-const fieldRow = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }
-const lbl      = { color: '#666', minWidth: 160, fontSize: 12 }
-const numInput = { width: 80, fontSize: 13 }
+const fieldRow = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-2)',
+  marginBottom: 'var(--space-2)',
+}
+const lbl = {
+  color: 'var(--color-text-secondary)',
+  minWidth: 160,
+  fontSize: 'var(--text-sm)',
+}
+const numInput = {
+  width: 80,
+  fontSize: 'var(--text-base)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
 
-const divider  = { borderTop: '1px solid #f0f0f0', margin: '6px 0' }
+const divider = {
+  borderTop: '1px solid var(--color-border)',
+  margin: 'var(--space-2) 0',
+}
 
 const card = {
-  border: '1px solid #e0e0e0', borderRadius: 6,
-  padding: '10px 12px', marginBottom: 10, cursor: 'pointer',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-md)',
+  padding: 'var(--space-3) var(--space-3)',
+  marginBottom: 'var(--space-3)',
+  cursor: 'pointer',
+  background: 'var(--color-surface)',
 }
 const cardSelected = {
   ...card,
-  borderColor: '#3498db',
-  background: '#f5fafd',
-  boxShadow: '0 0 0 2px rgba(52,152,219,0.15)',
+  borderColor: 'var(--color-primary)',
+  background: 'var(--color-primary-bg)',
+  boxShadow: 'var(--shadow-focus)',
 }
 
 const chip = {
-  display: 'inline-flex', alignItems: 'center',
-  padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
-  marginRight: 6,
-}
-
-const delBtn = {
-  background: '#fff0f0', border: '1px solid #e74c3c',
-  borderRadius: 4, color: '#e74c3c', cursor: 'pointer',
-  fontSize: 11, padding: '2px 7px',
-}
-
-const addBtn = {
-  padding: '6px 14px', fontSize: 12,
-  background: '#f5f5f5', border: '1px solid #ccc',
-  borderRadius: 4, cursor: 'pointer',
-}
-
-const addBtnPrimary = {
-  ...addBtn,
-  background: '#f0f7ff', borderColor: '#3498db', color: '#2471a3',
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '2px var(--space-2)',
+  borderRadius: 'var(--radius-full)',
+  fontSize: 'var(--text-xs)',
+  fontWeight: 'var(--weight-semibold)',
+  marginRight: 'var(--space-2)',
 }
 
 const selectStyle = {
-  fontSize: 13, padding: '3px 6px',
-  border: '1px solid #ccc', borderRadius: 4, background: '#fff',
+  fontSize: 'var(--text-base)',
+  padding: '3px var(--space-2)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text)',
+}
+
+const textInput = {
+  flex: 1,
+  fontSize: 'var(--text-base)',
+  padding: '3px var(--space-2)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text)',
 }
 
 const attachListStyle = {
-  border: '1px solid #eee', borderRadius: 4,
-  maxHeight: 140, overflowY: 'auto', padding: 4,
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  maxHeight: 140,
+  overflowY: 'auto',
+  padding: 'var(--space-1)',
+  background: 'var(--color-bg-subtle)',
 }
 
 const FDN_SOURCE_COLOR = {
-  INSTANCE:        { bg: '#e8f5e9', fg: '#2e7d32' },
-  TYPE:            { bg: '#e3f2fd', fg: '#1565c0' },
-  CLASS:           { bg: '#e3f2fd', fg: '#1565c0' },
-  PROJECT_DEFAULT: { bg: '#fff8e1', fg: '#a37200' },
-  ESTIMATE:        { bg: '#f5f5f5', fg: '#888' },
+  INSTANCE:        { bg: 'var(--color-success-bg)', fg: 'var(--color-success)' },
+  TYPE:            { bg: 'var(--color-primary-bg)', fg: 'var(--color-primary)' },
+  CLASS:           { bg: 'var(--color-primary-bg)', fg: 'var(--color-primary)' },
+  PROJECT_DEFAULT: { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' },
+  ESTIMATE:        { bg: 'var(--color-bg-muted)',   fg: 'var(--color-text-muted)' },
 }
 function fdnResBadge(source) {
   const c = FDN_SOURCE_COLOR[source] ?? FDN_SOURCE_COLOR.ESTIMATE
-  return { marginTop: 2, padding: '3px 8px', borderRadius: 4, fontSize: 11,
-           background: c.bg, color: c.fg, display: 'inline-block', lineHeight: 1.3 }
+  return {
+    marginTop: 'var(--space-1)',
+    padding: '3px var(--space-2)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: 'var(--text-xs)',
+    background: c.bg,
+    color: c.fg,
+    display: 'inline-block',
+    lineHeight: 1.3,
+    fontWeight: 'var(--weight-medium)',
+  }
 }
 
 // When `decimals` is set, the displayed value is rounded for visual
@@ -176,7 +202,8 @@ export default function FoundationPanel() {
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
   const setTool                    = useStore(s => s.setTool)
 
-  if (activeTool !== 'foundations') return null
+  const open = activeTool === 'foundations'
+  const onClose = () => setTool('select')
 
   const fdnList    = Object.values(foundations)
   const selected   = selectedFoundationId ? foundations[selectedFoundationId] : null
@@ -198,7 +225,7 @@ export default function FoundationPanel() {
         <div style={fieldRow}>
           <span style={lbl}>Label</span>
           <input
-            type="text" style={{ flex: 1, fontSize: 13, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
+            type="text" style={textInput}
             value={f.label ?? ''}
             placeholder={`${f.type} foundation`}
             onKeyDown={e => e.stopPropagation()}
@@ -262,15 +289,18 @@ export default function FoundationPanel() {
               </div>
               <div style={{ ...fieldRow, marginTop: -2 }}>
                 <span style={lbl}></span>
-                <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                   <span style={fdnResBadge(resolved.source)}>
                     {resolved.specLabel} · {humanizeAssignmentSource(resolved.source)}
                   </span>
-                  <button
-                    style={{ ...addBtn, fontSize: 11, padding: '3px 8px', marginLeft: 6 }}
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={handleApply}
                     title="Copy this spec to all other foundations of the same type"
-                  >Apply to matching</button>
+                  >
+                    Apply to matching
+                  </Button>
                 </div>
               </div>
             </>
@@ -299,11 +329,15 @@ export default function FoundationPanel() {
           <>
             <NumField label="Area (ft²)" step={1} value={g.areaFt2}
               onChange={v => patchGeometry(f.id, { areaFt2: v })} />
-            <div style={{ ...fieldRow, marginTop: -4, marginBottom: 10 }}>
+            <div style={{ ...fieldRow, marginTop: -4, marginBottom: 'var(--space-3)' }}>
               <span style={lbl}></span>
-              <button style={addBtn} onClick={() => patchGeometry(f.id, { areaFt2: Math.round((getTotalFloorArea() || 0) * 100) / 100 })}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => patchGeometry(f.id, { areaFt2: Math.round((getTotalFloorArea() || 0) * 100) / 100 })}
+              >
                 Use building footprint
-              </button>
+              </Button>
             </div>
             <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
@@ -349,13 +383,31 @@ export default function FoundationPanel() {
             <div style={sectionHead}>Attached columns ({(f.columnIds || []).length})</div>
             <div style={attachListStyle}>
               {Object.values(columns).length === 0 && (
-                <div style={{ fontSize: 12, color: '#999', padding: 4 }}>No columns placed yet.</div>
+                <div
+                  style={{
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--color-text-muted)',
+                    padding: 'var(--space-1)',
+                  }}
+                >
+                  No columns placed yet.
+                </div>
               )}
               {Object.values(columns).map(col => {
                 const attached = (f.columnIds || []).includes(col.id)
                 const otherFdn = fdnList.find(of => of.id !== f.id && (of.columnIds || []).includes(col.id))
                 return (
-                  <label key={col.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', fontSize: 12, cursor: 'pointer' }}>
+                  <label
+                    key={col.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-2)',
+                      padding: '3px var(--space-1)',
+                      fontSize: 'var(--text-sm)',
+                      cursor: 'pointer',
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={attached}
@@ -369,7 +421,9 @@ export default function FoundationPanel() {
                       {columnTypeLabel(col.columnTypeId)} @ ({Math.round(col.x / 12)}, {Math.round(col.y / 12)})
                     </span>
                     {otherFdn && !attached && (
-                      <span style={{ fontSize: 10, color: '#c0392b' }}>on {otherFdn.label ?? otherFdn.type}</span>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)' }}>
+                        on {otherFdn.label ?? otherFdn.type}
+                      </span>
                     )}
                   </label>
                 )
@@ -385,14 +439,32 @@ export default function FoundationPanel() {
             <div style={sectionHead}>Attached walls ({(f.wallIds || []).length})</div>
             <div style={attachListStyle}>
               {Object.values(walls).length === 0 && (
-                <div style={{ fontSize: 12, color: '#999', padding: 4 }}>No walls drawn yet.</div>
+                <div
+                  style={{
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--color-text-muted)',
+                    padding: 'var(--space-1)',
+                  }}
+                >
+                  No walls drawn yet.
+                </div>
               )}
               {Object.values(walls).map(w => {
                 const attached = (f.wallIds || []).includes(w.id)
                 const otherFdn = fdnList.find(of => of.id !== f.id && (of.wallIds || []).includes(w.id))
                 const lenFt = getWallLength(w.id) || 0
                 return (
-                  <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', fontSize: 12, cursor: 'pointer' }}>
+                  <label
+                    key={w.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-2)',
+                      padding: '3px var(--space-1)',
+                      fontSize: 'var(--text-sm)',
+                      cursor: 'pointer',
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={attached}
@@ -406,7 +478,9 @@ export default function FoundationPanel() {
                       Wall {w.id.slice(0, 6)} — {Math.round(lenFt * 100) / 100} ft
                     </span>
                     {otherFdn && !attached && (
-                      <span style={{ fontSize: 10, color: '#c0392b' }}>on {otherFdn.label ?? otherFdn.type}</span>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)' }}>
+                        on {otherFdn.label ?? otherFdn.type}
+                      </span>
                     )}
                   </label>
                 )
@@ -419,16 +493,23 @@ export default function FoundationPanel() {
   }
 
   return (
-    <div style={overlay}>
-      <div style={headerRow}>
-        <strong style={{ fontSize: 15 }}>Foundations</strong>
-        <button style={closeBtn} onClick={() => setTool('select')}>×</button>
-      </div>
-
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Foundations"
+      width={520}
+      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+    >
       <div style={sectionHead}>Defined foundations ({fdnList.length})</div>
 
       {fdnList.length === 0 && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
+        <div
+          style={{
+            fontSize: 'var(--text-sm)',
+            color: 'var(--color-text-muted)',
+            marginBottom: 'var(--space-2)',
+          }}
+        >
           No foundations yet. Add one below to start grouping columns/walls.
         </div>
       )}
@@ -442,19 +523,24 @@ export default function FoundationPanel() {
             style={isSel ? cardSelected : card}
             onClick={() => selectFoundation(f.id)}
           >
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 'var(--space-1)' }}>
               <span style={{ ...chip, ...badge }}>{f.type}</span>
-              <strong style={{ flex: 1, fontSize: 13 }}>{f.label ?? `${f.type} foundation`}</strong>
-              <button
-                style={delBtn}
+              <strong style={{ flex: 1, fontSize: 'var(--text-base)', color: 'var(--color-text)' }}>
+                {f.label ?? `${f.type} foundation`}
+              </strong>
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={e => { e.stopPropagation(); deleteFoundation(f.id) }}
-              >Delete</button>
+              >
+                Delete
+              </Button>
             </div>
-            <div style={{ fontSize: 11, color: '#666' }}>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
               {geometrySummary(f)}
-              <span style={{ color: '#aaa' }}> · </span>
+              <span style={{ color: 'var(--color-text-muted)' }}> · </span>
               {(f.columnIds || []).length} col{(f.columnIds || []).length === 1 ? '' : 's'}
-              <span style={{ color: '#aaa' }}> · </span>
+              <span style={{ color: 'var(--color-text-muted)' }}> · </span>
               {(f.wallIds || []).length} wall{(f.wallIds || []).length === 1 ? '' : 's'}
             </div>
           </div>
@@ -471,7 +557,7 @@ export default function FoundationPanel() {
 
       <div style={divider} />
       <div style={sectionHead}>Add foundation</div>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
         <select
           id="fdn-new-type"
           style={selectStyle}
@@ -482,16 +568,19 @@ export default function FoundationPanel() {
             <option key={t} value={t}>{t}</option>
           ))}
         </select>
-        <button
-          style={addBtnPrimary}
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => {
             const sel = document.getElementById('fdn-new-type')
             const type = sel?.value || 'ISOLATED'
             const id = addFoundation(type, {})
             selectFoundation(id)
           }}
-        >+ Add foundation</button>
+        >
+          + Add foundation
+        </Button>
       </div>
-    </div>
+    </Modal>
   )
 }

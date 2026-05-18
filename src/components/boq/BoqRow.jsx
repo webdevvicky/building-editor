@@ -3,13 +3,7 @@
 // via these components. Sections do NOT subscribe to the store directly
 // for quantity data — that data lives in the line objects.
 
-const COL = '1fr 68px 88px 70px'
-const GAP = 3
-
-const rateInputStyle = {
-  width: 48, fontSize: 10, padding: '2px 4px',
-  border: '1px solid #ddd', borderRadius: 3, textAlign: 'right', outline: 'none',
-}
+import './boq.css'
 
 function fmtCost(n) {
   if (n === null || n === undefined) return '—'
@@ -32,66 +26,70 @@ export function fmtLineQty(line, unit) {
 
 export function SectionHeader({ title }) {
   return (
-    <div style={{
-      fontSize: 11, fontWeight: 700, color: '#aaa',
-      textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
-    }}>
-      {title}
+    <div className="boq-section-header">
+      <span className="boq-section-title">{title}</span>
+      <span className="boq-section-rule" />
     </div>
   )
 }
 
 export function SubSectionHeader({ title, suffix }) {
   return (
-    <div style={{ fontWeight: 600, color: '#555', fontSize: 12, marginBottom: 4 }}>
-      {title}
-      {suffix && <span style={{ color: '#aaa', fontWeight: 400, marginLeft: 6 }}>{suffix}</span>}
+    <div className="boq-subsection-header">
+      <span>{title}</span>
+      {suffix && <span className="boq-subsection-suffix">{suffix}</span>}
     </div>
   )
 }
 
-function InfoIcon({ id, openId, onInfoClick }) {
+export function InfoIcon({ id, openId, onInfoClick }) {
   return (
     <button
       data-info-btn=""
       onClick={e => onInfoClick(id, e)}
       title="Show formula"
-      style={{
-        background: 'none', border: 'none', cursor: 'pointer',
-        fontSize: 12, color: openId === id ? '#555' : '#bbb',
-        padding: '0 1px', lineHeight: 1, flexShrink: 0,
-      }}
+      className={`boq-info-icon${openId === id ? ' is-active' : ''}`}
     >ⓘ</button>
+  )
+}
+
+// Composed rate input with ₹ prefix. Handles the per-1000 case for brick rates
+// by widening the prefix label to "₹/1000".
+function RateInput({ value, onChange, isPer1000, unit }) {
+  const prefix = isPer1000 ? '₹/1000' : '₹'
+  return (
+    <div className={`boq-rate-input${isPer1000 ? ' boq-rate-input--per1000' : ''}`}>
+      <span className="boq-rate-prefix">{prefix}</span>
+      <input
+        type="number" min="0" step="0.01"
+        value={value}
+        onChange={onChange}
+        placeholder={isPer1000 ? '' : `/${unit}`}
+        className="boq-rate-field"
+      />
+    </div>
   )
 }
 
 // Top-level priced row (used for finishes flooring/plaster/paint).
 export function BoqRow({ line, rates, onRateChange, openId, onInfoClick, unit, labelOverride }) {
-  const placeholder = line.isPer1000 ? '₹/1000' : `₹/${line.unit}`
-  const label       = labelOverride ?? line.label
-  const rateVal     = rates[line.rateKey] ?? ''
+  const label   = labelOverride ?? line.label
+  const rateVal = rates[line.rateKey] ?? ''
+  const hasCost = line.cost !== null && line.cost !== undefined
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: COL, gap: GAP,
-      marginBottom: 6, alignItems: 'center',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ color: '#555', fontSize: 12 }}>{label}</span>
+    <div className="boq-row">
+      <div className="boq-row-label">
+        <span>{label}</span>
         {line.formulaId && <InfoIcon id={line.formulaId} openId={openId} onInfoClick={onInfoClick} />}
       </div>
-      <span style={{ fontWeight: 600, textAlign: 'right', fontSize: 12 }}>
-        {fmtLineQty(line, unit)}
-      </span>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-        <input
-          type="number" min="0" step="0.01"
-          value={rateVal}
-          onChange={e => onRateChange(line.rateKey, e.target.value)}
-          placeholder={placeholder}
-          style={{ ...rateInputStyle, width: 52, fontSize: 11 }}
-        />
-      </div>
-      <span style={{ textAlign: 'right', fontSize: 12, color: line.cost !== null && line.cost !== undefined ? '#333' : '#ccc' }}>
+      <span className="boq-row-qty">{fmtLineQty(line, unit)}</span>
+      <RateInput
+        value={rateVal}
+        onChange={e => onRateChange(line.rateKey, e.target.value)}
+        isPer1000={!!line.isPer1000}
+        unit={line.unit}
+      />
+      <span className={`boq-row-cost${hasCost ? '' : ' boq-row-cost--empty'}`}>
         {fmtCost(line.cost)}
       </span>
     </div>
@@ -101,31 +99,23 @@ export function BoqRow({ line, rates, onRateChange, openId, onInfoClick, unit, l
 // Indented priced sub-row (used inside grouped sections — masonry, structural,
 // shuttering, plaster, etc.).
 export function BoqSubRow({ line, rates, onRateChange, openId, onInfoClick, unit, labelOverride }) {
-  const placeholder = line.isPer1000 ? '₹/1000' : `₹/${line.unit}`
-  const label       = labelOverride ?? line.label
-  const rateVal     = rates[line.rateKey] ?? ''
+  const label   = labelOverride ?? line.label
+  const rateVal = rates[line.rateKey] ?? ''
+  const hasCost = line.cost !== null && line.cost !== undefined
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: COL, gap: GAP,
-      marginBottom: 4, paddingLeft: 10, alignItems: 'center',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ color: '#888', fontSize: 11 }}>{label}</span>
+    <div className="boq-row boq-row--subrow">
+      <div className="boq-row-label">
+        <span>{label}</span>
         {line.formulaId && <InfoIcon id={line.formulaId} openId={openId} onInfoClick={onInfoClick} />}
       </div>
-      <span style={{ fontWeight: 500, textAlign: 'right', fontSize: 11 }}>
-        {fmtLineQty(line, unit)}
-      </span>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-        <input
-          type="number" min="0" step="0.01"
-          value={rateVal}
-          onChange={e => onRateChange(line.rateKey, e.target.value)}
-          placeholder={placeholder}
-          style={rateInputStyle}
-        />
-      </div>
-      <span style={{ textAlign: 'right', fontSize: 11, color: line.cost !== null && line.cost !== undefined ? '#333' : '#ccc' }}>
+      <span className="boq-row-qty">{fmtLineQty(line, unit)}</span>
+      <RateInput
+        value={rateVal}
+        onChange={e => onRateChange(line.rateKey, e.target.value)}
+        isPer1000={!!line.isPer1000}
+        unit={line.unit}
+      />
+      <span className={`boq-row-cost${hasCost ? '' : ' boq-row-cost--empty'}`}>
         {fmtCost(line.cost)}
       </span>
     </div>
@@ -136,12 +126,9 @@ export function BoqSubRow({ line, rates, onRateChange, openId, onInfoClick, unit
 // at the bottom of grouped sections.
 export function BoqTotalRow({ label, value }) {
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: COL, gap: GAP,
-      marginBottom: 4, paddingLeft: 10, alignItems: 'center',
-    }}>
-      <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>{label}</span>
-      <span style={{ fontWeight: 600, textAlign: 'right', fontSize: 11 }}>{value}</span>
+    <div className="boq-total-static">
+      <span>{label}</span>
+      <span className="boq-row-qty">{value}</span>
       <span /><span />
     </div>
   )

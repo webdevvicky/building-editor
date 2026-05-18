@@ -44,7 +44,7 @@ export default function StructuralBOQSection({
   return (
     <>
       {hasRCC && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="boq-group">
           <SectionHeader title="Structural RCC" />
           {rccLines.map(line => (
             <BoqSubRow key={line.id} line={line}
@@ -55,7 +55,7 @@ export default function StructuralBOQSection({
       )}
 
       {hasSteel && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="boq-group">
           <SectionHeader title="Structural Steel" />
           {steelLines.map(line => (
             <BoqSubRow key={line.id} line={line}
@@ -67,13 +67,14 @@ export default function StructuralBOQSection({
       )}
 
       {hasConcrete && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="boq-group">
           <SectionHeader title="Concrete Materials" />
           {[...concreteByGrade.entries()].map(([formulaId, gradeLines]) => (
-            <div key={formulaId} style={{ marginBottom: 8 }}>
+            <div key={formulaId} className="boq-section">
               <SubSectionHeader title={gradeLabel(gradeLines[0])} />
               {gradeLines.map(line => (
-                <BoqSubRow key={line.id} line={line} labelOverride={stripGradePrefix(line)}
+                <BoqSubRow key={line.id} line={line}
+                  labelOverride={stripGradePrefix(line)}
                   rates={rates} onRateChange={onRateChange}
                   openId={openId} onInfoClick={onInfoClick} unit={unit} />
               ))}
@@ -83,7 +84,7 @@ export default function StructuralBOQSection({
       )}
 
       {hasStair && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="boq-group">
           <SectionHeader title="Staircase" />
           {staircaseLines.map(line => (
             <BoqSubRow key={line.id} line={line}

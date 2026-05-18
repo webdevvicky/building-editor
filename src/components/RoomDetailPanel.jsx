@@ -4,14 +4,17 @@ import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
 import { toast } from './ui/Toast'
+import { Panel } from './ui/Panel'
+import { Button } from './ui/Button'
+import { Field } from './ui/Field'
 
 function Row({ label, value, sub }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-      <span style={{ color: '#555', fontSize: 12 }}>{label}</span>
-      <span style={{ fontWeight: 600, fontSize: 13 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 'var(--space-1)' }}>
+      <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>{label}</span>
+      <span style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-base)' }}>
         {value}
-        {sub && <span style={{ color: '#aaa', fontWeight: 400, fontSize: 11, marginLeft: 4 }}>{sub}</span>}
+        {sub && <span style={{ color: 'var(--color-text-muted)', fontWeight: 'var(--weight-regular)', fontSize: 'var(--text-xs)', marginLeft: 'var(--space-1)' }}>{sub}</span>}
       </span>
     </div>
   )
@@ -19,9 +22,15 @@ function Row({ label, value, sub }) {
 
 function Section({ title, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
-        letterSpacing: 0.6, marginBottom: 6 }}>{title}</div>
+    <div style={{ marginBottom: 'var(--space-3)' }}>
+      <div style={{
+        fontSize: 'var(--text-xs)',
+        fontWeight: 'var(--weight-bold)',
+        color: 'var(--color-text-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+        marginBottom: 'var(--space-2)',
+      }}>{title}</div>
       {children}
     </div>
   )
@@ -102,55 +111,76 @@ export default function RoomDetailPanel() {
     setEditingName(false)
   }
 
-  return (
-    <div style={{
-      position: 'absolute', top: 56, left: 16,
-      background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-      padding: '12px 14px', zIndex: 10, width: 260, fontSize: 13,
-      maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-      boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-    }}>
+  const statusStyle = {
+    fontSize: 'var(--text-xs)',
+    marginTop: 'var(--space-1)',
+    color: valid ? 'var(--color-success)' : 'var(--color-error)',
+    fontWeight: 'var(--weight-semibold)',
+  }
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {editingName ? (
-            <input autoFocus value={nameVal}
-              onChange={e => setNameVal(e.target.value)}
-              onBlur={saveName}
-              onKeyDown={e => {
-                e.stopPropagation()
-                if (e.key === 'Enter') saveName()
-                if (e.key === 'Escape') setEditingName(false)
-              }}
-              style={{ width: '100%', fontSize: 14, fontWeight: 700, padding: '2px 4px',
-                border: '1px solid #4a90e2', borderRadius: 4, outline: 'none' }}
-            />
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontWeight: 700, fontSize: 14, color: '#222', overflow: 'hidden',
-                textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{room.name}</span>
-              <button onClick={() => { setNameVal(room.name); setEditingName(true) }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#aaa',
-                  fontSize: 12, padding: 0, flexShrink: 0 }} title="Rename">✏</button>
-            </div>
-          )}
-          <div style={{ fontSize: 11, marginTop: 2, color: valid ? '#27ae60' : '#e74c3c', fontWeight: 600 }}>
-            {valid
-              ? '✓ Valid room'
-              : hasMissingWalls    ? '⚠ Missing wall refs'
-              : overlappingRoomName ? '⚠ Overlaps another room'
-              : '⚠ Open loop'}
-          </div>
+  const title = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', minWidth: 0 }}>
+      {editingName ? (
+        <input autoFocus value={nameVal}
+          onChange={e => setNameVal(e.target.value)}
+          onBlur={saveName}
+          onKeyDown={e => {
+            e.stopPropagation()
+            if (e.key === 'Enter') saveName()
+            if (e.key === 'Escape') setEditingName(false)
+          }}
+          style={{
+            width: '100%',
+            fontSize: 'var(--text-md)',
+            fontWeight: 'var(--weight-bold)',
+            padding: '2px var(--space-1)',
+            border: '1px solid var(--color-border-focus)',
+            borderRadius: 'var(--radius-sm)',
+            outline: 'none',
+          }}
+        />
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <span style={{
+            fontWeight: 'var(--weight-bold)',
+            fontSize: 'var(--text-md)',
+            color: 'var(--color-text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>{room.name}</span>
+          <Button variant="ghost" size="sm" onClick={() => { setNameVal(room.name); setEditingName(true) }} title="Rename">
+            ✏
+          </Button>
         </div>
-        <button onClick={() => selectRoom(null)}
-          style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer',
-            fontSize: 18, lineHeight: 1, marginLeft: 8, flexShrink: 0 }}>×</button>
+      )}
+      <div style={statusStyle}>
+        {valid
+          ? '✓ Valid room'
+          : hasMissingWalls    ? '⚠ Missing wall refs'
+          : overlappingRoomName ? '⚠ Overlaps another room'
+          : '⚠ Open loop'}
       </div>
+    </div>
+  )
 
+  return (
+    <Panel
+      title={title}
+      onClose={() => selectRoom(null)}
+      width={260}
+      position={{ top: 56, left: 16 }}
+    >
       {!valid && (
-        <div style={{ background: '#fff5f5', border: '1px solid #fcc', borderRadius: 6,
-          padding: '8px 10px', fontSize: 12, color: '#c0392b', marginBottom: 10 }}>
+        <div style={{
+          background: 'var(--color-error-bg)',
+          border: '1px solid var(--color-error-border)',
+          borderRadius: 'var(--radius-md)',
+          padding: 'var(--space-2) var(--space-3)',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--color-error)',
+          marginBottom: 'var(--space-3)',
+        }}>
           {hasMissingWalls
             ? 'One or more wall references are missing — this room\'s geometry cannot be computed. Load a valid save to restore.'
             : overlappingRoomName
@@ -160,27 +190,19 @@ export default function RoomDetailPanel() {
       )}
 
       {/* Room type selector */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
-          letterSpacing: 0.6, marginBottom: 5 }}>Room Type</div>
+      <Field label="Room Type">
         <select value={room.type || 'OTHER'}
-          onChange={e => setRoomType(room.id, e.target.value)}
-          style={{ width: '100%', padding: '5px 8px', border: '1px solid #ccc',
-            borderRadius: 4, fontSize: 13, color: '#333', background: '#fff' }}>
+          onChange={e => setRoomType(room.id, e.target.value)}>
           {ROOM_TYPES.map(t => (
             <option key={t} value={t}>{ROOM_TYPE_LABELS[t]}</option>
           ))}
         </select>
-      </div>
+      </Field>
 
       {/* Plaster system override (Phase 1.6f) */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
-          letterSpacing: 0.6, marginBottom: 5 }}>Plaster System</div>
+      <Field label="Plaster System">
         <select value={room.plasterSystemId ?? ''}
-          onChange={e => setRoomPlasterSystem(room.id, e.target.value || null)}
-          style={{ width: '100%', padding: '5px 8px', border: '1px solid #ccc',
-            borderRadius: 4, fontSize: 13, color: '#333', background: '#fff' }}>
+          onChange={e => setRoomPlasterSystem(room.id, e.target.value || null)}>
           <option value="">
             Use project default ({PLASTER_SYSTEMS[projectSettings?.defaultPlasterSystemId]?.label ?? '—'})
           </option>
@@ -188,7 +210,7 @@ export default function RoomDetailPanel() {
             <option key={sys.id} value={sys.id}>{sys.label}</option>
           ))}
         </select>
-      </div>
+      </Field>
 
       {/* Finish flags */}
       {(() => {
@@ -201,13 +223,21 @@ export default function RoomDetailPanel() {
           ['roofing',        'Roofing'],
         ]
         return (
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', textTransform: 'uppercase',
-              letterSpacing: 0.6, marginBottom: 6 }}>Finishes</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 8px' }}>
+          <div style={{ marginBottom: 'var(--space-3)' }}>
+            <div style={{
+              fontSize: 'var(--text-xs)',
+              fontWeight: 'var(--weight-bold)',
+              color: 'var(--color-text-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.6,
+              marginBottom: 'var(--space-2)',
+            }}>Finishes</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1) var(--space-2)' }}>
               {FLAGS.map(([key, label]) => (
-                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5,
-                  fontSize: 12, color: '#444', cursor: 'pointer' }}>
+                <label key={key} style={{
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                  fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer',
+                }}>
                   <input type="checkbox" checked={finishes[key]}
                     onChange={e => setRoomFinishes(room.id, { [key]: e.target.checked })}
                     style={{ cursor: 'pointer' }}
@@ -229,21 +259,21 @@ export default function RoomDetailPanel() {
             sub={`${realWalls.length} wall${realWalls.length !== 1 ? 's' : ''}${virtualWalls.length ? ` + ${virtualWalls.length} virtual` : ''}`} />
         </Section>
 
-        <div style={{ borderTop: '1px solid #f0f0f0', margin: '8px 0' }} />
+        <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />
 
         {/* Openings */}
         <Section title="Openings">
           {doors.length === 0 && windows.length === 0 && (
-            <div style={{ color: '#bbb', fontSize: 12 }}>No doors or windows</div>
+            <div style={{ color: 'var(--color-text-disabled)', fontSize: 'var(--text-sm)' }}>No doors or windows</div>
           )}
           {doors.length > 0 && (
-            <div style={{ marginBottom: 4 }}>
+            <div style={{ marginBottom: 'var(--space-1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ color: '#555', fontSize: 12 }}>Doors</span>
-                <span style={{ fontWeight: 600 }}>{doors.length}</span>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>Doors</span>
+                <span style={{ fontWeight: 'var(--weight-semibold)' }}>{doors.length}</span>
               </div>
               {doors.map((d, i) => (
-                <div key={i} style={{ fontSize: 11, color: '#888', marginLeft: 10, marginBottom: 1 }}>
+                <div key={i} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'var(--space-3)', marginBottom: 1 }}>
                   • {fmtLen(Math.round(d.width/GRID_IN*10)/10)} × {fmtLen(Math.round(d.height/GRID_IN*10)/10)}
                 </div>
               ))}
@@ -252,11 +282,11 @@ export default function RoomDetailPanel() {
           {windows.length > 0 && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ color: '#555', fontSize: 12 }}>Windows</span>
-                <span style={{ fontWeight: 600 }}>{windows.length}</span>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>Windows</span>
+                <span style={{ fontWeight: 'var(--weight-semibold)' }}>{windows.length}</span>
               </div>
               {windows.map((w, i) => (
-                <div key={i} style={{ fontSize: 11, color: '#888', marginLeft: 10, marginBottom: 1 }}>
+                <div key={i} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'var(--space-3)', marginBottom: 1 }}>
                   • {fmtLen(Math.round(w.width/GRID_IN*10)/10)} × {fmtLen(Math.round(w.height/GRID_IN*10)/10)}
                 </div>
               ))}
@@ -264,7 +294,7 @@ export default function RoomDetailPanel() {
           )}
         </Section>
 
-        <div style={{ borderTop: '1px solid #f0f0f0', margin: '8px 0' }} />
+        <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />
 
         {/* Materials */}
         <Section title="Materials needed">
@@ -288,28 +318,34 @@ export default function RoomDetailPanel() {
         </Section>
 
         {/* Wall breakdown (collapsible) */}
-        <div style={{ borderTop: '1px solid #f0f0f0', margin: '8px 0' }} />
-        <button onClick={() => setShowWalls(v => !v)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4a90e2',
-            fontSize: 12, padding: 0, marginBottom: showWalls ? 8 : 0, fontWeight: 600 }}>
+        <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />
+        <Button variant="ghost" size="sm" onClick={() => setShowWalls(v => !v)}>
           {showWalls ? '▾' : '▸'} Wall breakdown
-        </button>
+        </Button>
         {showWalls && (
-          <div>
+          <div style={{ marginTop: 'var(--space-2)' }}>
             {wallDetails.map((w, i) => (
-              <div key={w.id} style={{ marginBottom: 6, padding: '6px 8px',
-                background: '#f9f9f9', borderRadius: 4, fontSize: 11 }}>
+              <div key={w.id} style={{
+                marginBottom: 'var(--space-2)',
+                padding: 'var(--space-2)',
+                background: 'var(--color-bg-muted)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 'var(--text-xs)',
+              }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                  <span style={{ color: w.isVirtual ? '#888' : '#333', fontWeight: 600 }}>
+                  <span style={{
+                    color: w.isVirtual ? 'var(--color-text-muted)' : 'var(--color-text)',
+                    fontWeight: 'var(--weight-semibold)',
+                  }}>
                     {w.isVirtual ? '┅ Virtual' : w.isPlot ? '⬛ Plot wall' : `Wall ${i + 1}`}
                   </span>
-                  <span style={{ color: '#555' }}>{fmtLen(w.lenFt)} × h{w.hFt}ft</span>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{fmtLen(w.lenFt)} × h{w.hFt}ft</span>
                 </div>
                 {!w.isVirtual && (
-                  <div style={{ color: '#888' }}>
+                  <div style={{ color: 'var(--color-text-muted)' }}>
                     Net area: {fmtArea(w.netArea)}
                     {w.openings.length > 0 && (
-                      <span style={{ marginLeft: 6 }}>
+                      <span style={{ marginLeft: 'var(--space-2)' }}>
                         ({w.openings.map(o => `${o.type === 'door' ? 'D' : 'W'} ${Math.round(o.width/GRID_IN*10)/10}×${Math.round(o.height/GRID_IN*10)/10}`).join(', ')})
                       </span>
                     )}
@@ -322,20 +358,28 @@ export default function RoomDetailPanel() {
       </>}
 
       {/* Delete room */}
-      <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 10, paddingTop: 10 }}>
-        <button onClick={() => {
-            const roomToDelete = rooms[room.id]
-            deleteRoom(room.id)
-            selectRoom(null)
-            toast.action(`Deleted room "${roomToDelete?.name || 'Untitled'}".`, {
-              label: 'Undo', onClick: () => undo(), duration: 5000,
-            })
-          }}
-          style={{ width: '100%', padding: '5px', background: '#fff0f0', border: '1px solid #e74c3c',
-            borderRadius: 4, color: '#e74c3c', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-          Delete room
-        </button>
+      <div style={{
+        borderTop: '1px solid var(--color-border)',
+        marginTop: 'var(--space-3)',
+        paddingTop: 'var(--space-3)',
+      }}>
+        <div style={{ width: '100%' }}>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => {
+              const roomToDelete = rooms[room.id]
+              deleteRoom(room.id)
+              selectRoom(null)
+              toast.action(`Deleted room "${roomToDelete?.name || 'Untitled'}".`, {
+                label: 'Undo', onClick: () => undo(), duration: 5000,
+              })
+            }}
+          >
+            Delete room
+          </Button>
+        </div>
       </div>
-    </div>
+    </Panel>
   )
 }

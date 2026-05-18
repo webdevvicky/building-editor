@@ -492,6 +492,17 @@ export default function Canvas() {
       onMouseLeave={handleMouseLeave}
       onContextMenu={e => e.preventDefault()}
     >
+      <style>{`
+        @keyframes canvas-pulse-once {
+          0%   { opacity: 0; }
+          30%  { opacity: 0.4; }
+          100% { opacity: 0; }
+        }
+        .canvas-selection-pulse {
+          animation: canvas-pulse-once 600ms ease-out 1;
+          pointer-events: none;
+        }
+      `}</style>
       <defs>
         <pattern id="smallGrid" width={FOOT_PX} height={FOOT_PX} patternUnits="userSpaceOnUse">
           <path d={`M ${FOOT_PX} 0 L 0 0 0 ${FOOT_PX}`} fill="none" stroke="#e0e0e0" strokeWidth={0.5}/>
@@ -536,10 +547,22 @@ export default function Canvas() {
           const isSel = room.id === selectedRoomId
           return (
             <g key={room.id} style={fStyle}>
+              {isSel && (
+                <polygon
+                  key={`pulse-room-${room.id}`}
+                  className="canvas-selection-pulse"
+                  points={pts}
+                  fill="var(--color-primary)"
+                  stroke="var(--color-primary)" strokeWidth={4}
+                />
+              )}
               <polygon points={pts}
-                fill={color} fillOpacity={isSel ? 0.25 : 0.12}
-                stroke={color} strokeOpacity={isSel ? 0.8 : 0.3}
+                fill={isSel ? 'var(--color-primary-bg)' : color}
+                fillOpacity={isSel ? 1 : 0.12}
+                stroke={isSel ? 'var(--color-primary)' : color}
+                strokeOpacity={isSel ? 1 : 0.3}
                 strokeWidth={isSel ? 2 : 1}
+                strokeDasharray={isSel ? 'none' : undefined}
                 style={{ cursor: activeTool === 'select' ? 'pointer' : 'default' }}
                 onClick={activeTool === 'select' ? e => { e.stopPropagation(); selectRoom(room.id) } : undefined}
               />
@@ -552,7 +575,7 @@ export default function Canvas() {
         {/* Stamps — x/y is bottom-left corner in world inches */}
         {Object.values(stamps).map(stamp => {
           const isSelected = stamp.id === selectedStampId
-          const color    = isSelected ? '#e74c3c' : '#555'
+          const color    = isSelected ? 'var(--color-primary)' : '#555'
           const isDragging = draggingStamp?.stampId === stamp.id
           // SVG rect: top-left = (sx, sy of top-left corner in Y-up = (stamp.x, stamp.y+stamp.h))
           const rx = sx(stamp.x)
@@ -642,6 +665,23 @@ export default function Canvas() {
             </g>
           )
         })}
+
+        {/* One-shot pulse on newly-selected stamp (key remounts on id change). */}
+        {selectedStampId && stamps[selectedStampId] && (() => {
+          const stamp = stamps[selectedStampId]
+          const rx = sx(stamp.x)
+          const ry = sy(stamp.y + stamp.h)
+          const rw = stamp.w * PX_PER_INCH
+          const rh = stamp.h * PX_PER_INCH
+          return (
+            <rect
+              key={`pulse-stamp-${selectedStampId}`}
+              className="canvas-selection-pulse"
+              x={rx - 4} y={ry - 4} width={rw + 8} height={rh + 8}
+              fill="none" stroke="var(--color-primary)" strokeWidth={4}
+            />
+          )
+        })()}
         </>)}
 
         {layerVisibility.walls && (<>
@@ -654,14 +694,18 @@ export default function Canvas() {
           const isPending       = pendingWallIds.includes(wall.id)
           const isHovered       = wall.id === hoveredWallId
           const isVirtual       = wall.isVirtual ?? false
+          const isSelectedAny   = isSelected || isMultiSelected
           const color = isPending       ? '#27ae60'
-                      : isSelected      ? '#e74c3c'
-                      : isMultiSelected ? '#e67e22'
+                      : isSelectedAny   ? 'var(--color-primary)'
                       : wall.isPlot     ? '#a0522d'
                       : isVirtual       ? '#888'
                       : '#333'
           const thickPx = Math.max(2, (wall.thickness ?? DEFAULT_WALL_THICK_IN) * PX_PER_INCH)
-          const strokeW = (isSelected || isPending || isMultiSelected) ? thickPx + 2 : isVirtual ? 1.5 : thickPx
+          const baseStroke = isVirtual ? 1.5 : thickPx
+          const strokeW = isSelectedAny ? baseStroke + 2
+                        : isPending     ? baseStroke + 2
+                        : baseStroke
+          const glowW   = baseStroke + 6
           const dashArray = isVirtual ? '8 5' : undefined
           const hitW      = Math.max(14, thickPx + 8)
           const len       = wallLength(a, b)
@@ -685,6 +729,12 @@ export default function Canvas() {
               style={{ opacity: fWall.opacity, pointerEvents: fWall.pointerEvents ?? 'auto' }}>
               <line x1={ax} y1={ay} x2={bx} y2={by}
                 stroke="transparent" strokeWidth={hitW} style={{ cursor: wallHitCursor }}/>
+              {isSelectedAny && (
+                <line x1={ax} y1={ay} x2={bx} y2={by}
+                  stroke="var(--color-primary)" strokeWidth={glowW}
+                  strokeLinecap="round" opacity={0.18}
+                  style={{ pointerEvents: 'none' }}/>
+              )}
               {(() => {
                 const { segments, gaps } = getWallSegments(a, b, wall.openings)
                 return <>
@@ -743,6 +793,20 @@ export default function Canvas() {
             </g>
           )
         })}
+
+        {/* One-shot pulse on newly-selected wall (key remounts on id change). */}
+        {selectedWallId && walls[selectedWallId] && nodes[walls[selectedWallId].n1] && nodes[walls[selectedWallId].n2] && (() => {
+          const w = walls[selectedWallId]
+          const a = nodes[w.n1], b = nodes[w.n2]
+          return (
+            <line
+              key={`pulse-wall-${selectedWallId}`}
+              className="canvas-selection-pulse"
+              x1={sx(a.x)} y1={sy(a.y)} x2={sx(b.x)} y2={sy(b.y)}
+              stroke="var(--color-primary)" strokeWidth={12} strokeLinecap="round"
+            />
+          )
+        })()}
         </>)}
 
         {layerVisibility.beams && (<>
@@ -767,7 +831,9 @@ export default function Canvas() {
           // Wall-derived beams stay unselectable by design.
           const isSelected = !isDerived && beam.id === selectedBeamId
           const clickable = !isDerived && activeTool === 'select'
-          const strokeW = isSelected ? 5 : 3
+          const strokeW = isSelected ? 6 : 3
+          const beamStroke = isSelected ? 'var(--color-primary)' : color
+          const beamOpacity = isSelected ? 1 : 0.7 * (fBeam.opacity ?? 1)
           return (
             <g key={beam.id}>
               {/* Wider invisible hit target for easier clicking */}
@@ -779,12 +845,28 @@ export default function Canvas() {
                   onMouseDown={(e) => { e.stopPropagation(); selectBeam(beam.id) }}
                 />
               )}
+              {isSelected && (
+                <line
+                  x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
+                  stroke="var(--color-primary)" strokeWidth={strokeW + 6}
+                  strokeLinecap="round" opacity={0.18}
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
               <line
                 x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
-                stroke={color} strokeWidth={strokeW} strokeOpacity={0.7 * (fBeam.opacity ?? 1)}
+                stroke={beamStroke} strokeWidth={strokeW} strokeOpacity={beamOpacity}
                 strokeDasharray={dash}
                 style={{ pointerEvents: 'none' }}
               />
+              {isSelected && (
+                <line
+                  key={`pulse-beam-${beam.id}`}
+                  className="canvas-selection-pulse"
+                  x1={sx(fromPos.x)} y1={sy(fromPos.y)} x2={sx(toPos.x)} y2={sy(toPos.y)}
+                  stroke="var(--color-primary)" strokeWidth={12} strokeLinecap="round"
+                />
+              )}
             </g>
           )
         })}
@@ -844,8 +926,8 @@ export default function Canvas() {
           const ct  = projectSettings.columnTypes.find(t => t.id === col.columnTypeId)
           if (!ct) return null
           const isSelected = col.id === selectedColumnId
-          const strokeColor = isSelected ? '#e74c3c' : col.attachedNodeId ? '#2471a3' : '#555'
-          const fillColor   = isSelected ? '#fde8e8' : col.attachedNodeId ? '#d6eaf8' : '#ecf0f1'
+          const strokeColor = isSelected ? 'var(--color-primary)' : col.attachedNodeId ? '#2471a3' : '#555'
+          const fillColor   = isSelected ? 'var(--color-primary-bg)' : col.attachedNodeId ? '#d6eaf8' : '#ecf0f1'
           const strokeW     = isSelected ? 2 : 1.5
           const fCol = columnStyle(col)
 
@@ -877,6 +959,34 @@ export default function Canvas() {
             />
           )
         })}
+
+        {/* One-shot pulse on newly-selected column (key remounts on id change). */}
+        {selectedColumnId && columns[selectedColumnId] && (() => {
+          const col = columns[selectedColumnId]
+          const ct  = projectSettings.columnTypes.find(t => t.id === col.columnTypeId)
+          if (!ct) return null
+          const pos = getColPos(col, nodes)
+          const dims = getColumnSvgDims(ct, PX_PER_INCH)
+          if (dims.r !== undefined) {
+            return (
+              <circle
+                key={`pulse-col-${selectedColumnId}`}
+                className="canvas-selection-pulse"
+                cx={sx(pos.x)} cy={sy(pos.y)} r={dims.r + 6}
+                fill="none" stroke="var(--color-primary)" strokeWidth={4}
+              />
+            )
+          }
+          return (
+            <rect
+              key={`pulse-col-${selectedColumnId}`}
+              className="canvas-selection-pulse"
+              x={sx(pos.x) - dims.w/2 - 4} y={sy(pos.y) - dims.h/2 - 4}
+              width={dims.w + 8} height={dims.h + 8}
+              fill="none" stroke="var(--color-primary)" strokeWidth={4}
+            />
+          )
+        })()}
         </>)}
 
         {/* Beam tool: ghost line from selected first column to cursor */}

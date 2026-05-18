@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { DEFAULT_LAYER_VISIBILITY } from '../constants/layers'
+import { Panel } from './ui/Panel.jsx'
+import { Button } from './ui/Button.jsx'
 
 const LAYER_LABELS = {
   walls:      'Walls',
@@ -19,50 +21,85 @@ export default function LayersPanel() {
 
   const allOn = Object.values(layerVisibility).every(Boolean)
 
+  const toggleHeader = (
+    <button
+      onClick={() => setExpanded(v => !v)}
+      style={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 'var(--space-2) var(--space-3)',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 'var(--weight-semibold)',
+        color: 'var(--color-text-secondary)',
+      }}
+    >
+      <span>Layers</span>
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+        {expanded ? '▲' : '▼'}
+      </span>
+    </button>
+  )
+
   return (
-    <div style={{
-      position: 'fixed', bottom: 56, left: 16, zIndex: 50,
-      background: '#fff', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-      border: '1px solid #e0e0e0', userSelect: 'none', minWidth: 160,
-    }}>
-      <button
-        onClick={() => setExpanded(v => !v)}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '6px 10px', background: 'none', border: 'none', cursor: 'pointer',
-          fontSize: 11, fontWeight: 600, color: '#555',
-        }}
-      >
-        <span>Layers</span>
-        <span style={{ fontSize: 9, color: '#aaa' }}>{expanded ? '▲' : '▼'}</span>
-      </button>
+    <Panel
+      width={200}
+      position={{ bottom: 56, left: 16 }}
+      zIndex={'var(--z-overlay)'}
+    >
+      {toggleHeader}
 
       {expanded && (
-        <div style={{ padding: '4px 10px 8px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px', marginBottom: 6 }}>
+        <div style={{ padding: '0 var(--space-3) var(--space-2)' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 'var(--space-1) var(--space-3)',
+              marginBottom: 'var(--space-2)',
+            }}
+          >
             {Object.entries(DEFAULT_LAYER_VISIBILITY).map(([key]) => (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, color: '#444' }}>
+              <label
+                key={key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  cursor: 'pointer',
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={layerVisibility[key] ?? true}
                   onChange={e => setLayerVisibility({ [key]: e.target.checked })}
-                  style={{ cursor: 'pointer', accentColor: '#3498db' }}
+                  style={{ cursor: 'pointer', accentColor: 'var(--color-primary)' }}
                 />
                 {LAYER_LABELS[key]}
               </label>
             ))}
           </div>
-          <button
-            onClick={() => setLayerVisibility(Object.fromEntries(Object.keys(DEFAULT_LAYER_VISIBILITY).map(k => [k, !allOn])))}
-            style={{
-              fontSize: 10, color: '#888', background: 'none', border: '1px solid #ddd',
-              borderRadius: 3, padding: '2px 6px', cursor: 'pointer', width: '100%',
-            }}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setLayerVisibility(
+                Object.fromEntries(
+                  Object.keys(DEFAULT_LAYER_VISIBILITY).map(k => [k, !allOn])
+                )
+              )
+            }
           >
             {allOn ? 'Hide all' : 'Show all'}
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </Panel>
   )
 }

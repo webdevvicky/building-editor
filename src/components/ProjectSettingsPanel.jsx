@@ -1,43 +1,82 @@
 import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
-import { getColumnDimLabel } from '../lib/columnShapes'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
-
-const overlay = {
-  position: 'fixed', top: '50%', left: '50%',
-  transform: 'translate(-50%, -50%)', zIndex: 100,
-  width: 480, maxHeight: '80vh', overflowY: 'auto',
-  background: '#fff', borderRadius: 8,
-  padding: 20, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-  fontSize: 13,
-}
-
-const headerRow = {
-  display: 'flex', justifyContent: 'space-between',
-  alignItems: 'center', marginBottom: 16,
-}
-
-const closeBtn = {
-  background: 'none', border: 'none', fontSize: 18,
-  cursor: 'pointer', color: '#555', lineHeight: 1, padding: '0 4px',
-}
+import { Modal } from './ui/Modal.jsx'
+import { Button } from './ui/Button.jsx'
 
 const sectionHead = {
-  fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-  color: '#aaa', letterSpacing: 0.5, marginBottom: 6, marginTop: 16,
+  fontSize: 'var(--text-xs)',
+  fontWeight: 'var(--weight-bold)',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-muted)',
+  letterSpacing: 0.5,
+  marginBottom: 'var(--space-2)',
+  marginTop: 'var(--space-4)',
 }
 
-const fieldRow = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }
+const fieldRow = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-2)',
+  marginBottom: 'var(--space-2)',
+}
 
-const lbl = { color: '#666', minWidth: 160, fontSize: 12 }
+const lbl = {
+  color: 'var(--color-text-secondary)',
+  minWidth: 160,
+  fontSize: 'var(--text-sm)',
+}
 
-const numInput = { width: 72, fontSize: 13 }
+const numInput = {
+  width: 72,
+  fontSize: 'var(--text-base)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
 
-const divider = { borderTop: '1px solid #f0f0f0', margin: '4px 0' }
+const divider = {
+  borderTop: '1px solid var(--color-border)',
+  margin: 'var(--space-1) 0',
+}
 
-const tableStyle = { width: '100%', fontSize: 12, borderCollapse: 'collapse' }
-const thStyle = { textAlign: 'left', color: '#888', fontWeight: 600, paddingBottom: 4 }
-const tdStyle = { paddingBottom: 4, paddingRight: 8 }
+const selectStyle = {
+  flex: 1,
+  fontSize: 'var(--text-base)',
+  padding: '3px var(--space-2)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
+
+const labelInput = {
+  fontSize: 'var(--text-sm)',
+  fontWeight: 'var(--weight-semibold)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  flex: 1,
+  marginRight: 'var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
+
+const ctCard = {
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: 'var(--space-2) var(--space-3)',
+  marginBottom: 'var(--space-2)',
+  background: 'var(--color-surface)',
+}
+
+const hintText = {
+  fontSize: 'var(--text-xs)',
+  color: 'var(--color-text-muted)',
+  marginBottom: 'var(--space-2)',
+}
 
 function NumField({ label, value, onChange, min = 0, step = 0.5 }) {
   return (
@@ -82,7 +121,8 @@ export default function ProjectSettingsPanel() {
   const setProjectSettings      = useStore(s => s.setProjectSettings)
   const setFoundationDefaults   = useStore(s => s.setFoundationDefaults)
 
-  if (activeTool !== 'settings') return null
+  const open = activeTool === 'settings'
+  const onClose = () => setTool('select')
 
   const {
     heights,
@@ -93,7 +133,7 @@ export default function ProjectSettingsPanel() {
     staircaseDefaults,
     columnTypes,
     rccSpecs,
-  } = projectSettings
+  } = projectSettings ?? {}
 
   const steelRatios = rccSpecs?.steelKgPerM3 ?? {}
 
@@ -106,13 +146,30 @@ export default function ProjectSettingsPanel() {
     { key: 'CIVIL_STAMP', label: 'Civil (sump/septic)' },
   ]
 
-  return (
-    <div style={overlay}>
-      <div style={headerRow}>
-        <strong style={{ fontSize: 15 }}>Project Settings</strong>
-        <button style={closeBtn} onClick={() => setTool('select')}>×</button>
-      </div>
+  // If settings haven't been loaded yet, just don't render anything inside —
+  // the Modal scaffolding is still presented if open.
+  if (!open || !projectSettings) {
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Project Settings"
+        width={560}
+        footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+      >
+        <div />
+      </Modal>
+    )
+  }
 
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Project Settings"
+      width={560}
+      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+    >
       {/* 1. Floor Heights */}
       <div style={sectionHead}>Floor Heights</div>
       <NumField
@@ -133,7 +190,7 @@ export default function ProjectSettingsPanel() {
       <div style={fieldRow}>
         <span style={lbl}>System</span>
         <select
-          style={{ flex: 1, fontSize: 13, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
+          style={selectStyle}
           value={projectSettings?.defaultPlasterSystemId ?? ''}
           onKeyDown={e => e.stopPropagation()}
           onChange={e => setProjectSettings({ defaultPlasterSystemId: e.target.value })}
@@ -143,9 +200,7 @@ export default function ProjectSettingsPanel() {
           ))}
         </select>
       </div>
-      <div style={{ fontSize: 10, color: '#aaa', marginBottom: 8 }}>
-        Per-room override available in Room panel.
-      </div>
+      <div style={hintText}>Per-room override available in Room panel.</div>
 
       <div style={divider} />
 
@@ -156,7 +211,7 @@ export default function ProjectSettingsPanel() {
         value={projectSettings?.foundationDefaults?.plumDepthFt ?? 0}
         onChange={v => setFoundationDefaults({ plumDepthFt: v })}
       />
-      <div style={{ fontSize: 10, color: '#aaa', marginBottom: 8 }}>
+      <div style={hintText}>
         Mass concrete (typically M15 with 30–40% stone) under footings. 0 disables.
       </div>
 
@@ -168,9 +223,17 @@ export default function ProjectSettingsPanel() {
         const dims = beamDimensions[lvl.id] ?? { widthIn: lvl.defaultWidthIn, depthIn: lvl.defaultDepthIn }
         return (
           <div key={lvl.id}>
-            <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{lvl.label}</div>
+            <div
+              style={{
+                fontSize: 'var(--text-xs)',
+                color: 'var(--color-text-muted)',
+                marginBottom: 'var(--space-1)',
+              }}
+            >
+              {lvl.label}
+            </div>
             <div style={fieldRow}>
-              <span style={{ ...lbl, minWidth: 160 }}>Width (in)</span>
+              <span style={lbl}>Width (in)</span>
               <input
                 type="number" min={1} step={1} style={numInput}
                 value={dims.widthIn}
@@ -179,7 +242,7 @@ export default function ProjectSettingsPanel() {
               />
             </div>
             <div style={fieldRow}>
-              <span style={{ ...lbl, minWidth: 160 }}>Depth (in)</span>
+              <span style={lbl}>Depth (in)</span>
               <input
                 type="number" min={1} step={1} style={numInput}
                 value={dims.depthIn}
@@ -250,7 +313,7 @@ export default function ProjectSettingsPanel() {
 
       {/* 6. RCC Specifications — steel ratios per element */}
       <div style={sectionHead}>RCC Specifications</div>
-      <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>Steel reinforcement (kg/m³ of RCC)</div>
+      <div style={hintText}>Steel reinforcement (kg/m³ of RCC)</div>
       {STEEL_ELEMENTS.map(({ key, label }) => (
         <NumField
           key={key}
@@ -266,20 +329,34 @@ export default function ProjectSettingsPanel() {
       {/* 7. Column & Footing Types — editable */}
       <div style={sectionHead}>Column &amp; Footing Types</div>
       {(columnTypes ?? []).map(ct => (
-        <div key={ct.id} style={{ border: '1px solid #eee', borderRadius: 4, padding: '8px 10px', marginBottom: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div key={ct.id} style={ctCard}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 'var(--space-2)',
+            }}
+          >
             <input
-              style={{ fontSize: 12, fontWeight: 600, border: '1px solid #ddd', borderRadius: 3, padding: '2px 6px', flex: 1, marginRight: 8 }}
+              style={labelInput}
               value={ct.label}
               onKeyDown={e => e.stopPropagation()}
               onChange={e => setColumnTypeEntry(ct.id, { label: e.target.value })}
             />
-            <button
-              style={{ background: '#fff0f0', border: '1px solid #e74c3c', borderRadius: 3, color: '#e74c3c', cursor: 'pointer', fontSize: 10, padding: '2px 6px' }}
-              onClick={() => removeColumnType(ct.id)}
-            >✕</button>
+            <Button variant="danger" size="sm" onClick={() => removeColumnType(ct.id)}>
+              ✕
+            </Button>
           </div>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Section</div>
+          <div
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--color-text-muted)',
+              marginBottom: 'var(--space-1)',
+            }}
+          >
+            Section
+          </div>
           {ct.shape === 'circle' ? (
             <NumField label="Diameter (in)" step={1} value={ct.diamIn ?? 12}
               onChange={v => setColumnTypeEntry(ct.id, { diamIn: v })} />
@@ -291,7 +368,16 @@ export default function ProjectSettingsPanel() {
                 onChange={v => setColumnTypeEntry(ct.id, { depthIn: v })} />
             </>
           )}
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4, marginTop: 4 }}>Footing</div>
+          <div
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--color-text-muted)',
+              marginBottom: 'var(--space-1)',
+              marginTop: 'var(--space-1)',
+            }}
+          >
+            Footing
+          </div>
           <NumField label="Length (ft)" step={0.5} value={ct.footingLengthFt ?? 4}
             onChange={v => setColumnTypeEntry(ct.id, { footingLengthFt: v })} />
           <NumField label="Width (ft)" step={0.5} value={ct.footingWidthFt ?? 4}
@@ -300,10 +386,9 @@ export default function ProjectSettingsPanel() {
             onChange={v => setColumnTypeEntry(ct.id, { footingDepthFt: v })} />
         </div>
       ))}
-      <button
-        style={{ fontSize: 11, background: '#f0f7ff', border: '1px solid #3498db', borderRadius: 4, color: '#2471a3', cursor: 'pointer', padding: '4px 10px', marginBottom: 8 }}
-        onClick={() => addColumnType({})}
-      >+ Add Column Type</button>
+      <Button variant="primary" size="sm" onClick={() => addColumnType({})}>
+        + Add Column Type
+      </Button>
 
       <div style={divider} />
 
@@ -339,6 +424,6 @@ export default function ProjectSettingsPanel() {
         value={staircaseDefaults.flightWidthFt}
         onChange={v => setStaircaseDefaults({ flightWidthFt: v })}
       />
-    </div>
+    </Modal>
   )
 }

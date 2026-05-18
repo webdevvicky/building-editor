@@ -11,47 +11,78 @@ import { useStore } from '../store'
 import { REINFORCEMENT_SPEC_PRESETS } from '../specs/reinforcementSpecs'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { dialog } from './ui/Dialog'
+import { Modal } from './ui/Modal.jsx'
+import { Button } from './ui/Button.jsx'
 
-const overlay = {
-  position: 'fixed', top: '50%', left: '50%',
-  transform: 'translate(-50%, -50%)', zIndex: 100,
-  width: 480, maxHeight: '80vh', overflowY: 'auto',
-  background: '#fff', borderRadius: 8,
-  padding: 20, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-  fontSize: 13,
-}
-const headerRow = {
-  display: 'flex', justifyContent: 'space-between',
-  alignItems: 'center', marginBottom: 16,
-}
-const closeBtn = {
-  background: 'none', border: 'none', fontSize: 18,
-  cursor: 'pointer', color: '#555', lineHeight: 1, padding: '0 4px',
-}
 const sectionHead = {
-  fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-  color: '#aaa', letterSpacing: 0.5, marginBottom: 6, marginTop: 16,
+  fontSize: 'var(--text-xs)',
+  fontWeight: 'var(--weight-bold)',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-muted)',
+  letterSpacing: 0.5,
+  marginBottom: 'var(--space-2)',
+  marginTop: 'var(--space-4)',
 }
-const fieldRow = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }
-const lbl = { color: '#666', minWidth: 140, fontSize: 12 }
-const numInput = { width: 72, fontSize: 13 }
-const divider = { borderTop: '1px solid #f0f0f0', margin: '8px 0' }
-const card = { border: '1px solid #eee', borderRadius: 4, padding: '8px 10px', marginBottom: 8 }
-const primaryBtn = {
-  fontSize: 11, background: '#f0f7ff', border: '1px solid #3498db',
-  borderRadius: 4, color: '#2471a3', cursor: 'pointer', padding: '4px 10px',
+const fieldRow = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-2)',
+  marginBottom: 'var(--space-2)',
 }
-const subtleBtn = {
-  fontSize: 10, background: '#fafafa', border: '1px solid #ddd',
-  borderRadius: 3, color: '#666', cursor: 'pointer', padding: '2px 6px',
+const lbl = {
+  color: 'var(--color-text-secondary)',
+  minWidth: 140,
+  fontSize: 'var(--text-sm)',
 }
-const dangerBtn = {
-  background: '#fff0f0', border: '1px solid #e74c3c',
-  borderRadius: 3, color: '#e74c3c', cursor: 'pointer', fontSize: 10, padding: '2px 6px',
+const numInput = {
+  width: 72,
+  fontSize: 'var(--text-base)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
+const divider = {
+  borderTop: '1px solid var(--color-border)',
+  margin: 'var(--space-2) 0',
+}
+const card = {
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: 'var(--space-2) var(--space-3)',
+  marginBottom: 'var(--space-2)',
+  background: 'var(--color-surface)',
 }
 const defaultPill = {
-  fontSize: 9, background: '#27ae60', color: '#fff',
-  borderRadius: 2, padding: '1px 4px', marginLeft: 6,
+  fontSize: 'var(--text-xs)',
+  background: 'var(--color-success-bg)',
+  color: 'var(--color-success)',
+  border: '1px solid var(--color-success-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '1px var(--space-2)',
+  marginLeft: 'var(--space-2)',
+  fontWeight: 'var(--weight-medium)',
+}
+
+const textInput = {
+  flex: 1,
+  fontSize: 'var(--text-sm)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '2px var(--space-2)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+}
+
+const selectStyle = {
+  flex: 1,
+  fontSize: 'var(--text-base)',
+  padding: '3px var(--space-2)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
 }
 
 const ELEMENT_TYPES = ['COLUMN', 'BEAM', 'FOOTING', 'SLAB']
@@ -75,7 +106,7 @@ function SelectField({ label, value, onChange, options }) {
     <div style={fieldRow}>
       <span style={lbl}>{label}</span>
       <select
-        style={{ flex: 1, fontSize: 13, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
+        style={selectStyle}
         value={value ?? ''}
         onKeyDown={e => e.stopPropagation()}
         onChange={e => onChange(e.target.value)}
@@ -96,7 +127,7 @@ function SpecEditor({ spec, onChange }) {
       <div style={fieldRow}>
         <span style={lbl}>Label</span>
         <input
-          style={{ flex: 1, fontSize: 12, border: '1px solid #ddd', borderRadius: 3, padding: '2px 6px' }}
+          style={textInput}
           value={spec.label ?? ''}
           onKeyDown={e => e.stopPropagation()}
           onChange={e => setField('label', e.target.value)}
@@ -189,7 +220,8 @@ export default function BBSSpecPanel() {
   const [creating, setCreating]     = useState(false)
   const [newType, setNewType]       = useState('COLUMN')
 
-  if (activeTool !== 'bbs') return null
+  const open = activeTool === 'bbs'
+  const onClose = () => setTool('select')
 
   const specMap  = projectSettings?.reinforcementSpecs ?? {}
   const defaults = projectSettings?.bbsDefaults ?? {}
@@ -251,11 +283,6 @@ export default function BBSSpecPanel() {
     }
     setProjectSettings({ bbsDefaults: { ...defaults, [spec.elementType]: spec.id } })
   }
-  const clearBeamClassDefault = (classId) => {
-    const beamDefaults = { ...(defaults.BEAM ?? {}) }
-    delete beamDefaults[classId]
-    setProjectSettings({ bbsDefaults: { ...defaults, BEAM: beamDefaults } })
-  }
   const setBeamClassDefault = (classId, specId) => {
     const beamDefaults = { ...(defaults.BEAM ?? {}) }
     if (specId) beamDefaults[classId] = specId
@@ -286,29 +313,40 @@ export default function BBSSpecPanel() {
   }
 
   return (
-    <div style={overlay}>
-      <div style={headerRow}>
-        <strong style={{ fontSize: 15 }}>Bar Bending Schedule — Reinforcement Specs</strong>
-        <button style={closeBtn} onClick={() => setTool('select')}>×</button>
-      </div>
-
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Bar Bending Schedule — Reinforcement Specs"
+      width={520}
+      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+    >
       <div style={sectionHead}>Presets</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
         {Object.values(REINFORCEMENT_SPEC_PRESETS).map(p => (
-          <button key={p.id} style={subtleBtn}
-                  disabled={!!specMap[p.id]}
-                  onClick={() => applyPreset(p)}>
+          <Button
+            key={p.id}
+            variant="secondary"
+            size="sm"
+            disabled={!!specMap[p.id]}
+            onClick={() => applyPreset(p)}
+          >
             + {p.id}
-          </button>
+          </Button>
         ))}
-        <button style={primaryBtn} onClick={applyAllPresets}>Apply all</button>
+        <Button variant="primary" size="sm" onClick={applyAllPresets}>Apply all</Button>
       </div>
 
       <div style={divider} />
 
       <div style={sectionHead}>Specs ({specs.length})</div>
       {specs.length === 0 && (
-        <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>
+        <div
+          style={{
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-text-muted)',
+            marginBottom: 'var(--space-2)',
+          }}
+        >
           No specs yet. Apply a preset above or create a new one below.
         </div>
       )}
@@ -317,26 +355,43 @@ export default function BBSSpecPanel() {
           ? Object.values(defaults.BEAM ?? {}).includes(s.id)
           : defaults[s.elementType] === s.id
         const isSelected = selectedId === s.id
+        const cardStyle = isSelected
+          ? { ...card, borderColor: 'var(--color-primary)' }
+          : card
         return (
-          <div key={s.id} style={{ ...card, borderColor: isSelected ? '#3498db' : '#eee' }}>
+          <div key={s.id} style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ cursor: 'pointer', flex: 1 }}
-                   onClick={() => setSelectedId(isSelected ? null : s.id)}>
-                <span style={{ fontWeight: 600, fontSize: 12 }}>{s.label}</span>
-                <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>{s.elementType}</span>
+              <div
+                style={{ cursor: 'pointer', flex: 1 }}
+                onClick={() => setSelectedId(isSelected ? null : s.id)}
+              >
+                <span style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>
+                  {s.label}
+                </span>
+                <span
+                  style={{
+                    fontSize: 'var(--text-xs)',
+                    color: 'var(--color-text-muted)',
+                    marginLeft: 'var(--space-2)',
+                  }}
+                >
+                  {s.elementType}
+                </span>
                 {isDefault && <span style={defaultPill}>DEFAULT</span>}
               </div>
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
                 {!isDefault && (
-                  <button style={subtleBtn} onClick={() => setAsDefault(s)}>
+                  <Button variant="secondary" size="sm" onClick={() => setAsDefault(s)}>
                     Set default
-                  </button>
+                  </Button>
                 )}
-                <button style={dangerBtn} onClick={() => removeSpec(s.id)}>✕</button>
+                <Button variant="danger" size="sm" onClick={() => removeSpec(s.id)}>
+                  ✕
+                </Button>
               </div>
             </div>
             {isSelected && (
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 'var(--space-2)' }}>
                 <SpecEditor spec={s} onChange={updateSelected} />
               </div>
             )}
@@ -348,14 +403,16 @@ export default function BBSSpecPanel() {
 
       <div style={sectionHead}>Add new spec</div>
       {!creating ? (
-        <button style={primaryBtn} onClick={() => setCreating(true)}>+ Add new spec</button>
+        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+          + Add new spec
+        </Button>
       ) : (
         <div style={card}>
           <SelectField label="Element type" value={newType}
             onChange={setNewType} options={ELEMENT_TYPES} />
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            <button style={primaryBtn} onClick={createSpec}>Create</button>
-            <button style={subtleBtn} onClick={() => setCreating(false)}>Cancel</button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+            <Button variant="primary" size="sm" onClick={createSpec}>Create</Button>
+            <Button variant="ghost" size="sm" onClick={() => setCreating(false)}>Cancel</Button>
           </div>
         </div>
       )}
@@ -363,7 +420,13 @@ export default function BBSSpecPanel() {
       <div style={divider} />
 
       <div style={sectionHead}>Project defaults</div>
-      <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>
+      <div
+        style={{
+          fontSize: 'var(--text-xs)',
+          color: 'var(--color-text-muted)',
+          marginBottom: 'var(--space-2)',
+        }}
+      >
         Entities without a specific reinforcementSpecId fall back to these
         defaults. Entities without spec AND without default fall back to the
         kg/m³ estimate.
@@ -380,10 +443,12 @@ export default function BBSSpecPanel() {
                 <span style={lbl}>BEAM (per class)</span>
               </div>
               {BEAM_LEVEL_REGISTRY.map(lvl => (
-                <div key={lvl.id} style={{ ...fieldRow, paddingLeft: 12 }}>
-                  <span style={{ ...lbl, minWidth: 120, fontSize: 11 }}>{lvl.label}</span>
+                <div key={lvl.id} style={{ ...fieldRow, paddingLeft: 'var(--space-3)' }}>
+                  <span style={{ ...lbl, minWidth: 120, fontSize: 'var(--text-xs)' }}>
+                    {lvl.label}
+                  </span>
                   <select
-                    style={{ flex: 1, fontSize: 12, padding: '2px 6px', border: '1px solid #ccc', borderRadius: 4 }}
+                    style={{ ...selectStyle, fontSize: 'var(--text-sm)' }}
                     value={beamDefaults[lvl.id] ?? ''}
                     onKeyDown={e => e.stopPropagation()}
                     onChange={e => setBeamClassDefault(lvl.id, e.target.value || null)}
@@ -399,12 +464,17 @@ export default function BBSSpecPanel() {
         return (
           <div key={et} style={fieldRow}>
             <span style={lbl}>{et}</span>
-            <span style={{ fontSize: 12, color: defaults[et] ? '#27ae60' : '#aaa' }}>
+            <span
+              style={{
+                fontSize: 'var(--text-sm)',
+                color: defaults[et] ? 'var(--color-success)' : 'var(--color-text-muted)',
+              }}
+            >
               {defaults[et] ? specMap[defaults[et]]?.label ?? defaults[et] : '— (use kg/m³ estimate)'}
             </span>
           </div>
         )
       })}
-    </div>
+    </Modal>
   )
 }

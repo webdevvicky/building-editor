@@ -8,6 +8,9 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { GRID_IN } from '../geometry'
+import { Panel } from './ui/Panel'
+import { Button } from './ui/Button'
+import { Field } from './ui/Field'
 
 const CIVIL_TYPES = new Set(['sump', 'overhead_tank', 'septic_tank'])
 
@@ -25,6 +28,7 @@ export default function StampPanel() {
   const resizeStamp     = useStore(s => s.resizeStamp)
   const updateStamp     = useStore(s => s.updateStamp)
   const deleteStamp     = useStore(s => s.deleteStamp)
+  const selectStamp     = useStore(s => s.selectStamp)
   const unit            = useStore(s => s.unit)
 
   const stamp   = stamps[selectedStampId]
@@ -86,80 +90,71 @@ export default function StampPanel() {
     return `${ft3} ft³`
   }
 
-  const inputStyle = { width: 60, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }
-  const rowStyle   = { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }
-  const labelStyle = { color: '#555', width: 50 }
-
   return (
-    <div style={{
-      position: 'absolute', top: 56, left: 16,
-      background: '#fff', border: '1px solid #ccc', borderRadius: 8,
-      padding: '12px 14px', zIndex: 10, minWidth: 200, fontSize: 13,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span style={{ fontWeight: 700, color: '#333' }}>{label}</span>
-        <button onClick={() => deleteStamp(stamp.id)}
-          style={{ background: '#fff0f0', border: '1px solid #e74c3c', borderRadius: 4,
-            color: '#e74c3c', cursor: 'pointer', fontSize: 11, padding: '3px 8px', fontWeight: 600 }}>
+    <Panel
+      title={label}
+      onClose={() => selectStamp(null)}
+      width={260}
+      position={{ top: 56, left: 16 }}
+    >
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <Button variant="danger" size="sm" onClick={() => deleteStamp(stamp.id)}>
           Delete
-        </button>
+        </Button>
       </div>
 
       {isCivil && (
-        <div style={{ ...rowStyle, marginBottom: 10 }}>
-          <label style={labelStyle}>Name</label>
+        <Field label="Name">
           <input type="text" value={name}
             onChange={e => handleName(e.target.value)}
             onKeyDown={e => e.stopPropagation()}
-            style={{ flex: 1, padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4 }}
           />
-        </div>
+        </Field>
       )}
 
-      <div style={rowStyle}>
-        <label style={labelStyle}>Width</label>
+      <Field label="Width" inline hint="ft">
         <input type="number" value={w} min={1} step={0.5}
           onChange={e => handleW(e.target.value)}
           onKeyDown={e => e.stopPropagation()}
-          style={inputStyle}
         />
-        <span style={{ color: '#999', fontSize: 11 }}>ft</span>
-      </div>
+      </Field>
 
-      <div style={{ ...rowStyle, marginBottom: isCivil ? 8 : 0 }}>
-        <label style={labelStyle}>
-          {stamp.type === 'stairs' ? 'Depth' : 'Length'}
-        </label>
+      <Field label={stamp.type === 'stairs' ? 'Depth' : 'Length'} inline hint="ft">
         <input type="number" value={h} min={1} step={0.5}
           onChange={e => handleH(e.target.value)}
           onKeyDown={e => e.stopPropagation()}
-          style={inputStyle}
         />
-        <span style={{ color: '#999', fontSize: 11 }}>ft</span>
-      </div>
+      </Field>
 
       {isCivil && (
-        <div style={rowStyle}>
-          <label style={labelStyle}>Depth</label>
+        <Field label="Depth" inline hint="ft">
           <input type="number" value={depth} min={1} step={0.5}
             onChange={e => handleDepth(e.target.value)}
             onKeyDown={e => e.stopPropagation()}
-            style={inputStyle}
           />
-          <span style={{ color: '#999', fontSize: 11 }}>ft</span>
-        </div>
+        </Field>
       )}
 
       {hasExcavation && (
-        <div style={{ marginTop: 4, padding: '6px 8px', background: '#f5f5f5',
-          borderRadius: 4, fontSize: 11, color: '#555' }}>
+        <div style={{
+          marginTop: 'var(--space-1)',
+          padding: 'var(--space-2)',
+          background: 'var(--color-bg-muted)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: 'var(--text-xs)',
+          color: 'var(--color-text-secondary)',
+        }}>
           Excavation: <strong>{fmtVol()}</strong>
         </div>
       )}
 
-      <div style={{ marginTop: 10, fontSize: 11, color: '#aaa' }}>
+      <div style={{
+        marginTop: 'var(--space-3)',
+        fontSize: 'var(--text-xs)',
+        color: 'var(--color-text-muted)',
+      }}>
         Drag to reposition · Delete key to remove
       </div>
-    </div>
+    </Panel>
   )
 }

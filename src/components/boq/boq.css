@@ -1,0 +1,465 @@
+/* Phase 2D — BOQ panel visual layer.
+   Linear/Notion/Stripe-style: restrained, readable, professional.
+   Consumes tokens from src/design/tokens.css. No raw hex values. */
+
+/* ── Panel shell ─────────────────────────────────────────────────────────── */
+.boq-panel {
+  position: absolute;
+  bottom: var(--space-4);
+  right: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  z-index: var(--z-panel);
+  min-width: 420px;
+  max-height: calc(100vh - var(--space-12));
+  overflow-y: auto;
+  font-size: var(--text-base);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+
+.boq-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-1);
+}
+.boq-panel-title {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  font-size: var(--text-md);
+}
+.boq-panel-disclaimer {
+  font-size: var(--text-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+/* Floor toggle (segmented) */
+.boq-floor-toggle {
+  display: inline-flex;
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.boq-floor-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  padding: 2px var(--space-2);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out),
+              color var(--motion-fast) var(--ease-out);
+}
+.boq-floor-toggle button:hover {
+  color: var(--color-text);
+}
+.boq-floor-toggle button.is-active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Summary info rows (Walls / Total length / Wall area / Floor area) ──── */
+.boq-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-1);
+  padding: 2px 0;
+  font-size: var(--text-sm);
+}
+.boq-info-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+}
+.boq-info-value {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+.boq-divider {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-2) 0;
+}
+
+/* ── Column header row above rows ────────────────────────────────────────── */
+.boq-col-header {
+  display: grid;
+  grid-template-columns: 1fr 76px 104px 90px;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-2);
+  padding: 0 var(--space-2);
+}
+.boq-col-header > span:nth-child(2),
+.boq-col-header > span:nth-child(3),
+.boq-col-header > span:nth-child(4) {
+  text-align: right;
+}
+
+/* ── Row primitives ──────────────────────────────────────────────────────── */
+.boq-row {
+  display: grid;
+  grid-template-columns: 1fr 76px 104px 90px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.boq-row:hover { background: var(--color-bg-hover); }
+
+.boq-row--subrow {
+  font-size: var(--text-xs);
+  padding-left: var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.boq-row-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.boq-row-label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boq-row-qty {
+  text-align: right;
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.boq-row--subrow .boq-row-qty {
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.boq-row-cost {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.boq-row-cost--empty { color: var(--color-text-disabled); }
+
+/* Row striping: alternate top-level rows inside each section get a subtle
+   background. Subrows skip striping (they're inside grouped containers). */
+.boq-group .boq-row:not(.boq-row--subrow):nth-of-type(even) {
+  background: var(--color-bg-subtle);
+}
+.boq-group .boq-row:not(.boq-row--subrow):nth-of-type(even):hover {
+  background: var(--color-bg-hover);
+}
+
+/* ── Info icon ───────────────────────────────────────────────────────────── */
+.boq-info-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--color-text-disabled);
+  padding: 0 1px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.boq-info-icon:hover { color: var(--color-text-secondary); }
+.boq-info-icon.is-active { color: var(--color-text); }
+
+/* ── Rate input (composed) ───────────────────────────────────────────────── */
+.boq-rate-input {
+  display: flex;
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  height: 24px;
+  transition: border-color var(--motion-fast) var(--ease-out),
+              box-shadow var(--motion-fast) var(--ease-out);
+  overflow: hidden;
+}
+.boq-rate-input:hover { border-color: var(--color-border-strong); }
+.boq-rate-input:focus-within {
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+.boq-rate-prefix {
+  padding: 0 var(--space-1) 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+.boq-rate-field {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: right;
+  padding: 0 var(--space-2) 0 0;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+.boq-rate-field::placeholder {
+  color: var(--color-text-disabled);
+  font-size: var(--text-xs);
+}
+/* hide number-input spinners — they crowd the field */
+.boq-rate-field::-webkit-outer-spin-button,
+.boq-rate-field::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.boq-rate-field[type='number'] { -moz-appearance: textfield; }
+
+/* ── Section header ──────────────────────────────────────────────────────── */
+.boq-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-2);
+}
+.boq-section-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+.boq-section-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.boq-subsection-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  margin: var(--space-3) 0 var(--space-1);
+}
+.boq-subsection-suffix {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  color: var(--color-text-muted);
+}
+
+/* Section grouping container (used for striping scope + spacing). */
+.boq-section { margin-bottom: var(--space-2); }
+.boq-group { margin-bottom: var(--space-3); }
+
+/* Static totals row inside a section (e.g., "Total steel"). */
+.boq-total-static {
+  display: grid;
+  grid-template-columns: 1fr 76px 104px 90px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-left: var(--space-4);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-semibold);
+  border-top: 1px dashed var(--color-border);
+}
+.boq-total-static > .boq-row-qty {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+/* ── Total cost row (the headline) ───────────────────────────────────────── */
+.boq-total-row {
+  display: grid;
+  grid-template-columns: 1fr 76px 104px 90px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin-top: var(--space-4);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+.boq-total-row .boq-total-label {
+  grid-column: 1 / span 3;
+  color: var(--color-text);
+}
+.boq-total-row .boq-total-amount {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--color-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.boq-total-row .boq-total-amount--empty {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Validation footer ───────────────────────────────────────────────────── */
+.boq-validation-footer {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+}
+.boq-validation-footer--error {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+}
+.boq-validation-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+.boq-validation-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  line-height: var(--leading-normal);
+}
+.boq-validation-issue:hover { background: var(--color-bg); }
+.boq-validation-issue[data-no-target] { cursor: default; }
+.boq-validation-issue[data-no-target]:hover { background: transparent; }
+.boq-validation-severity {
+  text-transform: uppercase;
+  font-weight: var(--weight-semibold);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  margin-top: 1px;
+}
+.boq-validation-severity--error {
+  color: var(--color-error);
+  background: var(--color-error-bg);
+}
+.boq-validation-severity--warning {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+.boq-validation-severity--info {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-muted);
+}
+.boq-validation-message { flex: 1; min-width: 0; }
+.boq-validation-overflow {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  padding: var(--space-1) var(--space-2);
+  margin-top: 2px;
+}
+
+/* ── Export actions ──────────────────────────────────────────────────────── */
+.boq-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.boq-actions > * { flex: 1; }
+
+/* ── Formula popover ─────────────────────────────────────────────────────── */
+.boq-popover {
+  position: fixed;
+  width: 260px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  z-index: var(--z-dialog);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+.boq-popover-title {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+}
+.boq-popover-divider {
+  border-top: 1px solid var(--color-border);
+  margin-bottom: var(--space-2);
+}
+.boq-popover-step {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: 3px;
+}
+.boq-popover-step--bold {
+  font-weight: var(--weight-semibold);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-1);
+  margin-top: var(--space-1);
+}
+.boq-popover-step-label {
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+.boq-popover-step--bold .boq-popover-step-label { color: var(--color-text); }
+.boq-popover-step-value {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.boq-popover-step--bold .boq-popover-step-value { color: var(--color-text); }
+.boq-popover-note {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}

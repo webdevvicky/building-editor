@@ -24,10 +24,10 @@ export default function PlasterSection({ lines, rates, onRateChange, openId, onI
   }
 
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div className="boq-group">
       <SectionHeader title="Plaster Materials" />
       {[...groups.entries()].map(([sysId, groupLines]) => (
-        <div key={sysId} style={{ marginBottom: 10 }}>
+        <div key={sysId} className="boq-section">
           <SubSectionHeader title={sysLabel(groupLines[0])} />
           {groupLines.map(line => (
             <BoqSubRow key={line.id} line={line} labelOverride={stripPrefix(line)}

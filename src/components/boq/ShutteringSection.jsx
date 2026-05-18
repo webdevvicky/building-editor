@@ -14,7 +14,7 @@ export default function ShutteringSection({ lines, rates, onRateChange, openId, 
   const totalLine = { qty: Math.round(totalFt2 * 100) / 100, unit: 'ft²' }
 
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div className="boq-group">
       <SectionHeader title="Shuttering" />
       {lines.map(line => (
         <BoqSubRow key={line.id} line={line} labelOverride={stripPrefix(line)}
