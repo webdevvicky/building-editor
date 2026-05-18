@@ -91,6 +91,11 @@ export function useKeyboardShortcuts() {
         useStore.getState().setTool?.('room')
         return
       }
+      if (key === 'p' || key === 'P') {
+        e.preventDefault()
+        useStore.getState().setTool?.('plumbing')
+        return
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)

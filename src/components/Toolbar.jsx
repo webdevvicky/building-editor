@@ -130,6 +130,7 @@ export default function Toolbar() {
         {toolBtn('foundations',   Anchor,              'Foundations')}
         {toolBtn('stairs',        Stamp,               'Stairs')}
         {toolBtn('lift',          ArrowDownUp,         'Lift')}
+        {toolBtn('plumbing',      Droplet,             'Plumbing (P)')}
         {toolBtn('sump',          Droplet,             'Sump')}
         {toolBtn('overhead_tank', Container,           'Overhead tank')}
         {toolBtn('septic_tank',   Cylinder,            'Septic tank')}

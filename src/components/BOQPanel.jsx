@@ -18,6 +18,7 @@ import ShutteringSection   from './boq/ShutteringSection'
 import ExcavationSection   from './boq/ExcavationSection'
 import PlumConcreteRow     from './boq/PlumConcreteRow'
 import PlasterSection      from './boq/PlasterSection'
+import PlumbingBoqSection  from './boq/PlumbingBoqSection'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../boq/lines'
 import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
@@ -255,6 +256,9 @@ export default function BOQPanel() {
   const excavationLines   = linesByCat.excavation   ?? []
   const plasterLines      = linesByCat.plaster      ?? []
   const plumLines         = linesByCat.plumConcrete ?? []
+  const plumbingSupplyLines   = linesByCat.plumbing_supply   ?? []
+  const plumbingDrainageLines = linesByCat.plumbing_drainage ?? []
+  const plumbingFixturesLines = linesByCat.plumbing_fixtures ?? []
 
   // ── Header summary stats — pulled from scopedState so they honor the toggle.
   const wallCount      = Object.values(scopedState.walls).filter(w => !w.isVirtual).length
@@ -563,6 +567,16 @@ export default function BOQPanel() {
         steelLines={steelLines}
         concreteMixLines={concreteMixLines}
         staircaseLines={staircaseLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity}
+      />
+
+      {/* Plumbing (supply + drainage + fixtures) — Phase 1.1 */}
+      <PlumbingBoqSection
+        supplyLines={plumbingSupplyLines}
+        drainageLines={plumbingDrainageLines}
+        fixturesLines={plumbingFixturesLines}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity}

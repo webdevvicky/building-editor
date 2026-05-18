@@ -10,6 +10,7 @@ import { slabNoEnclosure } from './rules/slabNoEnclosure.js'
 import { beamNoSupport } from './rules/beamNoSupport.js'
 import { staircaseDisconnected } from './rules/staircaseDisconnected.js'
 import { footingNoColumn } from './rules/footingNoColumn.js'
+import { MEP_RULES } from '../mep/validation/index.js'
 
 export const RULES = [
   floatingColumn,
@@ -17,6 +18,7 @@ export const RULES = [
   beamNoSupport,
   staircaseDisconnected,
   footingNoColumn,
+  ...MEP_RULES,
 ]
 
 export const SEVERITY = {

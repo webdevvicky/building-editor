@@ -369,11 +369,308 @@ reset()
     `got ${edge.lengthFt}`)
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 1.1 — Plumbing engine + quantities + BOQ
+// ─────────────────────────────────────────────────────────────────────────
+//
+// These assertions cover the BOQ-side surface (emitter, line contract,
+// fixture state, floor scope). Engine-graph + routing assertions are
+// engine-owned; when the engines subagent ships, additional cases land
+// alongside this block.
+
+import { getBoqLines, groupBoqLinesByCategory } from '../src/boq/lines.js'
+import { emitPlumbingLines } from '../src/boq/emitters/plumbing.js'
+import { runValidation } from '../src/validation/engine.js'
+
+// Soft-detect the discipline engine. When the sibling subagent ships
+// src/mep/quantities/plumbing.js + src/mep/plumbing/*, these become non-null
+// and the engine-graph / route / suggestions tests become live.
+let computePlumbingQuantities = null
+let buildPlumbingSystemGraph = null
+let buildPlumbingRoutes = null
+let suggestPlumbingFixturesForRoom = null
+try {
+  const qMod = await import('../src/mep/quantities/plumbing.js')
+  computePlumbingQuantities = qMod.computePlumbingQuantities ?? null
+} catch { /* engine not ready */ }
+try {
+  const nMod = await import('../src/mep/plumbing/network.js')
+  buildPlumbingSystemGraph = nMod.buildPlumbingSystemGraph ?? null
+} catch { /* engine not ready */ }
+try {
+  const rMod = await import('../src/mep/plumbing/routing.js')
+  buildPlumbingRoutes = rMod.buildPlumbingRoutes ?? null
+} catch { /* engine not ready */ }
+try {
+  const sMod = await import('../src/mep/plumbing/suggestions.js')
+  suggestPlumbingFixturesForRoom = sMod.suggestPlumbingFixturesForRoom ?? null
+} catch { /* engine not ready */ }
+
+// Skipped-assertion helper — keeps the pass counter accurate while surfacing
+// engine-dependent gaps clearly in the run log.
+let skipped = 0
+function skip(label, reason) {
+  skipped++
+  console.log(`  ⊘ ${label}  (skipped — ${reason})`)
+}
+
+// Helper: build a closed wet TOILET room (10×10) and return its id + wall ids.
+function buildWetRoom(name, type, x0, y0) {
+  const SW = s().getOrCreateNode(x0, y0)
+  const SE = s().getOrCreateNode(x0 + 10 * FT, y0)
+  const NE = s().getOrCreateNode(x0 + 10 * FT, y0 + 10 * FT)
+  const NW = s().getOrCreateNode(x0, y0 + 10 * FT)
+  s().addWall(SW, SE); s().addWall(SE, NE); s().addWall(NE, NW); s().addWall(NW, SW)
+  const allWalls = Object.values(s().walls)
+  const wIds = [
+    allWalls.find(w => (w.n1===SW&&w.n2===SE)||(w.n2===SW&&w.n1===SE))?.id,
+    allWalls.find(w => (w.n1===SE&&w.n2===NE)||(w.n2===SE&&w.n1===NE))?.id,
+    allWalls.find(w => (w.n1===NE&&w.n2===NW)||(w.n2===NE&&w.n1===NW))?.id,
+    allWalls.find(w => (w.n1===NW&&w.n2===SW)||(w.n2===NW&&w.n1===SW))?.id,
+  ].filter(Boolean)
+  wIds.forEach(id => s().togglePendingWall(id))
+  s().saveRoom(name, type)
+  const room = Object.values(s().rooms).find(r => r.name === name)
+  return { roomId: room?.id, wallIds: wIds, centerX: x0 + 5 * FT, centerY: y0 + 5 * FT }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('12. Plumbing — fixtures in wet rooms (state contract)')
+reset()
+{
+  const { roomId, centerX, centerY } = buildWetRoom('Bath1', 'TOILET', 0, 0)
+  ok('TOILET room created', !!roomId)
+
+  const wcId  = s().addPlumbingFixture('WC', centerX - FT, centerY)
+  const wbId  = s().addPlumbingFixture('WASH_BASIN', centerX, centerY - FT)
+  const ftId  = s().addPlumbingFixture('FLOOR_TRAP', centerX + FT, centerY + FT)
+  const fixtures = s().plumbingFixtures
+  ok('addPlumbingFixture creates entries (3 expected)',
+    Object.keys(fixtures).length === 3,
+    `got ${Object.keys(fixtures).length}`)
+  ok('WC has discipline=PLUMBING + type=WC',
+    fixtures[wcId]?.discipline === 'PLUMBING' && fixtures[wcId]?.type === 'WC')
+  ok('FLOOR_TRAP has type=FLOOR_TRAP', fixtures[ftId]?.type === 'FLOOR_TRAP')
+  ok('all fixtures land on F1 by default',
+    [wcId, wbId, ftId].every(id => fixtures[id]?.floorId === 'F1'))
+  ok('all fixtures carry a stable uuid id',
+    [wcId, wbId, ftId].every(id => typeof id === 'string' && id.length > 0))
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('13. Plumbing — fixture counts via discipline aggregator')
+{
+  // Reuse state from Test 12. If computePlumbingQuantities is wired, verify
+  // its fixtureCounts; else verify the scope-state stub returns empty (Phase 0).
+  if (computePlumbingQuantities) {
+    const q = computePlumbingQuantities(s())
+    const counts = q?.fixtureCounts ?? {}
+    ok('fixtureCounts.WC = 1', counts.WC === 1, `got ${counts.WC}`)
+    ok('fixtureCounts.WASH_BASIN = 1', counts.WASH_BASIN === 1, `got ${counts.WASH_BASIN}`)
+    ok('fixtureCounts.FLOOR_TRAP = 1', counts.FLOOR_TRAP === 1, `got ${counts.FLOOR_TRAP}`)
+  } else {
+    skip('fixtureCounts.WC = 1', 'computePlumbingQuantities not yet built')
+    skip('fixtureCounts.WASH_BASIN = 1', 'engine pending')
+    skip('fixtureCounts.FLOOR_TRAP = 1', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('14. Plumbing — auto-suggest defaults (KITCHEN)')
+reset()
+{
+  const { roomId } = buildWetRoom('Kitchen1', 'KITCHEN', 0, 0)
+  ok('KITCHEN room created', !!roomId)
+  if (suggestPlumbingFixturesForRoom) {
+    const suggestions = suggestPlumbingFixturesForRoom(s(), roomId) ?? []
+    const types = new Set(suggestions.map(x => x?.type))
+    ok('suggests KITCHEN_SINK', types.has('KITCHEN_SINK'))
+    ok('suggests FLOOR_TRAP', types.has('FLOOR_TRAP'))
+  } else {
+    skip('suggests KITCHEN_SINK', 'suggestPlumbingFixturesForRoom not yet built')
+    skip('suggests FLOOR_TRAP', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('15. Plumbing — system graph correctness')
+reset()
+{
+  const { centerX, centerY } = buildWetRoom('Bath2', 'TOILET', 0, 0)
+  s().addPlumbingFixture('WC', centerX - FT, centerY)
+  s().addPlumbingFixture('WASH_BASIN', centerX, centerY - FT)
+  s().addPlumbingFixture('FLOOR_TRAP', centerX + FT, centerY + FT)
+  // Supply system needs a root — add a PLUMBING_SUPPLY riser (or OHT).
+  s().addRiser({ kind: 'PLUMBING_SUPPLY', fromFloorId: 'F1', toFloorId: 'F1',
+                 x: 20 * FT, y: 20 * FT, routingZone: 'SHAFT' })
+
+  if (buildPlumbingSystemGraph) {
+    const g = buildPlumbingSystemGraph(s())
+    const systems = new Set((g?.systems ?? []).map(x => x?.id ?? x))
+    ok('system graph returns at least 2 systems (supply + drain)',
+      systems.size >= 2, `got ${systems.size}`)
+    // network.js returns nodes/edges as id-keyed maps (objects), not arrays.
+    const nodeArr = Array.isArray(g?.nodes) ? g.nodes : Object.values(g?.nodes ?? {})
+    const drainNodes = nodeArr.filter(n => /DRAIN/i.test(n?.systemId ?? ''))
+    ok('drain network contains at least the WC + FLOOR_TRAP nodes',
+      drainNodes.length >= 2, `got ${drainNodes.length}`)
+    const supplyNodes = nodeArr.filter(n => /SUPPLY/i.test(n?.systemId ?? ''))
+    ok('supply network contains at least WC + WASH_BASIN supply taps',
+      supplyNodes.length >= 2, `got ${supplyNodes.length}`)
+  } else {
+    skip('system graph returns at least 2 systems', 'buildPlumbingSystemGraph not yet built')
+    skip('drain network contains WC + FLOOR_TRAP nodes', 'engine pending')
+    skip('supply network contains WC + WASH_BASIN nodes', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('16. Plumbing — quantities aggregate by diameter')
+{
+  if (computePlumbingQuantities) {
+    const q = computePlumbingQuantities(s())
+    const drain = q?.perSystem?.SOIL_DRAIN?.byDiameter ?? {}
+    const supply = q?.perSystem?.COLD_SUPPLY?.byDiameter ?? {}
+    ok('SOIL_DRAIN includes a 110mm entry (WC drain)',
+      Number(drain['110']) > 0 || Number(drain[110]) > 0,
+      `got keys=[${Object.keys(drain).join(',')}]`)
+    const hasSupply15Or20 = Number(supply['15']) > 0 || Number(supply['20']) > 0 ||
+                            Number(supply[15]) > 0 || Number(supply[20]) > 0
+    ok('COLD_SUPPLY includes a 15mm or 20mm entry', hasSupply15Or20,
+      `got keys=[${Object.keys(supply).join(',')}]`)
+  } else {
+    skip('SOIL_DRAIN includes a 110mm entry', 'computePlumbingQuantities not yet built')
+    skip('COLD_SUPPLY includes a 15mm or 20mm entry', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('17. Plumbing — BOQ emitter line shape + categories')
+{
+  // Direct emitter contract — runs even when the engine produces empty Q
+  // (push must simply not be called). When the engine is live, we expect
+  // real lines with the canonical category/rateKey/meta shape.
+  const collected = []
+  const push = (line) => collected.push(line)
+  emitPlumbingLines(s(), push, {})
+  ok('emitter is callable + does not throw', true)
+
+  if (computePlumbingQuantities) {
+    const allLines = getBoqLines(s(), {})
+    const grouped = groupBoqLinesByCategory(allLines)
+    const supply = grouped.plumbing_supply ?? []
+    const drainage = grouped.plumbing_drainage ?? []
+    const fixtures = grouped.plumbing_fixtures ?? []
+    ok('getBoqLines includes plumbing_supply lines',  supply.length > 0,   `got ${supply.length}`)
+    ok('getBoqLines includes plumbing_drainage lines', drainage.length > 0, `got ${drainage.length}`)
+    ok('getBoqLines includes plumbing_fixtures lines', fixtures.length > 0, `got ${fixtures.length}`)
+    // Schema contract: every plumbing line carries discipline=PLUMBING meta.
+    const plumbingLines = [...supply, ...drainage, ...fixtures]
+    ok('every plumbing line carries meta.discipline=PLUMBING',
+      plumbingLines.every(l => l.meta?.discipline === 'PLUMBING'),
+      `${plumbingLines.length} lines checked`)
+    // Schema contract: every plumbing line has a non-empty rateKey + stable id.
+    ok('every plumbing line has a rateKey + id',
+      plumbingLines.every(l => typeof l.rateKey === 'string' && l.rateKey.length > 0 &&
+                               typeof l.id === 'string' && l.id.length > 0))
+    // Schema contract: drainage lines start with `plumbing_drainage_` OR are a
+    // drainage fitting (system in DRAINAGE set) — at minimum, ALL drainage
+    // lines must belong to category 'plumbing_drainage'.
+    ok('drainage lines all use category=plumbing_drainage',
+      drainage.every(l => l.category === 'plumbing_drainage'))
+  } else {
+    // Engine not ready — verify the emitter pushed nothing (Phase 0 stubs return EMPTY_Q).
+    ok('emitter pushes zero lines when no plumbing data', collected.length === 0,
+      `got ${collected.length} lines`)
+    skip('getBoqLines includes plumbing_supply lines', 'engine pending')
+    skip('getBoqLines includes plumbing_drainage lines', 'engine pending')
+    skip('getBoqLines includes plumbing_fixtures lines', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('18. Plumbing — floor scope (F1 + F2 ≈ All)')
+reset()
+{
+  // F1 bathroom
+  s().setCurrentFloorId('F1')
+  const f1 = buildWetRoom('Bath-F1', 'TOILET', 0, 0)
+  s().addPlumbingFixture('WC', f1.centerX - FT, f1.centerY)
+  s().addPlumbingFixture('FLOOR_TRAP', f1.centerX + FT, f1.centerY)
+
+  // F2 bathroom
+  const f2Id = s().addFloor({ label: 'Floor 2', floorHeightFt: 10 })
+  s().setCurrentFloorId(f2Id)
+  const f2 = buildWetRoom('Bath-F2', 'TOILET', 50 * FT, 0)
+  s().addPlumbingFixture('WC', f2.centerX - FT, f2.centerY)
+  s().addPlumbingFixture('FLOOR_TRAP', f2.centerX + FT, f2.centerY)
+
+  ok('total plumbingFixtures across floors = 4',
+    Object.keys(s().plumbingFixtures).length === 4,
+    `got ${Object.keys(s().plumbingFixtures).length}`)
+
+  // Floor-scope BOQ — sum per-floor ≈ unscoped total.
+  const allLines = getBoqLines(s(), {})
+  const f1Lines  = getBoqLines(s(), {}, { floorId: 'F1' })
+  const f2Lines  = getBoqLines(s(), {}, { floorId: f2Id })
+  const onlyPlumbing = (ls) => ls.filter(l => /^plumbing_/.test(l.category))
+
+  if (computePlumbingQuantities) {
+    const allPlumbing = onlyPlumbing(allLines)
+    const f1Plumbing  = onlyPlumbing(f1Lines)
+    const f2Plumbing  = onlyPlumbing(f2Lines)
+    ok('per-floor plumbing-line counts > 0 on both floors',
+      f1Plumbing.length > 0 && f2Plumbing.length > 0,
+      `F1=${f1Plumbing.length}, F2=${f2Plumbing.length}`)
+    // Fixtures-only sum check (fixtures are pure per-floor, no inter-floor
+    // length spans, so the count sum is exact).
+    const fxAll = allLines.filter(l => l.category === 'plumbing_fixtures').reduce((t,l) => t + (l.qty || 0), 0)
+    const fxF1  = f1Lines.filter(l => l.category === 'plumbing_fixtures').reduce((t,l) => t + (l.qty || 0), 0)
+    const fxF2  = f2Lines.filter(l => l.category === 'plumbing_fixtures').reduce((t,l) => t + (l.qty || 0), 0)
+    ok('plumbing fixtures: F1 + F2 === All',
+      Math.abs((fxF1 + fxF2) - fxAll) < 0.01,
+      `F1=${fxF1}, F2=${fxF2}, All=${fxAll}`)
+  } else {
+    // With Phase 0 stubs, the emitter outputs zero plumbing lines on either
+    // path; the floor-scope wiring itself is still verifiable.
+    ok('floor-scope path runs without error on multi-floor + plumbing fixtures',
+      Array.isArray(allLines) && Array.isArray(f1Lines) && Array.isArray(f2Lines))
+    skip('per-floor plumbing line counts > 0', 'engine pending')
+    skip('plumbing fixtures: F1 + F2 === All', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('19. Plumbing — missing-floor-trap validation guard')
+reset()
+{
+  const { centerX, centerY } = buildWetRoom('Bath3', 'TOILET', 0, 0)
+  s().addPlumbingFixture('WC', centerX - FT, centerY)
+  // INTENTIONALLY no FLOOR_TRAP.
+
+  // The validation rule `mep_no_floor_trap` is engine-owned; surfaces via
+  // runValidation when the rule registers itself. Skip when the engine is
+  // not yet present.
+  const result = runValidation(s())
+  ok('runValidation runs without throwing on a wet room missing FLOOR_TRAP', !!result)
+  const issues = result.issues ?? []
+  const hasMepIssue = issues.some(i => /mep_no_floor_trap|missing_floor_trap|no_floor_trap/i.test(i.ruleId ?? ''))
+  if (computePlumbingQuantities) {
+    ok('validation surfaces a missing-floor-trap issue', hasMepIssue,
+      `issues=${issues.map(i => i.ruleId).join(',') || 'none'}`)
+  } else {
+    skip('validation surfaces a missing-floor-trap issue', 'mep validation rule pending')
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
-console.log(`Phase 0a — getFloorWallPerimeterGraph: ${pass} pass, ${fail} fail`)
+console.log(`Phase 0a + Phase 1.1 plumbing: ${pass} pass, ${fail} fail, ${skipped} skipped`)
+if (skipped > 0) {
+  console.log(`  (${skipped} engine-dependent assertions skipped — sibling subagent owns)`)
+}
 console.log('═'.repeat(70))
 if (fail > 0) {
   console.log('\nFAILURES:')

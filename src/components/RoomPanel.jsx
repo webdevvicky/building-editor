@@ -43,6 +43,20 @@ export default function RoomPanel() {
     if (result?.error) {
       setSaveError(result)
     } else {
+      // Find the room we just created so MepDefaultsModal can offer to apply
+      // IS-2065 plumbing defaults. saveRoom doesn't return the id, so we
+      // pick the most recently-added room on the current floor that matches
+      // the entered name (a unique enough proxy in normal use).
+      const state = useStore.getState()
+      const fId = state.currentFloorId ?? 'F1'
+      const created = Object.values(state.rooms ?? {})
+        .filter(r => (r.floorId ?? 'F1') === fId && r.name === trimmed)
+        .at(-1)
+      if (created) {
+        window.dispatchEvent(new CustomEvent('mep:room-created', {
+          detail: { roomId: created.id },
+        }))
+      }
       setName('')
       setPendingType('OTHER')
       setSaveError(null)

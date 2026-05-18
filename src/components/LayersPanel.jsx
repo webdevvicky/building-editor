@@ -12,7 +12,31 @@ const LAYER_LABELS = {
   roomFills:  'Room fills',
   roomLabels: 'Room labels',
   nodes:      'Nodes',
+
+  // Plumbing
+  plumbingFixtures:        'Fixtures',
+  plumbingSupplyRoutes:    'Cold supply',
+  plumbingDrainageRoutes:  'Drainage',
+  plumbingHotWaterRoutes:  'Hot supply',
+  risers:                  'Risers',
 }
+
+const LAYER_GROUPS = [
+  {
+    title: 'Structural',
+    keys: ['walls', 'columns', 'beams', 'stamps', 'roomFills', 'roomLabels', 'nodes'],
+  },
+  {
+    title: 'Plumbing',
+    keys: [
+      'plumbingFixtures',
+      'plumbingSupplyRoutes',
+      'plumbingDrainageRoutes',
+      'plumbingHotWaterRoutes',
+      'risers',
+    ],
+  },
+]
 
 export default function LayersPanel() {
   const [expanded, setExpanded] = useState(false)
@@ -55,36 +79,47 @@ export default function LayersPanel() {
 
       {expanded && (
         <div style={{ padding: '0 var(--space-3) var(--space-2)' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 'var(--space-1) var(--space-3)',
-              marginBottom: 'var(--space-2)',
-            }}
-          >
-            {Object.entries(DEFAULT_LAYER_VISIBILITY).map(([key]) => (
-              <label
-                key={key}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-1)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={layerVisibility[key] ?? true}
-                  onChange={e => setLayerVisibility({ [key]: e.target.checked })}
-                  style={{ cursor: 'pointer', accentColor: 'var(--color-primary)' }}
-                />
-                {LAYER_LABELS[key]}
-              </label>
-            ))}
-          </div>
+          {LAYER_GROUPS.map(group => (
+            <div key={group.title} style={{ marginBottom: 'var(--space-2)' }}>
+              <div style={{
+                fontSize: 'var(--text-xs)',
+                color: 'var(--color-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+                fontWeight: 'var(--weight-semibold)',
+                marginBottom: 'var(--space-1)',
+              }}>
+                {group.title}
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 'var(--space-1) var(--space-3)',
+              }}>
+                {group.keys.map(key => (
+                  <label
+                    key={key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-1)',
+                      cursor: 'pointer',
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={layerVisibility[key] ?? true}
+                      onChange={e => setLayerVisibility({ [key]: e.target.checked })}
+                      style={{ cursor: 'pointer', accentColor: 'var(--color-primary)' }}
+                    />
+                    {LAYER_LABELS[key] ?? key}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
           <Button
             variant="ghost"
             size="sm"

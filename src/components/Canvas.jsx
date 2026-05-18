@@ -7,7 +7,14 @@ import {
 } from '../geometry'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
+import { getNearestWallToPoint } from '../topology/index.js'
+import PlumbingOverlay from './canvas/PlumbingOverlay.jsx'
 import './Canvas.css'
+
+// Phase 1 plumbing — fixed placeholder type until a floating type picker
+// lands. Plumbing tool drops one WC per click; user then changes the type
+// via PlumbingFixturePanel. The picker is Phase 1.x polish.
+const DEFAULT_PLUMBING_FIXTURE_TYPE = 'WC'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -90,6 +97,7 @@ const TOOL_CURSOR = {
   septic_tank:   'crosshair',
   column:        'crosshair',
   beam:          'crosshair',
+  plumbing:      'crosshair',
 }
 
 function getColPos(col, nodes) {
@@ -344,6 +352,34 @@ export default function Canvas() {
       const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
       addStamp(activeTool, x, y)
       setTool('select')
+      return
+    }
+
+    if (activeTool === 'plumbing') {
+      // Phase 1: snap to nearest wall on the current floor and drop the
+      // default fixture. Engines subagent owns roomId resolution / routing.
+      // Floating type-picker is Phase 1.x polish; for now the user changes
+      // the type from PlumbingFixturePanel after placement.
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      const state = useStore.getState()
+      // Floor-scoped candidate set so we don't snap to walls on another floor.
+      const candidateIds = typeof state.getWallIdsByFloor === 'function'
+        ? state.getWallIdsByFloor(currentFloorId)
+        : null
+      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
+      // 36in (3ft) snap radius — beyond that we place a free fixture.
+      const SNAP_IN = 36
+      let wallId = null, wallT = null, px = x, py = y
+      if (near && near.distance <= SNAP_IN) {
+        wallId = near.wallId
+        wallT  = near.t
+        px = near.projected.x
+        py = near.projected.y
+      }
+      const id = useStore.getState().addPlumbingFixture(
+        DEFAULT_PLUMBING_FIXTURE_TYPE, px, py, wallId, wallT,
+      )
+      useStore.getState().selectPlumbingFixture(id)
       return
     }
 
@@ -896,6 +932,10 @@ export default function Canvas() {
           )
         })}
         </>)}
+
+        {/* Plumbing overlay (fixtures, supply/drain routes, risers).
+         * Renders between beams and nodes per CLAUDE.md MEP plan §16.2. */}
+        <PlumbingOverlay />
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {

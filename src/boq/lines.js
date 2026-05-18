@@ -33,6 +33,7 @@ import { computeBBSQuantities }        from '../quantities/bbs'
 import { humanizeAssignmentSource as humanizeSource } from '../specs/resolution'
 import { PLASTER_KIND }                from '../specs/plasterSystems'
 import { scopeStateToFloor }           from './scope'
+import { emitPlumbingLines }           from './emitters/plumbing.js'
 
 const DEFAULT_FLOOR = 'F1'
 
@@ -295,6 +296,11 @@ export function getBoqLines(state, rates, opts = {}) {
       push({ id: `plaster_${sys.systemId}_material`, category: 'plaster', label: `Plaster ${sys.label} — Material`, qty: sys.materialBags, unit: 'bags', rateKey: `plaster_${sys.systemId}_material`, formulaId: `plaster_${sys.systemId}`, meta: { plasterSystemId: sys.systemId } })
     }
   }
+
+  // ── 11. Plumbing (Phase 1.1 — per-discipline emitter) ─────────────────
+  // Floor scope is already applied (state may be the scoped wrapper).
+  // The emitter no-ops when no plumbing fixtures / network exist.
+  emitPlumbingLines(state, push, { rates, scopedFloorId })
 
   return lines
 }

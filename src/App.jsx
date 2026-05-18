@@ -16,6 +16,8 @@ import FoundationPanel from './components/FoundationPanel'
 import FloorSwitcher from './components/FloorSwitcher'
 import FloorsManagerPanel from './components/FloorsManagerPanel'
 import BBSSpecPanel from './components/BBSSpecPanel'
+import PlumbingFixturePanel from './components/PlumbingFixturePanel'
+import MepDefaultsModal from './components/MepDefaultsModal'
 import ProjectsPanel from './components/ProjectsPanel'
 import RevisionsPanel from './components/RevisionsPanel'
 import IsoView from './components/IsoView'
@@ -43,6 +45,8 @@ export default function App() {
         <FoundationPanel />
         <FloorsManagerPanel />
         <BBSSpecPanel />
+        <PlumbingFixturePanel />
+        <MepDefaultsModal />
         <ProjectSettingsPanel />
         <ProjectsPanel />
         <RevisionsPanel />

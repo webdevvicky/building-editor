@@ -28,6 +28,9 @@ import { getColumnAreaFt2 } from '../lib/columnShapes'
 import { isColumnOnFloor, sortedFloorList } from '../topology/floor.js'
 import { getWallAdjacencyCount as topoGetWallAdjacencyCount, classifyWallBeamFlags as topoClassifyWallBeamFlags } from '../topology/walls.js'
 import { resolveBeamEndpoint as topoResolveBeamEndpoint, getDerivedWallBeams as topoGetDerivedWallBeams, getAllBeams as topoGetAllBeams } from '../topology/beams.js'
+import { buildPlumbingSystemGraph } from '../mep/plumbing/network.js'
+import { buildPlumbingRoutes } from '../mep/plumbing/routing.js'
+import { computePlumbingQuantities } from '../mep/quantities/plumbing.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
@@ -578,9 +581,9 @@ export function scopeStateToFloor(state, floorId) {
   const EMPTY_GRAPH        = Object.freeze({ nodes: {}, edges: {}, systems: [], branches: [] })
   const EMPTY_ROUTES       = Object.freeze([])
 
-  const getPlumbingNetwork   = () => EMPTY_GRAPH
-  const getPlumbingRoutes    = () => EMPTY_ROUTES
-  const getPlumbingQuantities = () => EMPTY_DISCIPLINE_Q
+  const getPlumbingNetwork    = () => buildPlumbingSystemGraph(scopedStateRef)
+  const getPlumbingRoutes     = () => buildPlumbingRoutes(getPlumbingNetwork(), scopedStateRef)
+  const getPlumbingQuantities = (opts) => computePlumbingQuantities(scopedStateRef, opts)
   const getElectricalNetwork  = () => EMPTY_GRAPH
   const getElectricalRoutes   = () => EMPTY_ROUTES
   const getElectricalQuantities = () => EMPTY_DISCIPLINE_Q
