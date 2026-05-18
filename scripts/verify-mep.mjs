@@ -1210,11 +1210,238 @@ header('32. HVAC — BOQ emitter produces hvac_refrigerant / hvac_condensate / h
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 1.4 — Fire engine + quantities + BOQ
+// ─────────────────────────────────────────────────────────────────────────
+//
+// BOQ-side surface (emitter, catalog wiring, line contract, category
+// names) is owned by THIS agent and must pass green. Engine modules
+// (computeFireQuantities, buildFireRoutes, suggestFireDevicesForRoom, etc.)
+// are owned by the sibling subagent — soft-detected and skipped when
+// not yet shipped.
+
+import { emitFireLines } from '../src/boq/emitters/fire.js'
+import {
+  getFireDefaultsForRoom,
+  getFireDevice,
+  getGiDiameter,
+  getCableType,
+} from '../src/mep/catalogs/index.js'
+
+let buildFireSystemGraph = null
+let buildFireRoutes = null
+let computeFireQuantities = null
+let suggestFireDevicesForRoom = null
+try {
+  const mod = await import('../src/mep/fire/network.js')
+  buildFireSystemGraph = mod.buildFireSystemGraph ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/fire/routing.js')
+  buildFireRoutes = mod.buildFireRoutes ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/quantities/fire.js')
+  computeFireQuantities = mod.computeFireQuantities ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/fire/suggestions.js')
+  suggestFireDevicesForRoom = mod.suggestFireDevicesForRoom ?? null
+} catch { /* engine pending */ }
+
+// ─────────────────────────────────────────────────────────────────────
+header('33. Fire — auto-suggest defaults for BEDROOM')
+reset()
+{
+  // Catalog-level default check works without the suggestion engine —
+  // verifies the NBC 2016 fire defaults table itself.
+  const defaults = getFireDefaultsForRoom('BEDROOM')
+  ok('BEDROOM fire defaults exist',
+    Array.isArray(defaults) && defaults.length > 0,
+    `length=${defaults?.length}`)
+  const byType = Object.fromEntries(defaults.map(d => [d.type, d.n]))
+  ok('BEDROOM defaults include 1 SMOKE_DETECTOR', byType.SMOKE_DETECTOR === 1,
+    `got SMOKE_DETECTOR=${byType.SMOKE_DETECTOR}`)
+  ok('BEDROOM defaults DO NOT include HEAT_DETECTOR',
+    byType.HEAT_DETECTOR === undefined,
+    `got HEAT_DETECTOR=${byType.HEAT_DETECTOR}`)
+
+  // Catalog lookup for SMOKE_DETECTOR — confirms it's a real entry.
+  const smoke = getFireDevice('SMOKE_DETECTOR')
+  ok('SMOKE_DETECTOR catalog entry exists',
+    !!smoke && smoke.discipline === 'FIRE',
+    `got ${smoke?.discipline}`)
+  ok('SMOKE_DETECTOR carries coverageAreaFt2 > 0',
+    typeof smoke?.coverageAreaFt2 === 'number' && smoke.coverageAreaFt2 > 0,
+    `got ${smoke?.coverageAreaFt2}`)
+
+  const { roomId } = buildRoom('Bed1', 'BEDROOM', 0, 0)
+  if (suggestFireDevicesForRoom) {
+    const suggestions = suggestFireDevicesForRoom(s(), roomId) ?? []
+    const types = new Set(suggestions.map(x => x?.type))
+    ok('suggestor includes SMOKE_DETECTOR for BEDROOM',
+      types.has('SMOKE_DETECTOR'),
+      `got [${[...types].join(',')}]`)
+  } else {
+    skip('suggestor includes SMOKE_DETECTOR for BEDROOM', 'suggestFireDevicesForRoom not yet built')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('34. Fire — KITCHEN gets HEAT_DETECTOR not SMOKE_DETECTOR')
+reset()
+{
+  // Catalog-level: KITCHEN must NOT use a smoke detector (cooking smoke
+  // generates nuisance alarms). Per NBC 2016, KITCHEN gets HEAT_DETECTOR +
+  // FIRE_EXTINGUISHER instead.
+  const defaults = getFireDefaultsForRoom('KITCHEN')
+  ok('KITCHEN fire defaults exist',
+    Array.isArray(defaults) && defaults.length > 0,
+    `length=${defaults?.length}`)
+  const byType = Object.fromEntries(defaults.map(d => [d.type, d.n]))
+  ok('KITCHEN defaults include HEAT_DETECTOR', byType.HEAT_DETECTOR >= 1,
+    `got HEAT_DETECTOR=${byType.HEAT_DETECTOR}`)
+  ok('KITCHEN defaults DO NOT include SMOKE_DETECTOR',
+    byType.SMOKE_DETECTOR === undefined,
+    `got SMOKE_DETECTOR=${byType.SMOKE_DETECTOR}`)
+  ok('KITCHEN defaults include FIRE_EXTINGUISHER',
+    byType.FIRE_EXTINGUISHER >= 1,
+    `got FIRE_EXTINGUISHER=${byType.FIRE_EXTINGUISHER}`)
+
+  // Catalog lookup for HEAT_DETECTOR.
+  const heat = getFireDevice('HEAT_DETECTOR')
+  ok('HEAT_DETECTOR catalog entry exists + discipline=FIRE',
+    !!heat && heat.discipline === 'FIRE',
+    `got ${heat?.discipline}`)
+
+  const { roomId } = buildRoom('Kitchen1', 'KITCHEN', 0, 0)
+  if (suggestFireDevicesForRoom) {
+    const suggestions = suggestFireDevicesForRoom(s(), roomId) ?? []
+    const types = new Set(suggestions.map(x => x?.type))
+    ok('suggestor includes HEAT_DETECTOR for KITCHEN',
+      types.has('HEAT_DETECTOR'),
+      `got [${[...types].join(',')}]`)
+    ok('suggestor DOES NOT include SMOKE_DETECTOR for KITCHEN',
+      !types.has('SMOKE_DETECTOR'),
+      `got [${[...types].join(',')}]`)
+  } else {
+    skip('suggestor includes HEAT_DETECTOR for KITCHEN', 'suggestFireDevicesForRoom not yet built')
+    skip('suggestor DOES NOT include SMOKE_DETECTOR for KITCHEN', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('35. Fire — detection loop closes (devices + panel placed)')
+reset()
+{
+  // Build two BEDROOMs + an ENTRY with the panel. Place detectors in the
+  // bedrooms and a FIRE_ALARM_PANEL at the entry — detection loop should
+  // close (every device connects back to the panel via the system graph).
+  const bed1 = buildRoom('Bed1',  'BEDROOM', 0, 0)
+  const bed2 = buildRoom('Bed2',  'BEDROOM', 20 * FT, 0)
+  const ent  = buildRoom('Entry', 'LIVING',  40 * FT, 0)
+
+  const d1 = s().addFireDevice('SMOKE_DETECTOR',  bed1.centerX, bed1.centerY)
+  const d2 = s().addFireDevice('SMOKE_DETECTOR',  bed2.centerX, bed2.centerY)
+  const panel = s().addFireDevice('FIRE_ALARM_PANEL', ent.centerX, ent.centerY)
+
+  ok('three fire devices placed (2 detectors + 1 panel)',
+    !!d1 && !!d2 && !!panel)
+  const fireDevicesAll = s().fireDevices ?? {}
+  const placedTypes = Object.values(fireDevicesAll).map(x => x.type)
+  ok('store carries SMOKE_DETECTOR entries',
+    placedTypes.filter(t => t === 'SMOKE_DETECTOR').length === 2,
+    `got ${placedTypes.filter(t => t === 'SMOKE_DETECTOR').length}`)
+  ok('store carries FIRE_ALARM_PANEL entry',
+    placedTypes.includes('FIRE_ALARM_PANEL'))
+  ok('all fire devices land on F1 by default',
+    Object.values(fireDevicesAll).every(d => d.floorId === 'F1'))
+
+  if (buildFireSystemGraph) {
+    const g = buildFireSystemGraph(s())
+    ok('fire system graph builds without error', !!g && typeof g === 'object')
+    const nodeArr = Array.isArray(g?.nodes) ? g.nodes : Object.values(g?.nodes ?? {})
+    const detectionNodes = nodeArr.filter(n => /DETECTION/i.test(n?.systemId ?? ''))
+    ok('detection network includes both detectors + the panel',
+      detectionNodes.length >= 3, `got ${detectionNodes.length}`)
+    // Loop-closure: every detector should be reachable from the panel.
+    const branches = g?.branches ?? []
+    const detectionBranches = branches.filter(b => /DETECTION/i.test(b?.systemId ?? ''))
+    ok('detection loop branch ties detectors to the panel',
+      detectionBranches.length >= 1,
+      `got ${detectionBranches.length} detection branches`)
+  } else {
+    skip('fire system graph builds without error', 'buildFireSystemGraph not yet built')
+    skip('detection network includes both detectors + the panel', 'engine pending')
+    skip('detection loop branch ties detectors to the panel', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('36. Fire — BOQ emitter produces fire_detection / fire_suppression / fire_equipment')
+{
+  // Verify catalog wiring up-front (engine-independent).
+  const cat25 = getGiDiameter(25)
+  const cat40 = getGiDiameter(40)
+  ok('catalog has 25mm GI diameter', !!cat25, `got ${cat25?.nominalMm}`)
+  ok('catalog has 40mm GI diameter', !!cat40, `got ${cat40?.nominalMm}`)
+  ok('25mm GI diameter carries ratePerMRateKey from catalog',
+    typeof cat25?.ratePerMRateKey === 'string' && cat25.ratePerMRateKey.length > 0,
+    `got "${cat25?.ratePerMRateKey}"`)
+  const fireCable = getCableType('FIRE_RATED_2C')
+  ok('catalog has FIRE_RATED_2C cable',
+    !!fireCable && typeof fireCable.ratePerMRateKey === 'string',
+    `got rateKey="${fireCable?.ratePerMRateKey}"`)
+
+  // Direct emitter contract — must be callable + not throw, even when
+  // engine returns EMPTY_Q. When the engine ships, real lines flow.
+  const collected = []
+  emitFireLines(s(), (l) => collected.push(l), {})
+  ok('Fire emitter is callable + does not throw', true)
+
+  if (computeFireQuantities) {
+    const allLines = getBoqLines(s(), {})
+    const grouped = groupBoqLinesByCategory(allLines)
+    const detection   = grouped.fire_detection   ?? []
+    const suppression = grouped.fire_suppression ?? []
+    const equipment   = grouped.fire_equipment   ?? []
+    ok('getBoqLines includes fire_equipment category',
+      equipment.length > 0, `got ${equipment.length}`)
+    ok('getBoqLines includes fire_detection OR fire_suppression',
+      detection.length + suppression.length > 0,
+      `detection=${detection.length}, suppression=${suppression.length}`)
+    const fireLines = [...detection, ...suppression, ...equipment]
+    ok('every fire line carries meta.discipline=FIRE',
+      fireLines.every(l => l.meta?.discipline === 'FIRE'),
+      `${fireLines.length} lines checked`)
+    ok('every fire line has a non-empty rateKey + id',
+      fireLines.every(l => typeof l.rateKey === 'string' && l.rateKey.length > 0 &&
+                            typeof l.id === 'string' && l.id.length > 0))
+    ok('detection lines all use category=fire_detection',
+      detection.every(l => l.category === 'fire_detection'))
+    ok('suppression lines all use category=fire_suppression',
+      suppression.every(l => l.category === 'fire_suppression'))
+    ok('equipment lines all use category=fire_equipment',
+      equipment.every(l => l.category === 'fire_equipment'))
+  } else {
+    // Engine not yet built — emitter must safely no-op.
+    ok('emitter pushes zero lines when engine returns empty Q',
+      collected.length === 0, `got ${collected.length} lines`)
+    skip('getBoqLines includes fire_equipment category', 'quantities/fire.js not yet built')
+    skip('getBoqLines includes fire_detection OR fire_suppression', 'engine pending')
+    skip('every fire line carries meta.discipline=FIRE', 'engine pending')
+    skip('every fire line has rateKey + id', 'engine pending')
+    skip('detection lines all use category=fire_detection', 'engine pending')
+    skip('suppression lines all use category=fire_suppression', 'engine pending')
+    skip('equipment lines all use category=fire_equipment', 'engine pending')
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
-console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical + Phase 1.3 HVAC: ${pass} pass, ${fail} fail, ${skipped} skipped`)
+console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical + Phase 1.3 HVAC + Phase 1.4 Fire: ${pass} pass, ${fail} fail, ${skipped} skipped`)
 if (skipped > 0) {
   console.log(`  (${skipped} engine-dependent assertions skipped — sibling subagent owns)`)
 }

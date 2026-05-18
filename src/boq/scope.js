@@ -37,6 +37,9 @@ import { computeElectricalQuantities } from '../mep/quantities/electrical.js'
 import { buildHvacSystemGraph } from '../mep/hvac/network.js'
 import { buildHvacRoutes } from '../mep/hvac/routing.js'
 import { computeHvacQuantities } from '../mep/quantities/hvac.js'
+import { buildFireSystemGraph } from '../mep/fire/network.js'
+import { buildFireRoutes } from '../mep/fire/routing.js'
+import { computeFireQuantities } from '../mep/quantities/fire.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
@@ -596,9 +599,9 @@ export function scopeStateToFloor(state, floorId) {
   const getHvacNetwork    = () => buildHvacSystemGraph(scopedStateRef)
   const getHvacRoutes     = () => buildHvacRoutes(getHvacNetwork(), scopedStateRef)
   const getHvacQuantities = (opts) => computeHvacQuantities(scopedStateRef, opts)
-  const getFireNetwork  = () => EMPTY_GRAPH
-  const getFireRoutes   = () => EMPTY_ROUTES
-  const getFireQuantities = () => EMPTY_DISCIPLINE_Q
+  const getFireNetwork    = () => buildFireSystemGraph(scopedStateRef)
+  const getFireRoutes     = () => buildFireRoutes(getFireNetwork(), scopedStateRef)
+  const getFireQuantities = (opts) => computeFireQuantities(scopedStateRef, opts)
   const getElvNetwork   = () => EMPTY_GRAPH
   const getElvRoutes    = () => EMPTY_ROUTES
   const getElvQuantities  = () => EMPTY_DISCIPLINE_Q

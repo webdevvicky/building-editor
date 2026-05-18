@@ -36,6 +36,7 @@ import { scopeStateToFloor }           from './scope'
 import { emitPlumbingLines }           from './emitters/plumbing.js'
 import { emitElectricalLines }         from './emitters/electrical.js'
 import { emitHvacLines }               from './emitters/hvac.js'
+import { emitFireLines }               from './emitters/fire.js'
 
 const DEFAULT_FLOOR = 'F1'
 
@@ -313,6 +314,11 @@ export function getBoqLines(state, rates, opts = {}) {
   // Same floor-scope contract. No-ops until the HVAC engine
   // (computeHvacQuantities) or scoped wrapper returns data.
   emitHvacLines(state, push, { rates, scopedFloorId })
+
+  // ── 14. Fire (Phase 1.4 — per-discipline emitter) ─────────────────────
+  // Same floor-scope contract. No-ops until the Fire engine
+  // (computeFireQuantities) or scoped wrapper returns data.
+  emitFireLines(state, push, { rates, scopedFloorId })
 
   return lines
 }

@@ -19,6 +19,7 @@ import BBSSpecPanel from './components/BBSSpecPanel'
 import PlumbingFixturePanel from './components/PlumbingFixturePanel'
 import ElectricalPointPanel from './components/ElectricalPointPanel'
 import HvacPanel from './components/HvacPanel'
+import FirePanel from './components/FirePanel'
 import MepDefaultsModal from './components/MepDefaultsModal'
 import ProjectsPanel from './components/ProjectsPanel'
 import RevisionsPanel from './components/RevisionsPanel'
@@ -50,6 +51,7 @@ export default function App() {
         <PlumbingFixturePanel />
         <ElectricalPointPanel />
         <HvacPanel />
+        <FirePanel />
         <MepDefaultsModal />
         <ProjectSettingsPanel />
         <ProjectsPanel />

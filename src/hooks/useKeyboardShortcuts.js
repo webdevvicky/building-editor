@@ -106,6 +106,11 @@ export function useKeyboardShortcuts() {
         useStore.getState().setTool?.('hvac')
         return
       }
+      if (key === 'f' || key === 'F') {
+        e.preventDefault()
+        useStore.getState().setTool?.('fire')
+        return
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -165,6 +170,14 @@ async function handleDelete() {
     deleteFn = () => {
       useStore.getState().deleteHvacUnit?.(entityId)
       useStore.getState().selectHvacUnit?.(null)
+    }
+  } else if (s.selectedFireDeviceId) {
+    entityType = 'fire device'
+    entityId = s.selectedFireDeviceId
+    entityLabel = 'fire device'
+    deleteFn = () => {
+      useStore.getState().deleteFireDevice?.(entityId)
+      useStore.getState().selectFireDevice?.(null)
     }
   } else if (s.selectedWallIds?.length) {
     entityType = 'walls'

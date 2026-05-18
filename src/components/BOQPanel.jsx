@@ -21,6 +21,7 @@ import PlasterSection      from './boq/PlasterSection'
 import PlumbingBoqSection  from './boq/PlumbingBoqSection'
 import ElectricalBoqSection from './boq/ElectricalBoqSection'
 import HvacBoqSection       from './boq/HvacBoqSection'
+import FireBoqSection       from './boq/FireBoqSection'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../boq/lines'
 import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
@@ -279,6 +280,10 @@ export default function BOQPanel() {
   const hvacRefrigerant = linesByCat.hvac_refrigerant ?? []
   const hvacCondensate  = linesByCat.hvac_condensate  ?? []
   const hvacUnits       = linesByCat.hvac_units       ?? []
+  // Fire categories — detection cable + suppression pipe + device equipment.
+  const fireDetection   = linesByCat.fire_detection   ?? []
+  const fireSuppression = linesByCat.fire_suppression ?? []
+  const fireEquipment   = linesByCat.fire_equipment   ?? []
 
   // ── Header summary stats — pulled from scopedState so they honor the toggle.
   const wallCount      = Object.values(scopedState.walls).filter(w => !w.isVirtual).length
@@ -618,6 +623,16 @@ export default function BOQPanel() {
         refrigerantLines={hvacRefrigerant}
         condensateLines={hvacCondensate}
         unitLines={hvacUnits}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity}
+      />
+
+      {/* Fire (detection + suppression + equipment) — Phase 1.4 */}
+      <FireBoqSection
+        detectionLines={fireDetection}
+        suppressionLines={fireSuppression}
+        equipmentLines={fireEquipment}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity}

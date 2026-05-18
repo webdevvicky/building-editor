@@ -29,6 +29,11 @@ const LAYER_LABELS = {
   hvacUnits:               'Units',
   hvacRefrigerantRoutes:   'Refrigerant',
   hvacCondensateRoutes:    'Condensate',
+
+  // Fire
+  fireDevices:             'Devices',
+  fireDetectionRoutes:     'Detection',
+  fireSprinklerRoutes:     'Sprinkler',
 }
 
 const LAYER_GROUPS = [
@@ -60,6 +65,14 @@ const LAYER_GROUPS = [
       'hvacUnits',
       'hvacRefrigerantRoutes',
       'hvacCondensateRoutes',
+    ],
+  },
+  {
+    title: 'Fire',
+    keys: [
+      'fireDevices',
+      'fireDetectionRoutes',
+      'fireSprinklerRoutes',
     ],
   },
 ]

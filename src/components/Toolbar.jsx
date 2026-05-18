@@ -13,6 +13,7 @@ import {
   Droplet,
   Zap,
   Wind,
+  Flame,
   Container,
   Cylinder,
   Building2,
@@ -135,6 +136,7 @@ export default function Toolbar() {
         {toolBtn('plumbing',      Droplet,             'Plumbing (P)')}
         {toolBtn('electrical',    Zap,                 'Electrical (E)')}
         {toolBtn('hvac',          Wind,                'HVAC (H)')}
+        {toolBtn('fire',          Flame,               'Fire (F)')}
         {toolBtn('sump',          Droplet,             'Sump')}
         {toolBtn('overhead_tank', Container,           'Overhead tank')}
         {toolBtn('septic_tank',   Cylinder,            'Septic tank')}
