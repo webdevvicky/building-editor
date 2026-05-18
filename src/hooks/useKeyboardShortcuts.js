@@ -101,6 +101,11 @@ export function useKeyboardShortcuts() {
         useStore.getState().setTool?.('electrical')
         return
       }
+      if (key === 'h' || key === 'H') {
+        e.preventDefault()
+        useStore.getState().setTool?.('hvac')
+        return
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -153,6 +158,14 @@ async function handleDelete() {
     entityId = s.selectedStampId
     entityLabel = 'stamp'
     deleteFn = () => useStore.getState().deleteStamp?.(entityId)
+  } else if (s.selectedHvacUnitId) {
+    entityType = 'hvac unit'
+    entityId = s.selectedHvacUnitId
+    entityLabel = 'HVAC unit'
+    deleteFn = () => {
+      useStore.getState().deleteHvacUnit?.(entityId)
+      useStore.getState().selectHvacUnit?.(null)
+    }
   } else if (s.selectedWallIds?.length) {
     entityType = 'walls'
     entityLabel = `${s.selectedWallIds.length} walls`

@@ -20,6 +20,7 @@ import PlumConcreteRow     from './boq/PlumConcreteRow'
 import PlasterSection      from './boq/PlasterSection'
 import PlumbingBoqSection  from './boq/PlumbingBoqSection'
 import ElectricalBoqSection from './boq/ElectricalBoqSection'
+import HvacBoqSection       from './boq/HvacBoqSection'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../boq/lines'
 import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
@@ -274,6 +275,10 @@ export default function BOQPanel() {
     ...electricalLighting, ...electricalPower, ...electricalHvac,
     ...electricalSubmain, ...electricalSolar, ...electricalEv,
   ]
+  // HVAC categories — refrigerant copper + condensate UPVC + unit counts.
+  const hvacRefrigerant = linesByCat.hvac_refrigerant ?? []
+  const hvacCondensate  = linesByCat.hvac_condensate  ?? []
+  const hvacUnits       = linesByCat.hvac_units       ?? []
 
   // ── Header summary stats — pulled from scopedState so they honor the toggle.
   const wallCount      = Object.values(scopedState.walls).filter(w => !w.isVirtual).length
@@ -603,6 +608,16 @@ export default function BOQPanel() {
         pointLines={electricalPoints}
         fittingLines={electricalFittings}
         dbLines={electricalDb}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity}
+      />
+
+      {/* HVAC (refrigerant + condensate + units) — Phase 1.3 */}
+      <HvacBoqSection
+        refrigerantLines={hvacRefrigerant}
+        condensateLines={hvacCondensate}
+        unitLines={hvacUnits}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity}

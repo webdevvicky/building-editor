@@ -35,6 +35,7 @@ import { PLASTER_KIND }                from '../specs/plasterSystems'
 import { scopeStateToFloor }           from './scope'
 import { emitPlumbingLines }           from './emitters/plumbing.js'
 import { emitElectricalLines }         from './emitters/electrical.js'
+import { emitHvacLines }               from './emitters/hvac.js'
 
 const DEFAULT_FLOOR = 'F1'
 
@@ -307,6 +308,11 @@ export function getBoqLines(state, rates, opts = {}) {
   // Same floor-scope contract as plumbing. No-ops until the electrical
   // engine (computeElectricalQuantities) or scoped wrapper returns data.
   emitElectricalLines(state, push, { rates, scopedFloorId })
+
+  // ── 13. HVAC (Phase 1.3 — per-discipline emitter) ─────────────────────
+  // Same floor-scope contract. No-ops until the HVAC engine
+  // (computeHvacQuantities) or scoped wrapper returns data.
+  emitHvacLines(state, push, { rates, scopedFloorId })
 
   return lines
 }

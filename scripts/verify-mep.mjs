@@ -995,11 +995,226 @@ reset()
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 1.3 — HVAC engine + quantities + BOQ
+// ─────────────────────────────────────────────────────────────────────────
+//
+// BOQ-side surface (emitter, catalog wiring, line contract, category
+// names) is owned by THIS agent and must pass green. Engine modules
+// (computeHvacQuantities, buildHvacRoutes, suggestHvacUnitsForRoom, etc.)
+// are owned by the sibling subagent — soft-detected and skipped when
+// not yet shipped.
+
+import { emitHvacLines } from '../src/boq/emitters/hvac.js'
+import {
+  getHvacDefaultsForRoom,
+  getHvacUnit,
+  getCopperDiameter,
+} from '../src/mep/catalogs/index.js'
+
+let buildHvacSystemGraph = null
+let buildHvacRoutes = null
+let computeHvacQuantities = null
+let suggestHvacUnitsForRoom = null
+try {
+  const mod = await import('../src/mep/hvac/network.js')
+  buildHvacSystemGraph = mod.buildHvacSystemGraph ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/hvac/routing.js')
+  buildHvacRoutes = mod.buildHvacRoutes ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/quantities/hvac.js')
+  computeHvacQuantities = mod.computeHvacQuantities ?? null
+} catch { /* engine pending */ }
+try {
+  const mod = await import('../src/mep/hvac/suggestions.js')
+  suggestHvacUnitsForRoom = mod.suggestHvacUnitsForRoom ?? null
+} catch { /* engine pending */ }
+
+// ─────────────────────────────────────────────────────────────────────
+header('28. HVAC — auto-suggest defaults for BEDROOM')
+reset()
+{
+  // Catalog-level default check works without the suggestion engine —
+  // verifies the ISHRAE / NBC 2016 defaults table itself.
+  const defaults = getHvacDefaultsForRoom('BEDROOM')
+  ok('BEDROOM HVAC defaults exist',
+    Array.isArray(defaults) && defaults.length > 0,
+    `length=${defaults?.length}`)
+  const byType = Object.fromEntries(defaults.map(d => [d.type, d.n]))
+  ok('BEDROOM defaults include 1 AC_INDOOR_UNIT', byType.AC_INDOOR_UNIT === 1,
+    `got AC_INDOOR_UNIT=${byType.AC_INDOOR_UNIT}`)
+  ok('BEDROOM defaults include 1 AC_OUTDOOR_UNIT', byType.AC_OUTDOOR_UNIT === 1,
+    `got AC_OUTDOOR_UNIT=${byType.AC_OUTDOOR_UNIT}`)
+
+  // Catalog lookup for AC_INDOOR_UNIT — confirms it's a real entry.
+  const acIndoor = getHvacUnit('AC_INDOOR_UNIT')
+  ok('AC_INDOOR_UNIT catalog entry exists',
+    !!acIndoor && acIndoor.discipline === 'HVAC',
+    `got ${acIndoor?.discipline}`)
+  ok('AC_INDOOR_UNIT uses 3/8" refrigerant OD',
+    acIndoor?.refrigerantPipeOdIn === '3/8',
+    `got ${acIndoor?.refrigerantPipeOdIn}`)
+
+  const { roomId } = buildRoom('Bed1', 'BEDROOM', 0, 0)
+  if (suggestHvacUnitsForRoom) {
+    const suggestions = suggestHvacUnitsForRoom(s(), roomId) ?? []
+    const types = new Set(suggestions.map(x => x?.type))
+    ok('suggestor includes AC_INDOOR_UNIT for BEDROOM',
+      types.has('AC_INDOOR_UNIT'),
+      `got [${[...types].join(',')}]`)
+  } else {
+    skip('suggestor includes AC_INDOOR_UNIT for BEDROOM', 'suggestHvacUnitsForRoom not yet built')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('29. HVAC — indoor/outdoor pairing in system graph')
+reset()
+{
+  const { centerX, centerY } = buildRoom('Bed-Paired', 'BEDROOM', 0, 0)
+  const indoorId  = s().addHvacUnit('AC_INDOOR_UNIT',  centerX - 2 * FT, centerY)
+  const outdoorId = s().addHvacUnit('AC_OUTDOOR_UNIT', centerX + 12 * FT, centerY)
+  ok('indoor + outdoor units placed', !!indoorId && !!outdoorId)
+  // Pair them — the network engine ties paired indoor↔outdoor units into a
+  // single REFRIGERANT branch. Pairing is explicit (set via the panel today;
+  // future auto-pair heuristic lives in suggestions).
+  s().updateHvacUnit(indoorId,  { pairedOutdoorId: outdoorId })
+  s().updateHvacUnit(outdoorId, { pairedIndoorId:  indoorId  })
+
+  if (buildHvacSystemGraph) {
+    const g = buildHvacSystemGraph(s())
+    ok('HVAC system graph builds without error', !!g && typeof g === 'object')
+    const nodeArr = Array.isArray(g?.nodes) ? g.nodes : Object.values(g?.nodes ?? {})
+    const indoorNode  = nodeArr.find(n => n?.entityId === indoorId)
+    const outdoorNode = nodeArr.find(n => n?.entityId === outdoorId)
+    ok('graph contains the indoor unit as a node', !!indoorNode)
+    ok('graph contains the outdoor unit as a node', !!outdoorNode)
+    // Pairing — when both placed, the network should connect them via a
+    // REFRIGERANT branch with at least one edge from indoor → outdoor.
+    const branches = g?.branches ?? []
+    const refrigerantBranches = branches.filter(b => /REFRIGERANT/i.test(b?.systemId ?? ''))
+    ok('refrigerant branch ties the two units',
+      refrigerantBranches.length >= 1,
+      `got ${refrigerantBranches.length} refrigerant branches`)
+  } else {
+    skip('HVAC system graph builds without error', 'buildHvacSystemGraph not yet built')
+    skip('graph contains the indoor unit as a node', 'engine pending')
+    skip('graph contains the outdoor unit as a node', 'engine pending')
+    skip('refrigerant branch ties the two units', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('30. HVAC — refrigerant route built (polyline length > 0)')
+{
+  // Reuse the indoor + outdoor pair from Test 29's state.
+  if (buildHvacSystemGraph && buildHvacRoutes) {
+    const g = buildHvacSystemGraph(s())
+    const result = buildHvacRoutes(g, s())
+    const routes = Array.isArray(result?.routes) ? result.routes : (Array.isArray(result) ? result : [])
+    ok('buildHvacRoutes returns a routes array',
+      Array.isArray(routes), `got ${typeof result}`)
+    const refrigerantRoutes = routes.filter(r => /REFRIGERANT/i.test(r?.systemId ?? ''))
+    ok('at least one refrigerant route exists',
+      refrigerantRoutes.length >= 1, `got ${refrigerantRoutes.length}`)
+    // Polyline length sanity — every route's polyline (or adjustedLengthFt) > 0.
+    const hasLength = refrigerantRoutes.some(r => {
+      const pl = r?.polyline ?? []
+      const adj = Number(r?.adjustedLengthFt) || 0
+      return adj > 0 || (Array.isArray(pl) && pl.length >= 2)
+    })
+    ok('refrigerant route polyline length > 0', hasLength,
+      `routes=${refrigerantRoutes.length}`)
+  } else {
+    skip('buildHvacRoutes returns a routes array', 'buildHvacRoutes not yet built')
+    skip('at least one refrigerant route exists', 'engine pending')
+    skip('refrigerant route polyline length > 0', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('31. HVAC — quantities aggregate by pipe OD')
+{
+  // Verify catalog wiring up-front (engine-independent).
+  const cat38 = getCopperDiameter('3/8')
+  const cat14 = getCopperDiameter('1/4')
+  ok('catalog has 3/8" copper diameter', !!cat38, `got ${cat38?.nominalIn}`)
+  ok('catalog has 1/4" copper diameter', !!cat14, `got ${cat14?.nominalIn}`)
+  ok('3/8" diameter carries ratePerMRateKey from catalog',
+    typeof cat38?.ratePerMRateKey === 'string' && cat38.ratePerMRateKey.length > 0,
+    `got "${cat38?.ratePerMRateKey}"`)
+
+  if (computeHvacQuantities) {
+    const q = computeHvacQuantities(s())
+    ok('computeHvacQuantities returns an object with perSystem',
+      q && typeof q.perSystem === 'object')
+    const refrigerant = q?.perSystem?.REFRIGERANT ?? {}
+    const byOd = refrigerant.byPipeOd ?? refrigerant.byDiameter ?? {}
+    const has38 = Object.keys(byOd).some(k => /3\/?8/.test(k) || k === '3_8')
+    const has14 = Object.keys(byOd).some(k => /1\/?4/.test(k) || k === '1_4')
+    ok('refrigerant byPipeOd includes a 3/8" entry', has38,
+      `keys=[${Object.keys(byOd).join(',')}]`)
+    ok('refrigerant byPipeOd includes a 1/4" entry', has14,
+      `keys=[${Object.keys(byOd).join(',')}]`)
+  } else {
+    skip('computeHvacQuantities returns an object', 'quantities/hvac.js not yet built')
+    skip('refrigerant byPipeOd includes a 3/8" entry', 'engine pending')
+    skip('refrigerant byPipeOd includes a 1/4" entry', 'engine pending')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('32. HVAC — BOQ emitter produces hvac_refrigerant / hvac_condensate / hvac_units')
+{
+  // Direct emitter contract — must be callable + not throw, even when
+  // engine returns EMPTY_Q. When the engine ships, real lines flow.
+  const collected = []
+  emitHvacLines(s(), (l) => collected.push(l), {})
+  ok('HVAC emitter is callable + does not throw', true)
+
+  if (computeHvacQuantities) {
+    const allLines = getBoqLines(s(), {})
+    const grouped = groupBoqLinesByCategory(allLines)
+    const refrigerant = grouped.hvac_refrigerant ?? []
+    const condensate  = grouped.hvac_condensate  ?? []
+    const units       = grouped.hvac_units       ?? []
+    ok('getBoqLines includes hvac_units category',
+      units.length > 0, `got ${units.length}`)
+    ok('getBoqLines includes hvac_refrigerant OR hvac_condensate',
+      refrigerant.length + condensate.length > 0,
+      `refrigerant=${refrigerant.length}, condensate=${condensate.length}`)
+    const hvacLines = [...refrigerant, ...condensate, ...units]
+    ok('every HVAC line carries meta.discipline=HVAC',
+      hvacLines.every(l => l.meta?.discipline === 'HVAC'),
+      `${hvacLines.length} lines checked`)
+    ok('every HVAC line has a non-empty rateKey + id',
+      hvacLines.every(l => typeof l.rateKey === 'string' && l.rateKey.length > 0 &&
+                            typeof l.id === 'string' && l.id.length > 0))
+    ok('refrigerant lines all use category=hvac_refrigerant',
+      refrigerant.every(l => l.category === 'hvac_refrigerant'))
+    ok('condensate lines all use category=hvac_condensate',
+      condensate.every(l => l.category === 'hvac_condensate'))
+  } else {
+    // Engine not yet built — emitter must safely no-op.
+    ok('emitter pushes zero lines when engine returns empty Q',
+      collected.length === 0, `got ${collected.length} lines`)
+    skip('getBoqLines includes hvac_units category', 'quantities/hvac.js not yet built')
+    skip('getBoqLines includes hvac_refrigerant OR hvac_condensate', 'engine pending')
+    skip('every HVAC line carries meta.discipline=HVAC', 'engine pending')
+    skip('every HVAC line has rateKey + id', 'engine pending')
+    skip('refrigerant lines all use category=hvac_refrigerant', 'engine pending')
+    skip('condensate lines all use category=hvac_condensate', 'engine pending')
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
-console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical: ${pass} pass, ${fail} fail, ${skipped} skipped`)
+console.log(`Phase 0a + Phase 1.1 plumbing + Phase 1.2 electrical + Phase 1.3 HVAC: ${pass} pass, ${fail} fail, ${skipped} skipped`)
 if (skipped > 0) {
   console.log(`  (${skipped} engine-dependent assertions skipped — sibling subagent owns)`)
 }

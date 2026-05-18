@@ -10,6 +10,7 @@ import { getColumnSvgDims } from '../lib/columnShapes'
 import { getNearestWallToPoint } from '../topology/index.js'
 import PlumbingOverlay from './canvas/PlumbingOverlay.jsx'
 import ElectricalOverlay from './canvas/ElectricalOverlay.jsx'
+import HvacOverlay from './canvas/HvacOverlay.jsx'
 import './Canvas.css'
 
 // Phase 1 plumbing — fixed placeholder type until a floating type picker
@@ -21,6 +22,11 @@ const DEFAULT_PLUMBING_FIXTURE_TYPE = 'WC'
 // lands. Electrical tool drops one LIGHT per click; user then changes the
 // type via ElectricalPointPanel. The picker is Phase 1.x polish.
 const DEFAULT_ELECTRICAL_POINT_TYPE = 'LIGHT'
+
+// Phase 1 hvac — fixed placeholder type until a floating type picker lands.
+// HVAC tool drops one AC_INDOOR_UNIT per click; user then changes the type
+// via HvacPanel. The picker is Phase 1.x polish.
+const DEFAULT_HVAC_UNIT_TYPE = 'AC_INDOOR_UNIT'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -105,6 +111,7 @@ const TOOL_CURSOR = {
   beam:          'crosshair',
   plumbing:      'crosshair',
   electrical:    'crosshair',
+  hvac:          'crosshair',
 }
 
 function getColPos(col, nodes) {
@@ -415,6 +422,32 @@ export default function Canvas() {
         DEFAULT_ELECTRICAL_POINT_TYPE, px, py, wallId, wallT,
       )
       useStore.getState().selectElectricalPoint(id)
+      return
+    }
+
+    if (activeTool === 'hvac') {
+      // Phase 1: snap to nearest wall on the current floor and drop the
+      // default unit. Engines subagent owns roomId resolution / routing.
+      // Floating type-picker is Phase 1.x polish; for now the user changes
+      // the type from HvacPanel after placement.
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      const state = useStore.getState()
+      const candidateIds = typeof state.getWallIdsByFloor === 'function'
+        ? state.getWallIdsByFloor(currentFloorId)
+        : null
+      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
+      const SNAP_IN = 36
+      let wallId = null, wallT = null, px = x, py = y
+      if (near && near.distance <= SNAP_IN) {
+        wallId = near.wallId
+        wallT  = near.t
+        px = near.projected.x
+        py = near.projected.y
+      }
+      const id = useStore.getState().addHvacUnit(
+        DEFAULT_HVAC_UNIT_TYPE, px, py, wallId, wallT,
+      )
+      useStore.getState().selectHvacUnit(id)
       return
     }
 
@@ -975,6 +1008,10 @@ export default function Canvas() {
         {/* Electrical overlay (points, wiring/submain routes, submain risers).
          * Renders right after plumbing, before nodes, per CLAUDE.md MEP plan §16.2. */}
         <ElectricalOverlay />
+
+        {/* HVAC overlay (indoor/outdoor units, refrigerant/condensate routes,
+         * HVAC risers). Renders right after electrical, before nodes. */}
+        <HvacOverlay />
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {

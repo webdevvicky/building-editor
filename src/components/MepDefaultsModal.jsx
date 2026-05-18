@@ -16,20 +16,22 @@ import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
-import { getFixtureType, getPointType } from '../mep/catalogs/index.js'
+import { getFixtureType, getPointType, getHvacUnit } from '../mep/catalogs/index.js'
 
 function useSuggestFns() {
-  const [fns, setFns] = useState({ plumbing: null, electrical: null })
+  const [fns, setFns] = useState({ plumbing: null, electrical: null, hvac: null })
   useEffect(() => {
     let alive = true
     Promise.allSettled([
       import('../mep/plumbing/suggestions.js'),
       import('../mep/electrical/suggestions.js'),
-    ]).then(([p, e]) => {
+      import('../mep/hvac/suggestions.js'),
+    ]).then(([p, e, h]) => {
       if (!alive) return
       setFns({
         plumbing:   p.status === 'fulfilled' ? (p.value.suggestPlumbingFixturesForRoom ?? null) : null,
         electrical: e.status === 'fulfilled' ? (e.value.suggestElectricalPointsForRoom ?? null) : null,
+        hvac:       h.status === 'fulfilled' ? (h.value.suggestHvacUnitsForRoom ?? null) : null,
       })
     })
     return () => { alive = false }
@@ -59,8 +61,11 @@ export default function MepDefaultsModal() {
       const electricalSugs = suggestFns.electrical
         ? (suggestFns.electrical(state, roomId) ?? [])
         : []
+      const hvacSugs = suggestFns.hvac
+        ? (suggestFns.hvac(state, roomId) ?? [])
+        : []
 
-      if (!plumbingSugs.length && !electricalSugs.length) return
+      if (!plumbingSugs.length && !electricalSugs.length && !hvacSugs.length) return
 
       setPending({
         roomId,
@@ -72,6 +77,10 @@ export default function MepDefaultsModal() {
         electrical: {
           suggestions: electricalSugs,
           selected: electricalSugs.map(() => true),
+        },
+        hvac: {
+          suggestions: hvacSugs,
+          selected: hvacSugs.map(() => true),
         },
       })
     }
@@ -96,7 +105,8 @@ export default function MepDefaultsModal() {
   async function apply() {
     const chosenPlumbing   = pending.plumbing.suggestions.filter((_, i) => pending.plumbing.selected[i])
     const chosenElectrical = pending.electrical.suggestions.filter((_, i) => pending.electrical.selected[i])
-    const total = chosenPlumbing.length + chosenElectrical.length
+    const chosenHvac       = pending.hvac.suggestions.filter((_, i) => pending.hvac.selected[i])
+    const total = chosenPlumbing.length + chosenElectrical.length + chosenHvac.length
     if (!total) {
       await dialog.alert('Select at least one item to apply, or skip.', {
         title: 'Nothing selected',
@@ -106,16 +116,19 @@ export default function MepDefaultsModal() {
     applyRoomMepDefaults(pending.roomId, {
       plumbing: chosenPlumbing,
       electrical: chosenElectrical,
+      hvac: chosenHvac,
     })
     const parts = []
     if (chosenPlumbing.length)   parts.push(`${chosenPlumbing.length} plumbing`)
     if (chosenElectrical.length) parts.push(`${chosenElectrical.length} electrical`)
+    if (chosenHvac.length)       parts.push(`${chosenHvac.length} HVAC`)
     toast.success(`Placed ${parts.join(' + ')} default${total === 1 ? '' : 's'}.`)
     setPending(null)
   }
 
   const hasPlumbing   = pending.plumbing.suggestions.length > 0
   const hasElectrical = pending.electrical.suggestions.length > 0
+  const hasHvac       = pending.hvac.suggestions.length > 0
 
   return (
     <Modal
@@ -140,8 +153,8 @@ export default function MepDefaultsModal() {
         marginBottom: 'var(--space-3)',
         lineHeight: 1.5,
       }}>
-        IS-2065 / IS-732 / NBC 2016 suggest the following items for this
-        room type. Uncheck any you don&apos;t want, then Apply.
+        IS-2065 / IS-732 / ISHRAE / NBC 2016 suggest the following items
+        for this room type. Uncheck any you don&apos;t want, then Apply.
       </div>
 
       {hasPlumbing && (
@@ -171,6 +184,22 @@ export default function MepDefaultsModal() {
             return {
               label: catalog?.label ?? sug.type,
               meta: catalog?.defaultLoadW != null ? `${catalog.defaultLoadW} W` : null,
+            }
+          }}
+        />
+      )}
+
+      {hasHvac && (
+        <SuggestionGroup
+          title="HVAC (ISHRAE / NBC)"
+          suggestions={pending.hvac.suggestions}
+          selected={pending.hvac.selected}
+          onToggle={i => toggle('hvac', i)}
+          renderItem={(sug) => {
+            const catalog = getHvacUnit(sug.type)
+            return {
+              label: catalog?.label ?? sug.type,
+              meta: catalog?.capacityTons ? `${catalog.capacityTons} TR` : null,
             }
           }}
         />

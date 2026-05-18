@@ -24,6 +24,11 @@ const LAYER_LABELS = {
   electricalPoints:        'Points',
   electricalWiringRoutes:  'Wiring',
   electricalSubmainRoutes: 'Submains',
+
+  // HVAC
+  hvacUnits:               'Units',
+  hvacRefrigerantRoutes:   'Refrigerant',
+  hvacCondensateRoutes:    'Condensate',
 }
 
 const LAYER_GROUPS = [
@@ -47,6 +52,14 @@ const LAYER_GROUPS = [
       'electricalPoints',
       'electricalWiringRoutes',
       'electricalSubmainRoutes',
+    ],
+  },
+  {
+    title: 'HVAC',
+    keys: [
+      'hvacUnits',
+      'hvacRefrigerantRoutes',
+      'hvacCondensateRoutes',
     ],
   },
 ]
