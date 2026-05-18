@@ -14,6 +14,7 @@ import {
 } from './constants/structural'
 import { DEFAULT_PLASTER_SYSTEM_ID } from './specs/plasterSystems'
 import { getColumnAreaFt2 } from './lib/columnShapes'
+import { createMemo } from './topology/cache.js'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
@@ -30,14 +31,14 @@ function inferSlabRole(state, floorId) {
   return idx === sorted.length - 1 ? 'ROOF' : 'FLOOR'
 }
 
-// Module-level memoization caches (reference-equality keyed).
-// Safe for single-store apps — one store instance per app lifetime.
-let _wallAdjCache    = { rooms: null, result: null }
-let _derivedBeamsCache = { walls: null, nodes: null, columns: null, rooms: null, result: null }
-let _allBeamsCache   = { beams: null, derived: null, result: null }
-let _concreteCache   = { colQ: null, fdnQ: null, beamQ: null, slabQ: null, stairQ: null, sunQ: null, result: null }
-let _masonryDedCache = { walls: null, nodes: null, projectSettings: null, result: null }
-let _foundationCache = { columns: null, foundations: null, projectSettings: null, colQ: null, result: null }
+// Reference-equality memo cells (one per cached selector). Single-store
+// assumption — one cell per module is sufficient. See src/topology/cache.js.
+const _wallAdjMemo     = createMemo()
+const _derivedBeamsMemo = createMemo()
+const _allBeamsMemo    = createMemo()
+const _concreteMemo    = createMemo()
+const _masonryDedMemo  = createMemo()
+const _foundationMemo  = createMemo()
 
 export const DEFAULT_COLUMN_TYPES = [
   { id: 'C1', label: 'Corner 9×9',    widthIn: 9,  depthIn: 9,  shape: 'rect',   footingLengthFt: 3, footingWidthFt: 3, footingDepthFt: 1    },
@@ -824,15 +825,15 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Used to auto-classify external (count=1) vs partition (count=2) walls.
   getWallAdjacencyCount: () => {
     const { rooms } = get()
-    if (_wallAdjCache.rooms === rooms) return _wallAdjCache.result
-    const count = {}
-    for (const room of Object.values(rooms)) {
-      for (const wid of (room.wallIds || [])) {
-        count[wid] = (count[wid] || 0) + 1
+    return _wallAdjMemo([rooms], () => {
+      const count = {}
+      for (const room of Object.values(rooms)) {
+        for (const wid of (room.wallIds || [])) {
+          count[wid] = (count[wid] || 0) + 1
+        }
       }
-    }
-    _wallAdjCache = { rooms, result: count }
-    return count
+      return count
+    })
   },
 
   // Resolves null beam flags to auto-derived booleans from room adjacency.
@@ -860,36 +861,33 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Memoized on {walls, nodes, columns, rooms}.
   getDerivedWallBeams: () => {
     const { walls, nodes, columns, rooms } = get()
-    const c = _derivedBeamsCache
-    if (c.walls === walls && c.nodes === nodes && c.columns === columns && c.rooms === rooms) return c.result
-
-    // Build nodeId → columnId map for attached columns
-    const nodeToColId = {}
-    for (const col of Object.values(columns)) {
-      if (col.attachedNodeId) nodeToColId[col.attachedNodeId] = col.id
-    }
-
-    const result = []
-    for (const wall of Object.values(walls)) {
-      if (wall.isVirtual || wall.isPlot) continue
-      const flags = get().classifyWallBeamFlags(wall.id)
-      const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
-      if (!n1 || !n2) continue
-
-      for (const lvl of BEAM_LEVEL_REGISTRY) {
-        if (!flags[lvl.flagName]) continue
-        const fromRef = nodeToColId[wall.n1]
-          ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] }
-          : { type: 'POINT', x: n1.x, y: n1.y }
-        const toRef = nodeToColId[wall.n2]
-          ? { type: 'COLUMN', columnId: nodeToColId[wall.n2] }
-          : { type: 'POINT', x: n2.x, y: n2.y }
-        result.push({ id: `derived_${wall.id}_${lvl.id}`, endpoints: { from: fromRef, to: toRef }, level: lvl.id, source: 'WALL_DERIVED', sourceWallId: wall.id })
+    return _derivedBeamsMemo([walls, nodes, columns, rooms], () => {
+      // Build nodeId → columnId map for attached columns
+      const nodeToColId = {}
+      for (const col of Object.values(columns)) {
+        if (col.attachedNodeId) nodeToColId[col.attachedNodeId] = col.id
       }
-    }
 
-    _derivedBeamsCache = { walls, nodes, columns, rooms, result }
-    return result
+      const result = []
+      for (const wall of Object.values(walls)) {
+        if (wall.isVirtual || wall.isPlot) continue
+        const flags = get().classifyWallBeamFlags(wall.id)
+        const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
+        if (!n1 || !n2) continue
+
+        for (const lvl of BEAM_LEVEL_REGISTRY) {
+          if (!flags[lvl.flagName]) continue
+          const fromRef = nodeToColId[wall.n1]
+            ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] }
+            : { type: 'POINT', x: n1.x, y: n1.y }
+          const toRef = nodeToColId[wall.n2]
+            ? { type: 'COLUMN', columnId: nodeToColId[wall.n2] }
+            : { type: 'POINT', x: n2.x, y: n2.y }
+          result.push({ id: `derived_${wall.id}_${lvl.id}`, endpoints: { from: fromRef, to: toRef }, level: lvl.id, source: 'WALL_DERIVED', sourceWallId: wall.id })
+        }
+      }
+      return result
+    })
   },
 
   // Merges EXPLICIT (persisted) + WALL_DERIVED (in-memory) beams into one list.
@@ -898,11 +896,7 @@ export const createStructuralSlice = (set, get, uid) => ({
   getAllBeams: () => {
     const { beams } = get()
     const derived   = get().getDerivedWallBeams()
-    const c = _allBeamsCache
-    if (c.beams === beams && c.derived === derived) return c.result
-    const result = [...Object.values(beams), ...derived]
-    _allBeamsCache = { beams, derived, result }
-    return result
+    return _allBeamsMemo([beams, derived], () => [...Object.values(beams), ...derived])
   },
 
   // Fix 2: Column height = sum of floor heights from baseFloorId through topFloorId,
@@ -1092,10 +1086,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     const { columnTypes } = projectSettings
     const colQ = get().getColumnQuantities()
 
-    const c = _foundationCache
-    if (c.columns === columns && c.foundations === foundations && c.projectSettings === projectSettings && c.colQ === colQ)
-      return c.result
-
+    return _foundationMemo([columns, foundations, projectSettings, colQ], () => {
     // Fix 1: a column is "attached to a foundation" iff its id appears in some
     // foundation.columnIds[]. Inline auto-isolated path covers everything else.
     const attachedSet = new Set()
@@ -1165,9 +1156,8 @@ export const createStructuralSlice = (set, get, uid) => ({
       }
     }
 
-    const result = { byFoundation, byColumnTypeInline }
-    _foundationCache = { columns, foundations, projectSettings, colQ, result }
-    return result
+    return { byFoundation, byColumnTypeInline }
+    })
   },
 
   // Backward-compatible shape: { [columnTypeId]: { count, concreteVolFt3, pccVolFt3, label, lengthFt, widthFt, depthFt } }
@@ -1463,8 +1453,7 @@ export const createStructuralSlice = (set, get, uid) => ({
     const slabQ    = state.getSlabQuantities()
     const stairQ   = state.getStaircaseQuantities()
     const sunQ     = state.getSunshadeQuantities()
-    const c = _concreteCache
-    if (c.colQ === colQ && c.fdnQ === fdnQ && c.beamQ === beamQ && c.slabQ === slabQ && c.stairQ === stairQ && c.sunQ === sunQ) return c.result
+    return _concreteMemo([colQ, fdnQ, beamQ, slabQ, stairQ, sunQ], () => {
 
     const fdnConcreteFt3 =
       Object.values(fdnQ.byFoundation).reduce((s, q) => s + q.concreteVolFt3, 0) +
@@ -1503,8 +1492,8 @@ export const createStructuralSlice = (set, get, uid) => ({
       }
     }
 
-    _concreteCache = { colQ, fdnQ, beamQ, slabQ, stairQ, sunQ, result }
     return result
+    })
   },
 
   // Returns same shape as getMaterialQuantities() but with beam volumes deducted.
@@ -1518,71 +1507,62 @@ export const createStructuralSlice = (set, get, uid) => ({
   // Memoized on {walls, nodes, projectSettings}.
   getMasonryWithBeamDeduction: () => {
     const { walls, nodes, projectSettings } = get()
-    const c = _masonryDedCache
-    if (c.walls === walls && c.nodes === nodes && c.projectSettings === projectSettings) return c.result
+    return _masonryDedMemo([walls, nodes, projectSettings], () => {
+      const base = get().getMaterialQuantities?.()
+      if (!base || Object.keys(base).length === 0) return base ?? {}
 
-    const base = get().getMaterialQuantities?.()
-    if (!base || Object.keys(base).length === 0) {
-      _masonryDedCache = { walls, nodes, projectSettings, result: base ?? {} }
-      return base ?? {}
-    }
+      const { beamDimensions, wastagePercent } = projectSettings
+      const WASTAGE = 1 + wastagePercent / 100
 
-    const { beamDimensions, wastagePercent } = projectSettings
-    const WASTAGE = 1 + wastagePercent / 100
-
-    // Accumulate deductions per material key
-    const deductions = {}
-    for (const wall of Object.values(walls)) {
-      if (wall.isVirtual || wall.isPlot) continue
-      const matKey = wall.materialKey ?? 'IS_MODULAR_BRICK'
-      const flags  = get().classifyWallBeamFlags(wall.id)
-      const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
-      if (!n1 || !n2) continue
-      const wallLenFt  = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
-      const wallThickFt = (wall.thickness ?? 9) / 12
-      let deductFt3 = 0
-      for (const lvl of BEAM_LEVEL_REGISTRY) {
-        if (!flags[lvl.flagName]) continue
-        const dims = beamDimensions[lvl.id]
-        if (!dims) continue
-        deductFt3 += wallLenFt * Math.min(wallThickFt, dims.widthIn / 12) * (dims.depthIn / 12)
+      // Accumulate deductions per material key
+      const deductions = {}
+      for (const wall of Object.values(walls)) {
+        if (wall.isVirtual || wall.isPlot) continue
+        const matKey = wall.materialKey ?? 'IS_MODULAR_BRICK'
+        const flags  = get().classifyWallBeamFlags(wall.id)
+        const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
+        if (!n1 || !n2) continue
+        const wallLenFt  = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
+        const wallThickFt = (wall.thickness ?? 9) / 12
+        let deductFt3 = 0
+        for (const lvl of BEAM_LEVEL_REGISTRY) {
+          if (!flags[lvl.flagName]) continue
+          const dims = beamDimensions[lvl.id]
+          if (!dims) continue
+          deductFt3 += wallLenFt * Math.min(wallThickFt, dims.widthIn / 12) * (dims.depthIn / 12)
+        }
+        if (deductFt3 > 0) deductions[matKey] = (deductions[matKey] ?? 0) + deductFt3
       }
-      if (deductFt3 > 0) deductions[matKey] = (deductions[matKey] ?? 0) + deductFt3
-    }
 
-    if (Object.keys(deductions).length === 0) {
-      _masonryDedCache = { walls, nodes, projectSettings, result: base }
-      return base
-    }
+      if (Object.keys(deductions).length === 0) return base
 
-    const result = {}
-    for (const [matKey, qty] of Object.entries(base)) {
-      const deduct = deductions[matKey] ?? 0
-      if (deduct === 0) { result[matKey] = qty; continue }
+      const result = {}
+      for (const [matKey, qty] of Object.entries(base)) {
+        const deduct = deductions[matKey] ?? 0
+        if (deduct === 0) { result[matKey] = qty; continue }
 
-      const adjustedVol = Math.max(0, qty.volFt3 - deduct)
-      const ratio = qty.volFt3 > 0 ? adjustedVol / qty.volFt3 : 0
-      const mat = MATERIAL_LIBRARY[matKey]
+        const adjustedVol = Math.max(0, qty.volFt3 - deduct)
+        const ratio = qty.volFt3 > 0 ? adjustedVol / qty.volFt3 : 0
+        const mat = MATERIAL_LIBRARY[matKey]
 
-      if (!mat) { result[matKey] = { ...qty, volFt3: r2(adjustedVol) }; continue }
+        if (!mat) { result[matKey] = { ...qty, volFt3: r2(adjustedVol) }; continue }
 
-      const unitsPer   = mat.bricksPerFt3 ?? mat.blocksPerFt3 ?? 0
-      const unitCount  = Math.ceil(adjustedVol * unitsPer * WASTAGE)
-      const adjusted   = { ...qty, volFt3: r2(adjustedVol), unitCount }
+        const unitsPer   = mat.bricksPerFt3 ?? mat.blocksPerFt3 ?? 0
+        const unitCount  = Math.ceil(adjustedVol * unitsPer * WASTAGE)
+        const adjusted   = { ...qty, volFt3: r2(adjustedVol), unitCount }
 
-      if (mat.bondingType === BONDING.CEMENT_SAND) {
-        const mortarVol = adjustedVol * mat.mortarVolPerFt3Wall
-        adjusted.cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
-        adjusted.sandFt3    = r2(mortarVol * mat.sandFt3PerFt3Mortar)
-      } else {
-        // THIN_BED: adhesive scales proportionally with volume ratio
-        adjusted.adhesiveKg   = r2((qty.adhesiveKg ?? 0) * ratio)
-        adjusted.adhesiveBags = Math.ceil(adjusted.adhesiveKg / (mat.adhesiveBagKg ?? 40))
+        if (mat.bondingType === BONDING.CEMENT_SAND) {
+          const mortarVol = adjustedVol * mat.mortarVolPerFt3Wall
+          adjusted.cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
+          adjusted.sandFt3    = r2(mortarVol * mat.sandFt3PerFt3Mortar)
+        } else {
+          // THIN_BED: adhesive scales proportionally with volume ratio
+          adjusted.adhesiveKg   = r2((qty.adhesiveKg ?? 0) * ratio)
+          adjusted.adhesiveBags = Math.ceil(adjusted.adhesiveKg / (mat.adhesiveBagKg ?? 40))
+        }
+        result[matKey] = adjusted
       }
-      result[matKey] = adjusted
-    }
-
-    _masonryDedCache = { walls, nodes, projectSettings, result }
-    return result
+      return result
+    })
   },
 })
