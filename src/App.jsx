@@ -19,33 +19,36 @@ import BBSSpecPanel from './components/BBSSpecPanel'
 import ProjectsPanel from './components/ProjectsPanel'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
+import { DesktopGate } from './components/DesktopGate'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 
 export default function App() {
   useKeyboardShortcuts()
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Toolbar />
-      <FloorSwitcher />
-      <RoomPanel />
-      <OpeningPanel />
-      <StampPanel />
-      <BulkWallPanel />
-      <RoomDetailPanel />
-      <ColumnPanel />
-      <BeamPanel />
-      <StaircasePanel />
-      <SlabPanel />
-      <FoundationPanel />
-      <FloorsManagerPanel />
-      <BBSSpecPanel />
-      <ProjectSettingsPanel />
-      <ProjectsPanel />
-      <LayersPanel />
-      <BOQPanel />
-      <Canvas />
-      <DialogHost />
-      <ToastHost />
-    </div>
+    <DesktopGate>
+      <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+        <Toolbar />
+        <FloorSwitcher />
+        <RoomPanel />
+        <OpeningPanel />
+        <StampPanel />
+        <BulkWallPanel />
+        <RoomDetailPanel />
+        <ColumnPanel />
+        <BeamPanel />
+        <StaircasePanel />
+        <SlabPanel />
+        <FoundationPanel />
+        <FloorsManagerPanel />
+        <BBSSpecPanel />
+        <ProjectSettingsPanel />
+        <ProjectsPanel />
+        <LayersPanel />
+        <BOQPanel />
+        <Canvas />
+        <DialogHost />
+        <ToastHost />
+      </div>
+    </DesktopGate>
   )
 }

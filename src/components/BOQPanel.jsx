@@ -452,6 +452,15 @@ export default function BOQPanel() {
   const hasErrors = validation.counts.errors > 0
   const hasCostValue = totalCost !== null && totalCost !== undefined
 
+  // Empty-state: no entities exist that could produce BOQ output. Header,
+  // floor toggle, and export buttons stay visible; the section list and
+  // cost row are replaced with a centered "No items yet" message. Export
+  // buttons are disabled so users don't ship empty files.
+  const isEmpty =
+    Object.keys(rooms).length   === 0 &&
+    Object.keys(columns).length === 0 &&
+    Object.keys(stamps).length  === 0
+
   return (
     <div
       className="boq-panel"
@@ -476,6 +485,15 @@ export default function BOQPanel() {
         Preview pricing — for estimation only. Final rates from ERP product catalog.
       </div>
 
+      {isEmpty ? (
+        <div className="boq-empty-state">
+          <div className="boq-empty-state__title">No items yet</div>
+          <div className="boq-empty-state__hint">
+            Add rooms and structural elements to generate the BOQ.
+          </div>
+        </div>
+      ) : (
+      <>
       {/* Informational structure */}
       <InfoRow label="Walls"        value={wallCount} />
       <InfoRow label="Total length" value={fmtLen(totalLenFt)} />
@@ -648,12 +666,14 @@ export default function BOQPanel() {
           )}
         </div>
       )}
+      </>
+      )}
 
       {/* Export buttons */}
       <div className="boq-actions">
-        <Button variant="secondary" size="sm" onClick={handleExportCSV}>CSV</Button>
-        <Button variant="secondary" size="sm" onClick={handleExportPDF}>PDF</Button>
-        <Button variant="secondary" size="sm" onClick={handleExportExcel}>Excel</Button>
+        <Button variant="secondary" size="sm" onClick={handleExportCSV} disabled={isEmpty}>CSV</Button>
+        <Button variant="secondary" size="sm" onClick={handleExportPDF} disabled={isEmpty}>PDF</Button>
+        <Button variant="secondary" size="sm" onClick={handleExportExcel} disabled={isEmpty}>Excel</Button>
       </div>
 
       <FormulaPopover data={formulaData} pos={popoverPos} popoverRef={popoverRef} />

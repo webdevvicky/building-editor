@@ -1,0 +1,40 @@
+/* Desktop-only viewport gate. Replaces the entire app when the viewport is
+   narrower than MIN_WIDTH (1024px). Linear/Notion-style card, no animation
+   beyond the standard ui-fade-in. */
+
+.desktop-gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-subtle);
+  padding: var(--space-6);
+  z-index: var(--z-dialog);
+}
+.desktop-gate__card {
+  max-width: 440px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-6);
+  text-align: left;
+  animation: ui-fade-in var(--motion-normal) var(--ease-out);
+}
+.desktop-gate__title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-3);
+}
+.desktop-gate__body {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+  margin-bottom: var(--space-3);
+}
+.desktop-gate__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

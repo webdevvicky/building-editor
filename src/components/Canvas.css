@@ -1,0 +1,58 @@
+/* Canvas-local styling. Imported by Canvas.jsx. */
+
+/* ── Selection feedback pulse ─────────────────────────────────────────────── */
+/* Was previously inlined in a <style> block inside the SVG; moved here for
+   maintainability + to live alongside the empty-state styles. */
+@keyframes canvas-pulse-once {
+  0%   { opacity: 0; }
+  30%  { opacity: 0.4; }
+  100% { opacity: 0; }
+}
+.canvas-selection-pulse {
+  animation: canvas-pulse-once 600ms ease-out 1;
+  pointer-events: none;
+}
+
+/* ── Empty state overlay ──────────────────────────────────────────────────── */
+/* Centered text + subtle arrow pointing toward the toolbar (top-left).
+   Rendered alongside (not inside) the SVG so it inherits normal text rendering. */
+.canvas-empty-state {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  pointer-events: none;
+  text-align: center;
+  max-width: 360px;
+  animation: ui-fade-in var(--motion-normal) var(--ease-out);
+}
+.canvas-empty-state__arrow {
+  font-size: 32px;
+  color: var(--color-text-muted);
+  line-height: 1;
+  margin-bottom: var(--space-2);
+  animation: canvas-empty-arrow-bob 2s ease-in-out infinite;
+}
+@keyframes canvas-empty-arrow-bob {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(-4px, -4px); }
+}
+.canvas-empty-state__title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+.canvas-empty-state__hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+.canvas-empty-state__hint strong {
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+}

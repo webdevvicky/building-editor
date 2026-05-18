@@ -7,6 +7,7 @@ import {
 } from '../geometry'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
+import './Canvas.css'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -145,6 +146,18 @@ export default function Canvas() {
   } = useStore()
 
   const svgRef = useRef(null)
+
+  // Floor-switch fade: briefly dim canvas content on currentFloorId change.
+  const prevFloorIdRef = useRef(currentFloorId)
+  const [floorFading, setFloorFading] = useState(false)
+  useEffect(() => {
+    if (prevFloorIdRef.current !== currentFloorId) {
+      setFloorFading(true)
+      prevFloorIdRef.current = currentFloorId
+      const t = setTimeout(() => setFloorFading(false), 130)
+      return () => clearTimeout(t)
+    }
+  }, [currentFloorId])
 
   const [pan,  setPan]  = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
@@ -399,8 +412,27 @@ export default function Canvas() {
   )
   const columnStyle = (col) => !multiFloor || columnIdsOnCurrentFloor.has(col.id) ? activeStyle : ghostStyle
 
+  // Empty-state overlay: shown when the project has no walls, rooms, columns,
+  // or stamps. Pure UI signal — nothing in the store depends on it.
+  const isEmpty =
+    Object.keys(walls).length   === 0 &&
+    Object.keys(rooms).length   === 0 &&
+    Object.keys(columns).length === 0 &&
+    Object.keys(stamps).length  === 0
+
   return (
     <>
+    {/* Empty-state overlay — points to the toolbar (top-left) */}
+    {isEmpty && (
+      <div className="canvas-empty-state">
+        <div className="canvas-empty-state__arrow" aria-hidden="true">↖</div>
+        <div className="canvas-empty-state__title">Draw your first wall to get started</div>
+        <div className="canvas-empty-state__hint">
+          Select the <strong>Draw</strong> tool in the toolbar, then click two points on the canvas.
+        </div>
+      </div>
+    )}
+
     {/* Beam level picker overlay */}
     {beamLevelPicker && (
       <div style={{
@@ -492,17 +524,6 @@ export default function Canvas() {
       onMouseLeave={handleMouseLeave}
       onContextMenu={e => e.preventDefault()}
     >
-      <style>{`
-        @keyframes canvas-pulse-once {
-          0%   { opacity: 0; }
-          30%  { opacity: 0.4; }
-          100% { opacity: 0; }
-        }
-        .canvas-selection-pulse {
-          animation: canvas-pulse-once 600ms ease-out 1;
-          pointer-events: none;
-        }
-      `}</style>
       <defs>
         <pattern id="smallGrid" width={FOOT_PX} height={FOOT_PX} patternUnits="userSpaceOnUse">
           <path d={`M ${FOOT_PX} 0 L 0 0 0 ${FOOT_PX}`} fill="none" stroke="#e0e0e0" strokeWidth={0.5}/>
@@ -516,7 +537,11 @@ export default function Canvas() {
         </pattern>
       </defs>
 
-      <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+      <g
+        transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}
+        className="canvas-floor-layer"
+        data-fading={floorFading ? 'true' : 'false'}
+      >
 
         {/* Grid */}
         <rect x="-10000" y="-10000" width="30000" height="30000" fill="url(#grid)"/>
