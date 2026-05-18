@@ -22,6 +22,7 @@ import PlumbingBoqSection  from './boq/PlumbingBoqSection'
 import ElectricalBoqSection from './boq/ElectricalBoqSection'
 import HvacBoqSection       from './boq/HvacBoqSection'
 import FireBoqSection       from './boq/FireBoqSection'
+import ElvBoqSection        from './boq/ElvBoqSection'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../boq/lines'
 import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
@@ -284,6 +285,11 @@ export default function BOQPanel() {
   const fireDetection   = linesByCat.fire_detection   ?? []
   const fireSuppression = linesByCat.fire_suppression ?? []
   const fireEquipment   = linesByCat.fire_equipment   ?? []
+  // ELV categories — 4 sub-systems (CCTV / DATA / SECURITY / AV).
+  const elvCctv     = linesByCat.elv_cctv     ?? []
+  const elvData     = linesByCat.elv_data     ?? []
+  const elvSecurity = linesByCat.elv_security ?? []
+  const elvAv       = linesByCat.elv_av       ?? []
 
   // ── Header summary stats — pulled from scopedState so they honor the toggle.
   const wallCount      = Object.values(scopedState.walls).filter(w => !w.isVirtual).length
@@ -633,6 +639,17 @@ export default function BOQPanel() {
         detectionLines={fireDetection}
         suppressionLines={fireSuppression}
         equipmentLines={fireEquipment}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity}
+      />
+
+      {/* ELV (CCTV + data + security + AV) — Phase 1.5 */}
+      <ElvBoqSection
+        cctvLines={elvCctv}
+        dataLines={elvData}
+        securityLines={elvSecurity}
+        avLines={elvAv}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity}

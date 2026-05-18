@@ -16,10 +16,10 @@ import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
-import { getFixtureType, getPointType, getHvacUnit, getFireDevice } from '../mep/catalogs/index.js'
+import { getFixtureType, getPointType, getHvacUnit, getFireDevice, getElvDevice } from '../mep/catalogs/index.js'
 
 function useSuggestFns() {
-  const [fns, setFns] = useState({ plumbing: null, electrical: null, hvac: null, fire: null })
+  const [fns, setFns] = useState({ plumbing: null, electrical: null, hvac: null, fire: null, elv: null })
   useEffect(() => {
     let alive = true
     Promise.allSettled([
@@ -27,13 +27,15 @@ function useSuggestFns() {
       import('../mep/electrical/suggestions.js'),
       import('../mep/hvac/suggestions.js'),
       import('../mep/fire/suggestions.js'),
-    ]).then(([p, e, h, f]) => {
+      import('../mep/elv/suggestions.js'),
+    ]).then(([p, e, h, f, l]) => {
       if (!alive) return
       setFns({
         plumbing:   p.status === 'fulfilled' ? (p.value.suggestPlumbingFixturesForRoom ?? null) : null,
         electrical: e.status === 'fulfilled' ? (e.value.suggestElectricalPointsForRoom ?? null) : null,
         hvac:       h.status === 'fulfilled' ? (h.value.suggestHvacUnitsForRoom ?? null) : null,
         fire:       f.status === 'fulfilled' ? (f.value.suggestFireDevicesForRoom ?? null) : null,
+        elv:        l.status === 'fulfilled' ? (l.value.suggestElvDevicesForRoom ?? null) : null,
       })
     })
     return () => { alive = false }
@@ -69,8 +71,11 @@ export default function MepDefaultsModal() {
       const fireSugs = suggestFns.fire
         ? (suggestFns.fire(state, roomId) ?? [])
         : []
+      const elvSugs = suggestFns.elv
+        ? (suggestFns.elv(state, roomId) ?? [])
+        : []
 
-      if (!plumbingSugs.length && !electricalSugs.length && !hvacSugs.length && !fireSugs.length) return
+      if (!plumbingSugs.length && !electricalSugs.length && !hvacSugs.length && !fireSugs.length && !elvSugs.length) return
 
       setPending({
         roomId,
@@ -90,6 +95,10 @@ export default function MepDefaultsModal() {
         fire: {
           suggestions: fireSugs,
           selected: fireSugs.map(() => true),
+        },
+        elv: {
+          suggestions: elvSugs,
+          selected: elvSugs.map(() => true),
         },
       })
     }
@@ -116,7 +125,8 @@ export default function MepDefaultsModal() {
     const chosenElectrical = pending.electrical.suggestions.filter((_, i) => pending.electrical.selected[i])
     const chosenHvac       = pending.hvac.suggestions.filter((_, i) => pending.hvac.selected[i])
     const chosenFire       = pending.fire.suggestions.filter((_, i) => pending.fire.selected[i])
-    const total = chosenPlumbing.length + chosenElectrical.length + chosenHvac.length + chosenFire.length
+    const chosenElv        = pending.elv.suggestions.filter((_, i) => pending.elv.selected[i])
+    const total = chosenPlumbing.length + chosenElectrical.length + chosenHvac.length + chosenFire.length + chosenElv.length
     if (!total) {
       await dialog.alert('Select at least one item to apply, or skip.', {
         title: 'Nothing selected',
@@ -128,12 +138,14 @@ export default function MepDefaultsModal() {
       electrical: chosenElectrical,
       hvac: chosenHvac,
       fire: chosenFire,
+      elv: chosenElv,
     })
     const parts = []
     if (chosenPlumbing.length)   parts.push(`${chosenPlumbing.length} plumbing`)
     if (chosenElectrical.length) parts.push(`${chosenElectrical.length} electrical`)
     if (chosenHvac.length)       parts.push(`${chosenHvac.length} HVAC`)
     if (chosenFire.length)       parts.push(`${chosenFire.length} fire`)
+    if (chosenElv.length)        parts.push(`${chosenElv.length} ELV`)
     toast.success(`Placed ${parts.join(' + ')} default${total === 1 ? '' : 's'}.`)
     setPending(null)
   }
@@ -142,6 +154,7 @@ export default function MepDefaultsModal() {
   const hasElectrical = pending.electrical.suggestions.length > 0
   const hasHvac       = pending.hvac.suggestions.length > 0
   const hasFire       = pending.fire.suggestions.length > 0
+  const hasElv        = pending.elv.suggestions.length > 0
 
   return (
     <Modal
@@ -229,6 +242,22 @@ export default function MepDefaultsModal() {
             return {
               label: catalog?.label ?? sug.type,
               meta: catalog?.coverageAreaFt2 > 0 ? `${catalog.coverageAreaFt2} ft² cov.` : null,
+            }
+          }}
+        />
+      )}
+
+      {hasElv && (
+        <SuggestionGroup
+          title="ELV"
+          suggestions={pending.elv.suggestions}
+          selected={pending.elv.selected}
+          onToggle={i => toggle('elv', i)}
+          renderItem={(sug) => {
+            const catalog = getElvDevice(sug.type)
+            return {
+              label: catalog?.label ?? sug.type,
+              meta: catalog?.mountHeightFt != null ? `${catalog.mountHeightFt} ft mount` : null,
             }
           }}
         />

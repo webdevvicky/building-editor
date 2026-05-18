@@ -14,6 +14,7 @@ import {
   Zap,
   Wind,
   Flame,
+  Cable,
   Container,
   Cylinder,
   Building2,
@@ -137,6 +138,7 @@ export default function Toolbar() {
         {toolBtn('electrical',    Zap,                 'Electrical (E)')}
         {toolBtn('hvac',          Wind,                'HVAC (H)')}
         {toolBtn('fire',          Flame,               'Fire (F)')}
+        {toolBtn('elv',           Cable,               'ELV (L)')}
         {toolBtn('sump',          Droplet,             'Sump')}
         {toolBtn('overhead_tank', Container,           'Overhead tank')}
         {toolBtn('septic_tank',   Cylinder,            'Septic tank')}

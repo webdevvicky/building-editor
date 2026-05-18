@@ -34,6 +34,11 @@ const LAYER_LABELS = {
   fireDevices:             'Devices',
   fireDetectionRoutes:     'Detection',
   fireSprinklerRoutes:     'Sprinkler',
+
+  // ELV
+  elvDevices:              'Devices',
+  elvCctvRoutes:           'CCTV',
+  elvDataRoutes:           'Data',
 }
 
 const LAYER_GROUPS = [
@@ -73,6 +78,14 @@ const LAYER_GROUPS = [
       'fireDevices',
       'fireDetectionRoutes',
       'fireSprinklerRoutes',
+    ],
+  },
+  {
+    title: 'ELV',
+    keys: [
+      'elvDevices',
+      'elvCctvRoutes',
+      'elvDataRoutes',
     ],
   },
 ]

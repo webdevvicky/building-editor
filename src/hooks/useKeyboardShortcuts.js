@@ -111,6 +111,11 @@ export function useKeyboardShortcuts() {
         useStore.getState().setTool?.('fire')
         return
       }
+      if (key === 'l' || key === 'L') {
+        e.preventDefault()
+        useStore.getState().setTool?.('elv')
+        return
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -178,6 +183,14 @@ async function handleDelete() {
     deleteFn = () => {
       useStore.getState().deleteFireDevice?.(entityId)
       useStore.getState().selectFireDevice?.(null)
+    }
+  } else if (s.selectedElvDeviceId) {
+    entityType = 'ELV device'
+    entityId = s.selectedElvDeviceId
+    entityLabel = 'ELV device'
+    deleteFn = () => {
+      useStore.getState().deleteElvDevice?.(entityId)
+      useStore.getState().selectElvDevice?.(null)
     }
   } else if (s.selectedWallIds?.length) {
     entityType = 'walls'

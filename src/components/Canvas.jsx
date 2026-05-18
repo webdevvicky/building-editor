@@ -12,6 +12,7 @@ import PlumbingOverlay from './canvas/PlumbingOverlay.jsx'
 import ElectricalOverlay from './canvas/ElectricalOverlay.jsx'
 import HvacOverlay from './canvas/HvacOverlay.jsx'
 import FireOverlay from './canvas/FireOverlay.jsx'
+import ElvOverlay from './canvas/ElvOverlay.jsx'
 import './Canvas.css'
 
 // Phase 1 plumbing — fixed placeholder type until a floating type picker
@@ -33,6 +34,11 @@ const DEFAULT_HVAC_UNIT_TYPE = 'AC_INDOOR_UNIT'
 // Fire tool drops one SMOKE_DETECTOR per click; user then changes the type
 // via FirePanel. The picker is Phase 1.x polish.
 const DEFAULT_FIRE_DEVICE_TYPE = 'SMOKE_DETECTOR'
+
+// Phase 1 elv — fixed placeholder type until a floating type picker lands.
+// ELV tool drops one DATA_POINT per click; user then changes the type via
+// ElvPanel. The picker is Phase 1.x polish.
+const DEFAULT_ELV_DEVICE_TYPE = 'DATA_POINT'
 
 // Shorthand: world inches → SVG-group coordinate (pan/zoom handled by the <g> transform)
 const sx = x =>  x * PX_PER_INCH
@@ -119,6 +125,7 @@ const TOOL_CURSOR = {
   electrical:    'crosshair',
   hvac:          'crosshair',
   fire:          'crosshair',
+  elv:           'crosshair',
 }
 
 function getColPos(col, nodes) {
@@ -481,6 +488,32 @@ export default function Canvas() {
         DEFAULT_FIRE_DEVICE_TYPE, px, py, wallId, wallT,
       )
       useStore.getState().selectFireDevice(id)
+      return
+    }
+
+    if (activeTool === 'elv') {
+      // Phase 1: snap to nearest wall on the current floor and drop the
+      // default device. Engines subagent owns roomId resolution / routing.
+      // Floating type-picker is Phase 1.x polish; for now the user changes
+      // the type from ElvPanel after placement.
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      const state = useStore.getState()
+      const candidateIds = typeof state.getWallIdsByFloor === 'function'
+        ? state.getWallIdsByFloor(currentFloorId)
+        : null
+      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
+      const SNAP_IN = 36
+      let wallId = null, wallT = null, px = x, py = y
+      if (near && near.distance <= SNAP_IN) {
+        wallId = near.wallId
+        wallT  = near.t
+        px = near.projected.x
+        py = near.projected.y
+      }
+      const id = useStore.getState().addElvDevice(
+        DEFAULT_ELV_DEVICE_TYPE, px, py, wallId, wallT,
+      )
+      useStore.getState().selectElvDevice(id)
       return
     }
 
@@ -1049,6 +1082,10 @@ export default function Canvas() {
         {/* Fire overlay (detection + suppression devices, detection /
          * sprinkler routes, FIRE_MAIN risers). Renders right after HVAC. */}
         <FireOverlay />
+
+        {/* ELV overlay (extra-low-voltage devices, CCTV / data routes).
+         * Renders right after fire, before nodes. */}
+        <ElvOverlay />
 
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {

@@ -37,6 +37,7 @@ import { emitPlumbingLines }           from './emitters/plumbing.js'
 import { emitElectricalLines }         from './emitters/electrical.js'
 import { emitHvacLines }               from './emitters/hvac.js'
 import { emitFireLines }               from './emitters/fire.js'
+import { emitElvLines }                from './emitters/elv.js'
 
 const DEFAULT_FLOOR = 'F1'
 
@@ -319,6 +320,12 @@ export function getBoqLines(state, rates, opts = {}) {
   // Same floor-scope contract. No-ops until the Fire engine
   // (computeFireQuantities) or scoped wrapper returns data.
   emitFireLines(state, push, { rates, scopedFloorId })
+
+  // ── 15. ELV (Phase 1.5 — per-discipline emitter) ──────────────────────
+  // Extra-Low Voltage: CCTV, data/LAN, security (intrusion + VDP),
+  // audio/video. Same floor-scope contract. No-ops until the ELV engine
+  // (computeElvQuantities) or scoped wrapper returns data.
+  emitElvLines(state, push, { rates, scopedFloorId })
 
   return lines
 }
