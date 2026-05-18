@@ -15,6 +15,19 @@ import {
 import { DEFAULT_PLASTER_SYSTEM_ID } from './specs/plasterSystems'
 import { getColumnAreaFt2 } from './lib/columnShapes'
 import { createMemo } from './topology/cache.js'
+import {
+  getNodesOnFloor as topoGetNodesOnFloor,
+  getWallsOnFloor as topoGetWallsOnFloor,
+  getRoomsOnFloor as topoGetRoomsOnFloor,
+  getStampsOnFloor as topoGetStampsOnFloor,
+  getBeamsOnFloor as topoGetBeamsOnFloor,
+  getSlabsOnFloor as topoGetSlabsOnFloor,
+  getStaircasesOnFloor as topoGetStaircasesOnFloor,
+  getColumnsOnFloor as topoGetColumnsOnFloor,
+  getNodeIdsOnFloor as topoGetNodeIdsOnFloor,
+  getWallIdsOnFloor as topoGetWallIdsOnFloor,
+  getEntitiesOnFloor as topoGetEntitiesOnFloor,
+} from './topology/floor.js'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
@@ -979,97 +992,16 @@ export const createStructuralSlice = (set, get, uid) => ({
     return (f.columnIds || []).map(cid => columns[cid]).filter(Boolean)
   },
 
-  getColumnsOnFloor: (floorId) => {
-    // A column belongs to a floor if floorId ∈ [baseFloorId, topFloorId] in sequence order.
-    const { columns, projectSettings } = get()
-    const floors = [...(projectSettings.floors ?? [])].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
-    const idx = floors.findIndex(f => f.id === floorId)
-    if (idx === -1) return Object.values(columns).filter(c => c.baseFloorId === floorId)
-    return Object.values(columns).filter(col => {
-      const baseIdx = floors.findIndex(f => f.id === (col.baseFloorId ?? floorId))
-      const topIdx  = floors.findIndex(f => f.id === (col.topFloorId  ?? col.baseFloorId ?? floorId))
-      if (baseIdx === -1 || topIdx === -1) return col.baseFloorId === floorId
-      const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
-      return idx >= lo && idx <= hi
-    })
-  },
-
-  getWallsOnFloor: (floorId) => {
-    const { walls } = get()
-    return Object.values(walls).filter(w => (w.floorId ?? DEFAULT_FLOOR_ID) === floorId)
-  },
-
-  getSlabsOnFloor: (floorId) => {
-    const { slabs } = get()
-    return Object.values(slabs).filter(s => (s.floorId ?? DEFAULT_FLOOR_ID) === floorId)
-  },
-
-  getRoomsOnFloor: (floorId) => {
-    const { rooms } = get()
-    return Object.values(rooms).filter(r => (r.floorId ?? DEFAULT_FLOOR_ID) === floorId)
-  },
-
-  getStampsOnFloor: (floorId) => {
-    const { stamps } = get()
-    return Object.values(stamps).filter(s => (s.floorId ?? DEFAULT_FLOOR_ID) === floorId)
-  },
-
-  getBeamsOnFloor: (floorId) => {
-    const { beams } = get()
-    return Object.values(beams).filter(b => (b.floorId ?? DEFAULT_FLOOR_ID) === floorId)
-  },
-
-  getStaircasesOnFloor: (floorId) => {
-    // A staircase belongs to its fromFloor and toFloor (visible on both ends).
-    const { staircases } = get()
-    return Object.values(staircases).filter(sc =>
-      (sc.fromFloorId ?? DEFAULT_FLOOR_ID) === floorId ||
-      (sc.toFloorId   ?? DEFAULT_FLOOR_ID) === floorId
-    )
-  },
-
-  // Floor-aware topology selectors (Phase 1.7+ multi-floor).
-  //
-  // Nodes are floor-owned via node.floorIds[] (length 1 today, future-proof
-  // for vertical shafts / staircase cores). Walls are floor-owned via
-  // wall.floorId. These Set-returning selectors are the canonical way to
-  // ask "which node/wall ids belong to floor X" and are used by mutating
-  // actions (getOrCreateNode, addWall) to scope geometric operations.
-  getNodeIdsByFloor: (floorId) => {
-    const { nodes } = get()
-    const out = new Set()
-    for (const [id, node] of Object.entries(nodes)) {
-      const ids = node.floorIds ?? ['F1']
-      if (ids.includes(floorId)) out.add(id)
-    }
-    return out
-  },
-
-  getWallIdsByFloor: (floorId) => {
-    const { walls } = get()
-    const out = new Set()
-    for (const [id, w] of Object.entries(walls)) {
-      if ((w.floorId ?? 'F1') === floorId) out.add(id)
-    }
-    return out
-  },
-
-  // Convenience aggregate — every entity visible on a given floor.
-  // `nodes` is Node[] (entity records), parallel to walls/rooms/stamps shape.
-  getEntitiesOnFloor: (floorId) => {
-    const { nodes } = get()
-    const nodeIds   = get().getNodeIdsByFloor(floorId)
-    return {
-      nodes:      [...nodeIds].map(id => nodes[id]).filter(Boolean),
-      walls:      get().getWallsOnFloor(floorId),
-      rooms:      get().getRoomsOnFloor(floorId),
-      stamps:     get().getStampsOnFloor(floorId),
-      columns:    get().getColumnsOnFloor(floorId),
-      beams:      get().getBeamsOnFloor(floorId),
-      slabs:      get().getSlabsOnFloor(floorId),
-      staircases: get().getStaircasesOnFloor(floorId),
-    }
-  },
+  getColumnsOnFloor:    (floorId) => topoGetColumnsOnFloor(get(), floorId),
+  getWallsOnFloor:      (floorId) => topoGetWallsOnFloor(get(), floorId),
+  getSlabsOnFloor:      (floorId) => topoGetSlabsOnFloor(get(), floorId),
+  getRoomsOnFloor:      (floorId) => topoGetRoomsOnFloor(get(), floorId),
+  getStampsOnFloor:     (floorId) => topoGetStampsOnFloor(get(), floorId),
+  getBeamsOnFloor:      (floorId) => topoGetBeamsOnFloor(get(), floorId),
+  getStaircasesOnFloor: (floorId) => topoGetStaircasesOnFloor(get(), floorId),
+  getNodeIdsByFloor:    (floorId) => topoGetNodeIdsOnFloor(get(), floorId),
+  getWallIdsByFloor:    (floorId) => topoGetWallIdsOnFloor(get(), floorId),
+  getEntitiesOnFloor:   (floorId) => topoGetEntitiesOnFloor(get(), floorId),
 
   // Returns { byFoundation, byColumnTypeInline } — combined foundation view.
   //

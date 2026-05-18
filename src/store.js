@@ -20,6 +20,10 @@ import {
   getValidRoomIds as topoGetValidRoomIds,
   sumRoomAreas as topoSumRoomAreas,
 } from './topology/rooms.js'
+import {
+  getActiveFloorNodes,
+  getActiveFloorWalls,
+} from './topology/floor.js'
 
 const uid = () => crypto.randomUUID()
 
@@ -38,40 +42,9 @@ function removeOrphanNodes(nodes, walls) {
   return cleaned
 }
 
-// ── Floor-aware topology helpers (Phase 1.7+ multi-floor) ───────────────────
-//
-// Nodes are floor-owned: every node carries floorIds: string[] (length 1 for
-// single-floor projects, future-proofed for vertical shafts / cores). Walls
-// are floor-owned via wall.floorId. Drawing on F2 NEVER snaps to or mutates
-// F1 topology — spatial alignment across floors does not imply shared
-// ownership. Vertical relationships are explicit entities, never inferred
-// from shared node identity.
-//
-// Both helpers return the FULL maps for single-floor projects so the
-// existing single-floor behavior is byte-identical.
-
-function getActiveFloorNodes(state, floorId) {
-  const floors = state.projectSettings?.floors ?? []
-  if (floors.length <= 1) return state.nodes
-  const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
-  const out = {}
-  for (const [id, node] of Object.entries(state.nodes)) {
-    const ids = node.floorIds ?? [DEFAULT_FLOOR_ID]
-    if (ids.includes(fid)) out[id] = node
-  }
-  return out
-}
-
-function getActiveFloorWalls(state, floorId) {
-  const floors = state.projectSettings?.floors ?? []
-  if (floors.length <= 1) return state.walls
-  const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
-  const out = {}
-  for (const [id, w] of Object.entries(state.walls)) {
-    if ((w.floorId ?? DEFAULT_FLOOR_ID) === fid) out[id] = w
-  }
-  return out
-}
+// Floor-aware draw/snap scoping flows through src/topology/floor.js — see
+// getActiveFloorNodes / getActiveFloorWalls imports above. Topology principle:
+// spatial alignment across floors NEVER implies shared ownership.
 
 // Dev-only handle for browser console debugging. Stripped from production builds.
 // Usage in DevTools: useStore.getState().getValidRoomIds(), etc.

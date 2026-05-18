@@ -25,6 +25,7 @@ import {
   PCC_BEDDING_THICKNESS_FT,
 } from '../constants/structural'
 import { getColumnAreaFt2 } from '../lib/columnShapes'
+import { isColumnOnFloor, sortedFloorList } from '../topology/floor.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
@@ -37,20 +38,10 @@ function filterMap(map, pred) {
   return out
 }
 
-// A column is "on" a floor iff floorId ∈ [baseFloorId, topFloorId] in sequence.
-function isColumnOnFloor(col, floorId, sortedFloors) {
-  const baseIdx = sortedFloors.findIndex(f => f.id === (col.baseFloorId ?? floorId))
-  const topIdx  = sortedFloors.findIndex(f => f.id === (col.topFloorId  ?? col.baseFloorId ?? floorId))
-  const cIdx    = sortedFloors.findIndex(f => f.id === floorId)
-  if (baseIdx === -1 || topIdx === -1 || cIdx === -1) return (col.baseFloorId ?? DEFAULT_FLOOR_ID) === floorId
-  return cIdx >= Math.min(baseIdx, topIdx) && cIdx <= Math.max(baseIdx, topIdx)
-}
-
 export function scopeStateToFloor(state, floorId) {
   if (!floorId) return state
 
-  const sortedFloors = [...(state.projectSettings?.floors ?? [])]
-    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  const sortedFloors = sortedFloorList(state)
 
   const onFloor = e => (e.floorId ?? DEFAULT_FLOOR_ID) === floorId
 
