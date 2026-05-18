@@ -4,13 +4,24 @@
 
 Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +
 Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + UI Phases 1–4 +
-Collapsible BOQ sidebar + **Topology Layer (Steps 0–9)** complete on
-`main` (2026-05-18).
+Collapsible BOQ sidebar + **Topology Layer (Steps 0–9)** + **MEP Phase 0
++ Plumbing + Electrical + HVAC + Fire + ELV + Clash Detection +
+Load-Based Sizing** complete on `main` (2026-05-18).
 
 Topology layer (commits step-0 → step-9) is the canonical read-only
 spatial-relationship surface for downstream discipline engines
 (structural BOQ, MEP, interiors, fabrication). See "Topology Layer"
 section below.
+
+MEP system (commits `76b193c → d46ee20`, 2026-05-18): six-discipline
+enterprise architecture covering Plumbing, Electrical, HVAC, Fire, and
+ELV — each with its own engines (system-graph → routing → sizing →
+quantities), BOQ emitter, UI panel, canvas overlay, toolbar button, and
+keyboard shortcut. Plus cross-discipline clash detection (Phase 2.5) and
+pluggable sizing strategies (Phase 2.6: CATALOG, HUNTER, LOAD_BASED,
+GRADIENT_DRAIN). Solar (Phase 2.3) and Rainwater + Hot Water (Phase 2.4)
+are deferred — schema slots and scope.js stubs remain ready. See "MEP
+System" section below.
 
 UI rebuild (Phases 1–4, commits `3ee27a8 → bfed97a`, 2026-05-18) landed the
 design-token system, 6 UI primitives, native-dialog removal, panel/toolbar/
@@ -21,9 +32,10 @@ Collapsible BOQ sidebar (commit `0394c88`, 2026-05-18): BOQ panel now
 collapses to a 32px strip via Ctrl/Cmd+B or the toggle button on its left
 edge. State persists in `localStorage['boq_panel_collapsed']`.
 
-ERP integration (replace static MATERIAL_LIBRARY + add live rate catalog) is
-the next major work item; foundation for it is in place via the canonical
-`getBoqLines()` pipeline.
+ERP integration (replace static MATERIAL_LIBRARY + MEP catalogs + add live
+rate catalog) is the next major work item; foundation for it is in place
+via the canonical `getBoqLines()` pipeline and the versioned
+`src/mep/catalogs/` registries.
 
 ---
 
@@ -70,7 +82,8 @@ Training data for these versions is outdated.
 node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs        # single-floor BOQ checks
 node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-multifloor.mjs # multi-floor scope + topology guard
 node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-topology.mjs   # 23 topology-layer relationship checks
-All three must pass green before any commit.
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-mep.mjs        # 242 MEP assertions across 5 disciplines + clash + sizing
+All four must pass green before any commit.
 
 ## Planned Features (do not implement yet)
 - DXF import (Phase 2.1) — parse AutoCAD floor plans into walls/rooms
@@ -1213,6 +1226,222 @@ src/topology/
 
 ### Architectural reminders (existing)
 
+---
+
+## MEP System (src/mep/)
+
+MEP is the discipline-engineering layer that sits on top of the topology
+layer. Each discipline owns its own module under `src/mep/<discipline>/`
+with a consistent internal layout, and shares cross-discipline utilities
+in `src/mep/shared/`. **Phase 0 → 2.6 shipped on commits
+`76b193c → d46ee20` (2026-05-18).**
+
+### Module structure (current state)
+
+```
+src/mep/
+  catalogs/           # 25 files, 24 versioned catalogs (IS 15778 CPVC,
+                      # IS 13592 UPVC, IS 1239 GI, IS 732 wire, NBC 2016
+                      # fire defaults, IS 962 architectural symbols)
+    fixtureTypes.js / pointTypes.js / hvacUnits.js / fireDevices.js /
+    elvDevices.js / solarEquipment.js          # entity-type registries
+    pipeStandards/{cpvc, upvc, gi, copper, pvcConduit, pexInsulated}.js
+    wireGauges.js / cableTypes.js
+    {is732,plumbing,hvac,fire,elv}Defaults.js  # room defaults
+    loads/{fixtureUnits, pointLoads, diversityFactors, electricalConstants}.js
+    ifcClasses.js / classificationCodes.js
+    index.js          # barrel + CATALOG_VERSIONS manifest
+  shared/             # 11 files
+    routingZones.js   # WALL/CEILING/FLOOR/SHAFT/EXTERNAL/UNDERGROUND
+    sizingStrategy.js # CATALOG | HUNTER | LOAD_BASED | GRADIENT_DRAIN
+    systemGraph.js    # deterministic IDs, sort, validate
+    geometry.js       # snap-to-wall, walkWallPerimeter, simplifyPolyline,
+                      # routeStableHash, fittingCounter
+    risers.js         # cross-discipline riser helpers
+    suggestions.js    # applyRoomDefaults engine
+    clashDetection.js # full impl (Phase 2.5)
+    ifcMapping.js
+  plumbing/           # network, routing, sizing, suggestions,
+                      # fixturePlacement, drainage, hotwater (local geyser)
+  electrical/         # network, routing, circuitGrouping, sizing,
+                      # dbPlacement, submains, suggestions, pointPlacement
+  hvac/               # network, routing, sizing, placement, suggestions
+  fire/               # network, routing, sizing, placement, suggestions
+  elv/                # network, routing, sizing, placement, suggestions
+  quantities/         # one aggregator per discipline:
+    plumbing.js / electrical.js / hvac.js / fire.js / elv.js
+  validation/
+    engine.js
+    rules/
+      mep_no_floor_trap.js
+      mep_db_load_exceeded.js
+      mep_clash_detected.js
+    index.js          # MEP_RULES barrel, spread into src/validation/engine.js
+```
+
+**Deferred (clean scaffolding remains):**
+- `src/mep/solar/` and `src/mep/quantities/solar.js` — Phase 2.3 deferred. Solar equipment catalog (`solarEquipment.js`) + store map (`state.solarEquipment`) + scope.js stubs all in place.
+- Plumbing rainwater + central hot-water riser — Phase 2.4 deferred. The 4-system plumbing graph already has slots for `RAINWATER` and `HOT_SUPPLY`; the latter currently runs in local-geyser mode only.
+
+### The MEP pipeline (every discipline follows it)
+
+```
+User places fixture/point/unit
+  → System graph (logical connectivity per discipline; src/mep/<d>/network.js)
+  → Routing engine (spatial polylines along routing zones; routing.js)
+  → Sizing engine (CATALOG | HUNTER | LOAD_BASED | GRADIENT_DRAIN; sizing.js)
+  → Quantity engine (lengths by zone/diameter, fittings, equipment counts;
+                     src/mep/quantities/<d>.js)
+  → BOQ lines (src/boq/emitters/<d>.js → src/boq/lines.js)
+  → Canvas overlay (src/components/canvas/<D>Overlay.jsx)
+```
+
+Each layer is pure and deterministic. Same inputs always produce the
+same outputs (byte-stable hash via `routeStableHash` from
+`src/mep/shared/geometry.js`).
+
+### MEP invariants (non-negotiable)
+
+- **No spatial-relationship math in `src/mep/`.** Every "which wall is in
+  this room?", "where is this fixture?" question goes through
+  `src/topology/`. New relationship APIs land in topology, not in MEP.
+- **Catalogs are data, not code.** Every diameter, every default, every
+  IS-standard load cap, every IFC class lives in `src/mep/catalogs/`.
+  Magic numbers in engine code are a bug. Every catalog file exports
+  `CATALOG_VERSION` + `CATALOG_SOURCE` (e.g. `'IS 15778:2007'`).
+- **`scope.js` aggregator wrappers are load-bearing.** Each of 5 shipped
+  disciplines exposes 3 wrappers (`getXNetwork`, `getXRoutes`,
+  `getXQuantities`) on the floor-scoped state object. That's
+  **15 wrappers live** (Solar deferred = 3 stubs remain). Forgetting one
+  silently corrupts multi-floor BOQ. `verify-mep.mjs` per-floor + per-floor
+  ≈ total assertions catch this.
+- **Risers are cross-discipline + cross-floor.** A single `state.risers`
+  map with `kind ∈ { PLUMBING_SUPPLY, SOIL_STACK, RAINWATER_DOWN,
+  HOT_WATER_RISER, ELECTRICAL_SUBMAIN, HVAC_REFRIGERANT, HVAC_CONDENSATE,
+  FIRE_MAIN, ELV_TRUNKING, SOLAR_DC_RISER, SOLAR_AC_RISER }`. Visible in
+  scoped state on both `fromFloorId` and `toFloorId` (mirrors staircase
+  rule in `boq/scope.js`). Quantities count their length ONCE at the
+  project level — NOT per floor. Codified in
+  `computeXQuantities(...).risers`.
+- **Sizing strategy is per-discipline + per-project.**
+  `projectSettings.mepSizing = { PLUMBING, ELECTRICAL, HVAC, FIRE, ELV,
+  SOLAR }`, each value ∈ `{ CATALOG, HUNTER, LOAD_BASED, GRADIENT_DRAIN }`.
+  Default `'CATALOG'`. Strategy is picked by `state.projectSettings
+  .mepSizing?.[discipline] ?? 'CATALOG'` inside each discipline's
+  `sizing.js`. Switching strategy on a project re-derives sizes on next
+  selector call (no manual re-route).
+- **Deterministic routing.** Every sort uses an explicit comparator with
+  stable tiebreaks `(roomId, type, id)`. Every "nearest" lookup uses `<`
+  not `<=`. Every Set iteration is converted to a sorted Array. Without
+  this, route hashes drift and `verify-mep.mjs` route-stability
+  assertions fail.
+- **No store mutation in pure modules.** Engines and quantity aggregators
+  are pure functions of state. Only `mepSlice.js` actions mutate.
+- **BOQ emitters fall back gracefully.** Each `src/boq/emitters/<d>.js`
+  resolves quantities via `state.getXQuantities()` (scope wrapper) THEN
+  falls back to direct `computeXQuantities(state)` (live state). This
+  unlocks both the floor-scoped path AND the call-from-the-live-store
+  path without code duplication.
+- **IFC-ready from day one.** Every MEP entity carries `discipline`,
+  `type`, `ifcType` (from `catalogs/ifcClasses.js`),
+  `classificationCode` (Uniclass via `catalogs/classificationCodes.js`),
+  `systemId`, `systemType`. Phase 3 IFC exporter consumes these — no
+  schema rework needed.
+
+### Discipline sub-systems shipped
+
+| Discipline | Sub-systems | Entity registry |
+|---|---|---|
+| Plumbing | COLD_SUPPLY, HOT_SUPPLY (local geyser), SOIL_DRAIN, (RAINWATER deferred) | `PLUMBING_FIXTURE_REGISTRY` (14 types) |
+| Electrical | LIGHTING, POWER_5A, POWER_15A, AC, GEYSER, SUBMAIN, SOLAR_TIE, EV | `ELECTRICAL_POINT_REGISTRY` (15 types) |
+| HVAC | SPLIT_AC, REFRIGERANT, CONDENSATE, VENTILATION (ducted = schema-only) | `HVAC_UNIT_REGISTRY` (6 types) |
+| Fire | DETECTION (closed loop), SPRINKLER (tree), EQUIPMENT | `FIRE_DEVICE_REGISTRY` (8 types) |
+| ELV | CCTV, DATA, SECURITY, AV | `ELV_DEVICE_REGISTRY` (8 types) |
+
+### BOQ categories emitted (current)
+
+```
+plumbing_supply, plumbing_drainage, plumbing_fixtures,
+electrical_lighting, electrical_power, electrical_hvac, electrical_submain,
+electrical_solar, electrical_ev, electrical_points, electrical_fittings,
+electrical_db,
+hvac_refrigerant, hvac_condensate, hvac_units,
+fire_detection, fire_suppression, fire_equipment,
+elv_cctv, elv_data, elv_security, elv_av,
+```
+
+Deferred categories (Phase 2.3 / 2.4): `solar_pv`, `solar_wiring_dc`,
+`solar_wiring_ac`, `solar_equipment`, `plumbing_rainwater`.
+
+### MEP UI surface (current)
+
+- 5 selection-driven side panels:
+  `PlumbingFixturePanel`, `ElectricalPointPanel`, `HvacPanel`,
+  `FirePanel`, `ElvPanel`.
+- 6 canvas overlays:
+  `PlumbingOverlay`, `ElectricalOverlay`, `HvacOverlay`, `FireOverlay`,
+  `ElvOverlay`, `ClashOverlay`.
+- 5 BOQ section components:
+  `PlumbingBoqSection`, `ElectricalBoqSection`, `HvacBoqSection`,
+  `FireBoqSection`, `ElvBoqSection`. All purely presentational —
+  take `lines: BoqLine[]` props; never call `useStore`.
+- `MepDefaultsModal`: listens for `mep:room-created` window event;
+  offers checkbox lists of suggested fixtures/points/units/devices per
+  discipline; applies via `applyRoomMepDefaults({ plumbing, electrical,
+  hvac, fire, elv })`.
+- Toolbar buttons (Structural & Civil cluster):
+  Plumbing (`Droplet`, P), Electrical (`Zap`, E), HVAC (`Wind`, H),
+  Fire (`Flame`, F), ELV (`Cable`, L).
+- LayersPanel groups: Plumbing, Electrical, HVAC, Fire, ELV, Diagnostics
+  (Clashes), plus per-discipline route toggles
+  (`plumbingSupplyRoutes`, `electricalWiringRoutes`,
+  `hvacRefrigerantRoutes`, etc.) — see `src/constants/layers.js`.
+
+### Adding a new MEP discipline (or completing deferred Solar / Rainwater)
+
+1. **Catalog**: add registry to `src/mep/catalogs/<name>.js` with
+   `CATALOG_VERSION` + `Object.freeze` + `getX(id)` + `listX()`.
+2. **Engines**: create `src/mep/<discipline>/` with `network.js`,
+   `routing.js`, `sizing.js`, `suggestions.js`, `placement.js`,
+   `index.js`. Pure functions, deterministic.
+3. **Quantities**: `src/mep/quantities/<discipline>.js` —
+   `computeXQuantities(state, opts) → { perSystem, ..., totals }`.
+4. **Store**: if a new entity collection is needed, add a state map +
+   CRUD actions in `src/mepSlice.js`, plus history snapshot coverage
+   in `store.js::_save/undo/redo` and `loadProject` normalization.
+5. **scope.js**: replace the 3 stubs (`getXNetwork`, `getXRoutes`,
+   `getXQuantities`) at the end of `scopeStateToFloor` with real
+   impls. Pass `scopedStateRef` so they consume floor-scoped state.
+6. **BOQ emitter**: `src/boq/emitters/<discipline>.js`. Resolve
+   quantities via `state.getXQuantities?.()` THEN fall back to
+   `computeXQuantities(state)`. Wire into `src/boq/lines.js` at the
+   end of `getBoqLines()`.
+7. **BOQ section**: `src/components/boq/XBoqSection.jsx`. Purely
+   presentational; takes `lines` prop. Wire into `BOQPanel.jsx`.
+8. **UI**: `src/components/XPanel.jsx` + `src/components/canvas/XOverlay.jsx`.
+   Use `<Panel>` + `<Modal>` primitives; lucide icons; design tokens.
+9. **Toolbar + shortcut**: add a button to `Toolbar.jsx` + a bare-key
+   shortcut to `useKeyboardShortcuts.js`. Mount panel in `App.jsx`.
+10. **Layers**: add layer keys to `src/constants/layers.js`
+    `DEFAULT_LAYER_VISIBILITY` and a group to `LayersPanel.jsx`.
+11. **Validation rules**: optional; add to `src/mep/validation/rules/`,
+    spread into `MEP_RULES` in `src/mep/validation/index.js`.
+12. **Verify**: append assertions to `scripts/verify-mep.mjs` covering
+    auto-suggest, system-graph correctness, routes generated, quantity
+    aggregation by diameter/gauge, floor scope (per-floor + per-floor ≈
+    total), BOQ emitter produces non-empty lines, and validation events
+    surface correctly.
+
+### What NOT to extract into MEP
+
+- Pure topology questions ("are these two rooms adjacent?", "what's the
+  centroid of this room?") — those live in `src/topology/`. MEP imports
+  them.
+- Pure geometry math (segment intersection, polygon containment) — that
+  lives in `src/geometry.js`. Topology + MEP both call it.
+- BOQ rendering primitives (`BoqRow`, `SectionHeader`, etc.) — those live
+  in `src/components/boq/BoqRow.jsx`. MEP sections consume them.
+
 ## Architectural reminders
 
 - `getValidRoomIds()` is the filter for ALL finish-gated and floor area totals. Never iterate `Object.keys(rooms)` directly for BOQ.
@@ -1281,3 +1510,17 @@ src/topology/
 - **Desktop-only.** Minimum viewport is 1024px enforced by `DesktopGate` wrapper in `App.jsx`. Below that, the entire app shell is replaced by a splash card. Don't add media queries to "support" smaller viewports — the gate is the design.
 - **Animation budget: 100-150ms with `var(--ease-out)`.** The 2s bobbing arrow in the canvas empty state is the SOLE sanctioned infinite animation in the app — don't add others. `prefers-reduced-motion` collapses all transitions globally (the rule lives at the bottom of `ui.css`).
 - **BOQ collapsible state is persisted in `localStorage['boq_panel_collapsed']`.** The keyboard hook (`useKeyboardShortcuts.js`) dispatches `window.dispatchEvent(new CustomEvent('boq:toggle'))` on `Ctrl/Cmd+B`; `BOQPanel.jsx` listens for that event and flips state. **Use this same window-event pattern for any future cross-component toggle that shouldn't reach into the store** — it keeps the keyboard hook decoupled from concrete component imports. Add new event names under the `boq:` / `panel:` namespace.
+- **MEP system pipeline is the canonical path for every discipline.** User places fixture/point → `buildXSystemGraph` (logical connectivity) → `buildXRoutes` (spatial polylines along zones) → sizing strategy (`CATALOG | HUNTER | LOAD_BASED | GRADIENT_DRAIN`) → `computeXQuantities` → BOQ emitter (`src/boq/emitters/<discipline>.js`) → `src/boq/lines.js` → BOQ section component. NEVER recompute spatial relationships in MEP — always go through `src/topology/`. NEVER hardcode diameters / wattages / IS-732 caps — always read from `src/mep/catalogs/`.
+- **Topology APIs added for MEP (lands in `src/topology/`, not MEP).** `getFloorWallPerimeterGraph(state, floorId)` is the LOAD-BEARING primitive — every discipline's routing BFS's over it. Plus `getRoomWallPerimeterGraph`, `getCeilingPaths`, `getRoomCentroid`, `getRoofPolygon`, `getShaftPolygons`, `getNearestWallToPoint`, `getExternalAccessibleWalls`, `getColumnFloorSpans`. Per-floor memo cells keyed on `state.walls` + `state.nodes` refs; invalidate on Zustand mutation.
+- **scope.js MEP aggregator wrappers are load-bearing.** 5 disciplines × 3 layers = 15 active wrappers in `scopeStateToFloor` (Solar deferred = 3 stubs remain). Forgetting one silently corrupts multi-floor BOQ for that aggregator. `verify-mep.mjs` per-floor + per-floor ≈ total assertions catch this. When completing Solar or adding a 7th discipline: replace stubs (`getXNetwork`, `getXRoutes`, `getXQuantities`) with real impls calling the discipline modules, passing `scopedStateRef`.
+- **MEP routing zones (`src/mep/shared/routingZones.js`).** Six zones: `WALL` (1.00×), `CEILING` (1.05×), `FLOOR` (1.00×), `SHAFT` (1.05×), `EXTERNAL` (1.10×), `UNDERGROUND` (1.00×). Quantity engines apply `zoneMultiplier` to polyline lengths. Each discipline's routing module exports a `classifyZone(edge, ctx)` callback. Fitting transitions (wall→ceiling) generate elbows via `fittingCounter`.
+- **MEP risers are cross-discipline + cross-floor.** Single `state.risers` map with `kind ∈ { PLUMBING_SUPPLY, SOIL_STACK, RAINWATER_DOWN, HOT_WATER_RISER, ELECTRICAL_SUBMAIN, HVAC_REFRIGERANT, HVAC_CONDENSATE, FIRE_MAIN, ELV_TRUNKING, SOLAR_DC_RISER, SOLAR_AC_RISER }`. Visible in scoped state on BOTH `fromFloorId` and `toFloorId` (mirrors staircase rule). Quantities count their length ONCE at the project level — NOT per floor.
+- **MEP sizing strategies are pluggable per discipline.** `projectSettings.mepSizing = { PLUMBING, ELECTRICAL, HVAC, FIRE, ELV, SOLAR }`, each value ∈ `{ CATALOG, HUNTER, LOAD_BASED, GRADIENT_DRAIN }`. Default `'CATALOG'`. Each discipline's `sizing.js` reads `state.projectSettings.mepSizing?.[discipline]` and dispatches to the right strategy in `src/mep/shared/sizingStrategy.js`. HUNTER walks fixture units → catalog `fixtureUnitsCarried`. LOAD_BASED applies IS-732 voltage-drop (3% limit at 230V, pf 0.85). GRADIENT_DRAIN tags edges with 1/80 (soil) or 1/40 (waste).
+- **MEP BOQ emitters fall back gracefully.** Each `src/boq/emitters/<discipline>.js` resolves quantities via `state.getXQuantities?.()` (scope wrapper) THEN falls back to `computeXQuantities(state)` (live state). This means both the floor-scoped path AND the call-from-the-live-store path work without code duplication. Forgetting the live-state fallback = BOQ silently empty when called without `floorId`.
+- **MEP BOQ section components are purely presentational.** `PlumbingBoqSection`, `ElectricalBoqSection`, `HvacBoqSection`, `FireBoqSection`, `ElvBoqSection` accept `lines: BoqLine[]` props. They NEVER call `useStore`, NEVER call store selectors, NEVER re-derive quantities. All grouping happens via `meta.system` / `meta.lineType` on the lines themselves. Adding a new MEP discipline's BOQ section = mirror an existing one.
+- **MEP UI mounts in App.jsx, gated on selection state.** Five panels: `PlumbingFixturePanel`, `ElectricalPointPanel`, `HvacPanel`, `FirePanel`, `ElvPanel`. Each self-gates on its own `selectedXId`. No prop drilling. Mount once.
+- **MepDefaultsModal listens for `mep:room-created` window event.** `RoomPanel.jsx::saveRoom` dispatches the event after creation. The modal lazy-imports `suggestXForRoom` from each discipline and renders checkbox lists. Apply button calls `applyRoomMepDefaults({ plumbing, electrical, hvac, fire, elv })`. New disciplines plug into this modal by adding their lazy-import + suggestion group.
+- **MEP canvas overlays render in fixed order in `Canvas.jsx`.** Bottom to top inside the MEP block (after structural overlays, before nodes/columns): `PlumbingOverlay → ElectricalOverlay → HvacOverlay → FireOverlay → ElvOverlay → ClashOverlay`. ClashOverlay always rendered last so clash markers sit visually above all routes. Don't reorder without re-checking layer-visibility hit-test priority.
+- **Clash detection is pure-function + frozen severity matrix.** `src/mep/shared/clashDetection.js::detectClashes(routes, options)` takes a combined route array and returns deterministic clash events. Severity from frozen `SEVERITY_MATRIX` (alphabetically-sorted keys). 6-inch snap-grid dedup. Wired through `src/mep/validation/rules/mep_clash_detected.js` into `runValidation`. The validation engine was patched to support per-issue severity (each clash carries its own severity) — `it.severity ?? rule.severity` fallback in `src/validation/engine.js`. Backward-compatible with rules that don't set per-issue severity.
+- **MEP entities are IFC-ready from day one.** Every entity carries `discipline`, `type`, `ifcType` (from `catalogs/ifcClasses.js`), `classificationCode` (Uniclass via `catalogs/classificationCodes.js`), `systemId`, `systemType`. Don't store UI-only fields on entities — selection / hover / edit state stays in component-local React state. This unlocks future Phase 3 IFC export without schema rework.
+- **MEP catalogs are versioned + frozen.** Every catalog file (`src/mep/catalogs/*.js`) exports `CATALOG_VERSION` (date-IS-spec format like `'2026-05-IS-15778'`) and `CATALOG_SOURCE` (`'IS 15778:2007'` etc.). Every registry array + entry is `Object.freeze`-d. Every catalog exports `getX(id)` lookup + `listX()` array accessor. `CATALOG_VERSIONS` manifest in `src/mep/catalogs/index.js` enumerates all 24 versions for audit traceability in PDF/Excel exports. Phase 2 ERP swap path = replace catalog files in-place with ERP-backed providers exposing the same API surface; engines unchanged.
