@@ -1,6 +1,8 @@
 import { useStore } from '../store'
 import { Panel } from './ui/Panel'
 import { Field } from './ui/Field'
+import FeetInchesInput from './ui/FeetInchesInput.jsx'
+import { DEFAULT_PRECISION } from '../lib/units.js'
 
 function NumField({ fieldLabel, value, fieldKey, min, onUpdate }) {
   return (
@@ -11,6 +13,20 @@ function NumField({ fieldLabel, value, fieldKey, min, onUpdate }) {
         min={min}
         onKeyDown={e => e.stopPropagation()}
         onChange={e => onUpdate({ [fieldKey]: parseFloat(e.target.value) })}
+      />
+    </Field>
+  )
+}
+
+// Feet-inches input for staircase landing/flight dimensions (decimal-feet storage).
+function FtField({ fieldLabel, value, fieldKey, min, onUpdate }) {
+  return (
+    <Field label={fieldLabel}>
+      <FeetInchesInput
+        value={value ?? 0}
+        onCommit={v => onUpdate({ [fieldKey]: v })}
+        min={min}
+        precision={DEFAULT_PRECISION.staircase}
       />
     </Field>
   )
@@ -99,9 +115,9 @@ export default function StaircasePanel() {
       <NumField fieldLabel="Tread (in)"       fieldKey="treadIn"         value={sc.treadIn}         min={1}   onUpdate={update} />
       <NumField fieldLabel="Riser (in)"       fieldKey="riserIn"         value={sc.riserIn}         min={0.5} onUpdate={update} />
       <NumField fieldLabel="Waist slab (in)"  fieldKey="waistSlabIn"     value={sc.waistSlabIn}     min={1}   onUpdate={update} />
-      <NumField fieldLabel="Landing width (ft)"  fieldKey="landingFtWidth"  value={sc.landingFtWidth}  min={1}   onUpdate={update} />
-      <NumField fieldLabel="Landing length (ft)" fieldKey="landingFtLength" value={sc.landingFtLength} min={1}   onUpdate={update} />
-      <NumField fieldLabel="Flight width (ft)"   fieldKey="flightWidthFt"   value={sc.flightWidthFt}   min={1}   onUpdate={update} />
+      <FtField  fieldLabel="Landing width"  fieldKey="landingFtWidth"  value={sc.landingFtWidth}  min={1}   onUpdate={update} />
+      <FtField  fieldLabel="Landing length" fieldKey="landingFtLength" value={sc.landingFtLength} min={1}   onUpdate={update} />
+      <FtField  fieldLabel="Flight width"   fieldKey="flightWidthFt"   value={sc.flightWidthFt}   min={1}   onUpdate={update} />
 
       {/* Derived metrics — verifies dog-legged formula at a glance */}
       <div style={{

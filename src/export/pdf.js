@@ -10,6 +10,7 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { getBoqLines, groupBoqLinesByCategory, totalBoqCost } from '../boq/lines'
+import { formatQuantity, normalizeUnitMode } from '../lib/units.js'
 
 const CATEGORY_LABELS = {
   finishes:     'Finishes',
@@ -46,9 +47,11 @@ function fmtRs(n) {
   return 'Rs. ' + Math.round(n).toLocaleString('en-IN')
 }
 
-function fmtQty(n) {
-  if (n === null || n === undefined || Number.isNaN(n)) return ''
-  return Math.round(n * 100) / 100 + ''
+function fmtPdfQty(line, displayMode) {
+  if (!line) return ''
+  const v = line.qty
+  if (v === null || v === undefined || Number.isNaN(v)) return ''
+  return formatQuantity(v, line.unit, displayMode)
 }
 
 function fmtRate(rate, isPer1000) {
@@ -71,7 +74,13 @@ function drawFooter(doc, page, pageCount) {
 export function exportBoqPdf(state, rates, opts = {}) {
   const projectName = opts.projectName || 'Untitled'
   const preparedBy  = opts.preparedBy  || '-'
-  const unitSystem  = opts.unitSystem  || 'ft (Indian)'
+  // Prefer explicit display unit ('ft' | 'ft-in' | 'm'); fall back to
+  // legacy unitSystem string ('metric' | 'ft (Indian)'). Indian engineers
+  // get feet-inches as the default friendly format.
+  const displayMode = normalizeUnitMode(
+    opts.unit ?? (opts.unitSystem === 'metric' ? 'm' : 'ft-in')
+  )
+  const unitSystem  = opts.unitSystem  || (displayMode === 'm' ? 'metric' : 'ft (Indian)')
 
   const lines    = getBoqLines(state, rates || {})
   const grouped  = groupBoqLinesByCategory(lines)
@@ -119,7 +128,7 @@ export function exportBoqPdf(state, rates, opts = {}) {
 
     const body = catLines.map(l => [
       l.label,
-      fmtQty(l.qty),
+      fmtPdfQty(l, displayMode),
       l.unit || '',
       fmtRate(rates ? rates[l.rateKey] : '', l.isPer1000),
       fmtRs(l.cost),

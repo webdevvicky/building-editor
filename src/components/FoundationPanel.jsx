@@ -11,6 +11,9 @@ import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
+import FeetInchesInput from './ui/FeetInchesInput.jsx'
+import InchesInput from './ui/InchesInput.jsx'
+import { DEFAULT_PRECISION } from '../lib/units.js'
 
 const FOUNDATION_TYPES = ['ISOLATED', 'COMBINED', 'RAFT', 'STRIP', 'PILE']
 
@@ -156,6 +159,42 @@ function NumField({ label, value, onChange, min = 0, step = 0.5, decimals }) {
         onKeyDown={e => e.stopPropagation()}
         onChange={e => onChange(parseFloat(e.target.value) || 0)}
       />
+    </div>
+  )
+}
+
+// Feet-inches input wrapper — used for all foundation length/depth/width
+// values stored in decimal feet. Sub-foot values (PCC bedding, plum depth)
+// render as pure inches via the FeetInchesInput sub-foot rule.
+function FtField({ label, value, onChange, min = 0 }) {
+  return (
+    <div style={fieldRow}>
+      <span style={lbl}>{label}</span>
+      <div style={{ width: 100 }}>
+        <FeetInchesInput
+          value={value ?? 0}
+          onCommit={v => onChange(v)}
+          min={min}
+          precision={DEFAULT_PRECISION.foundation}
+        />
+      </div>
+    </div>
+  )
+}
+
+// Inches input wrapper — used for values stored in inches (pile diameter).
+function InField({ label, value, onChange, min = 0 }) {
+  return (
+    <div style={fieldRow}>
+      <span style={lbl}>{label}</span>
+      <div style={{ width: 100 }}>
+        <InchesInput
+          value={value ?? 0}
+          onCommit={v => onChange(v)}
+          min={min}
+          precision={DEFAULT_PRECISION.foundation}
+        />
+      </div>
     </div>
   )
 }
@@ -314,15 +353,15 @@ export default function FoundationPanel() {
 
         {(f.type === 'ISOLATED' || f.type === 'COMBINED') && (
           <>
-            <NumField label="Length (ft)" step={0.5} value={g.lengthFt}
+            <FtField label="Length" value={g.lengthFt}
               onChange={v => patchGeometry(f.id, { lengthFt: v })} />
-            <NumField label="Width (ft)" step={0.5} value={g.widthFt}
+            <FtField label="Width" value={g.widthFt}
               onChange={v => patchGeometry(f.id, { widthFt: v })} />
-            <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
+            <FtField label="Depth" value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
+            <FtField label="PCC depth" value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
-            <NumField label="Plum concrete depth (ft)" step={0.25} decimals={2} value={f.plumDepthFt}
+            <FtField label="Plum concrete depth" value={f.plumDepthFt}
               onChange={v => updateFoundation(f.id, { plumDepthFt: v })} />
           </>
         )}
@@ -341,39 +380,39 @@ export default function FoundationPanel() {
                 Use building footprint
               </Button>
             </div>
-            <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
+            <FtField label="Depth" value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
+            <FtField label="PCC depth" value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
           </>
         )}
 
         {f.type === 'STRIP' && (
           <>
-            <NumField label="Width (ft)" step={0.25} value={g.widthFt}
+            <FtField label="Width" value={g.widthFt}
               onChange={v => patchGeometry(f.id, { widthFt: v })} />
-            <NumField label="Depth (ft)" step={0.25} value={g.depthFt}
+            <FtField label="Depth" value={g.depthFt}
               onChange={v => patchGeometry(f.id, { depthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
+            <FtField label="PCC depth" value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
           </>
         )}
 
         {f.type === 'PILE' && (
           <>
-            <NumField label="Pile diameter (in)" step={1} value={g.pileDiamIn}
+            <InField label="Pile diameter" value={g.pileDiamIn}
               onChange={v => patchGeometry(f.id, { pileDiamIn: v })} />
-            <NumField label="Pile length (ft)" step={1} value={g.pileLengthFt}
+            <FtField label="Pile length" value={g.pileLengthFt}
               onChange={v => patchGeometry(f.id, { pileLengthFt: v })} />
             <NumField label="Piles count" step={1} value={g.pilesCount}
               onChange={v => patchGeometry(f.id, { pilesCount: v })} />
-            <NumField label="Cap length (ft)" step={0.5} value={g.capLengthFt}
+            <FtField label="Cap length" value={g.capLengthFt}
               onChange={v => patchGeometry(f.id, { capLengthFt: v })} />
-            <NumField label="Cap width (ft)" step={0.5} value={g.capWidthFt}
+            <FtField label="Cap width" value={g.capWidthFt}
               onChange={v => patchGeometry(f.id, { capWidthFt: v })} />
-            <NumField label="Cap depth (ft)" step={0.25} value={g.capDepthFt}
+            <FtField label="Cap depth" value={g.capDepthFt}
               onChange={v => patchGeometry(f.id, { capDepthFt: v })} />
-            <NumField label="PCC depth (ft)" step={0.25} decimals={2} value={f.pccDepthFt}
+            <FtField label="PCC depth" value={f.pccDepthFt}
               onChange={v => updateFoundation(f.id, { pccDepthFt: v })} />
           </>
         )}

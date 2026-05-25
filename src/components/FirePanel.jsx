@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { useUnits } from '../hooks/useUnits'
 import { listFireDevices, getFireDevice } from '../mep/catalogs/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
@@ -37,6 +38,7 @@ const labelStyle = {
 }
 
 export default function FirePanel() {
+  const { fmtCoord } = useUnits()
   const selectedFireDeviceId = useStore(s => s.selectedFireDeviceId)
   const fireDevices          = useStore(s => s.fireDevices)
   const rooms                = useStore(s => s.rooms)
@@ -155,7 +157,7 @@ export default function FirePanel() {
       <div style={fieldRow}>
         <div style={labelStyle}>Position</div>
         <div style={{ fontSize: 'var(--text-sm)' }}>
-          {(device.x / 12).toFixed(2)} ft, {(device.y / 12).toFixed(2)} ft
+          {fmtCoord(device.x / 12, device.y / 12)}
         </div>
       </div>
 

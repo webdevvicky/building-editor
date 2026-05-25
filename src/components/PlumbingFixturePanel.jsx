@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { useUnits } from '../hooks/useUnits'
 import { listFixtureTypes, getFixtureType } from '../mep/catalogs/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
@@ -39,6 +40,7 @@ const labelStyle = {
 }
 
 export default function PlumbingFixturePanel() {
+  const { fmtCoord } = useUnits()
   const selectedPlumbingFixtureId = useStore(s => s.selectedPlumbingFixtureId)
   const plumbingFixtures          = useStore(s => s.plumbingFixtures)
   const rooms                     = useStore(s => s.rooms)
@@ -157,7 +159,7 @@ export default function PlumbingFixturePanel() {
       <div style={fieldRow}>
         <div style={labelStyle}>Position</div>
         <div style={{ fontSize: 'var(--text-sm)' }}>
-          {(fixture.x / 12).toFixed(2)} ft, {(fixture.y / 12).toFixed(2)} ft
+          {fmtCoord(fixture.x / 12, fixture.y / 12)}
         </div>
       </div>
 

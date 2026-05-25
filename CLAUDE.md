@@ -1,5 +1,69 @@
 # Building Editor — Developer Notes
 
+## Feet-Inches Display Mode (2026-05-25)
+
+Indian construction engineers think in feet-inches (`10'-6"`, `9"`) not
+decimal feet. The data layer continues to store decimal feet (and
+inches for sub-foot dimensions like wall thickness, beam section) —
+feet-inches is display-only.
+
+**Locked rules:**
+1. **State always stores decimal feet** (or inches where it already
+   does). No storage changes.
+2. **Single formatter module: `src/lib/units.js`.** Owns every
+   feet/inches glyph in the app. Exports `formatFeetInches`,
+   `parseFeetInches`, `formatLength(ft, unit, opts?)`, `formatArea`,
+   `formatVolume`, `formatCoord`, `formatInches`, `parseInches`,
+   `normalizeUnitMode`, `formatQuantity(value, unitType, displayMode)`,
+   `DEFAULT_PRECISION` per-entity precision map.
+3. **Sub-foot rule** — `|x| < 1ft` → inches-only (`9"`, `4½"`, `0"`).
+   Never `0'-9"`. 12" rollup at the precision boundary
+   (`0.999 → 1'-0"`).
+4. **Input behavior** — `<FeetInchesInput>` shows feet-inches when
+   not focused, switches to raw decimal on focus (selects all),
+   parses & commits on blur or Enter. Reverts on Escape or
+   unparseable input. Storage receives decimal feet only.
+   `<InchesInput>` sibling for values stored in inches.
+5. **Unit preference** — three modes on `state.unit`:
+   `'ft' | 'ft-in' | 'm'`. Toolbar segmented control in View &
+   Settings cluster. `useUnits()` hook is the canonical access point;
+   `normalizeUnitMode()` defends against bad saved state.
+6. **Export parity** — PDF and Excel route quantity rendering through
+   `formatQuantity()` with the user's active mode so on-screen and
+   printed BOQs match. Excel uses dual-column layout: numeric
+   "Quantity (decimal)" for SUM formulas + text "Quantity (display)"
+   for human reading.
+7. **Default precision per entity** —
+   `DEFAULT_PRECISION = { wall:'1/2', opening:'1/2', height:'1',
+   foundation:'1/2', staircase:'1/2', display:'1/2' }`.
+8. **No locale formatting in the formatter.** ASCII apostrophe (`'`),
+   straight double-quote (`"`), unicode fractions (`¼ ½ ¾`). No
+   `Intl.NumberFormat`. Deterministic, PDF-stable, copy-paste-clean.
+
+**Areas / volumes use Indian convention always:**
+`'ft'` and `'ft-in'` modes both render `Sft` / `Cft`; `'m'` mode
+renders `m²` / `m³`. Linear quantities (Rft, ft) switch glyph by mode.
+
+**Verification:** `scripts/verify-units.mjs` — 66 round-trip + edge-
+case assertions (format / parse / sub-foot / carry / negative /
+unit-mode-switch / round-trip / null handling). Must pass alongside
+the existing four verify scripts.
+
+**Grep guards (must hold after every change):**
+- `grep -rn "\.toFixed(2)} ft" src/` → 0 matches (positions /
+  dimensions go through formatter)
+- Position readouts in `*Panel.jsx` route through `useUnits().fmtCoord`
+- Linear inputs in panels use `<FeetInchesInput>` or `<InchesInput>`
+  primitive — never bare `<input type="number">` for length/depth
+
+**Latent bug fixed during migration:** `BulkWallPanel` was writing
+decimal-feet values directly into `wall.height`/`wall.thickness`
+(which store inches), producing 10-inch walls when the user typed
+"10". `FeetInchesInput`/`InchesInput` make the unit explicit at the
+boundary, so this class of bug is now structurally prevented.
+
+---
+
 ## Rev 2 — Joinery + Tiles + Grills + Room-Wise BOQ (2026-05-25)
 
 New BOQ categories and centralized registries shipped on top of the

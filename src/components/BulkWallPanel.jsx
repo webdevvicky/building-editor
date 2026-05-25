@@ -1,6 +1,10 @@
 import { useStore } from '../store'
+import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
 import { Panel } from './ui/Panel'
 import { Field } from './ui/Field'
+import FeetInchesInput from './ui/FeetInchesInput'
+import InchesInput from './ui/InchesInput'
+import { DEFAULT_PRECISION } from '../lib/units'
 
 export default function BulkWallPanel() {
   const selectedWallIds  = useStore(s => s.selectedWallIds)
@@ -13,25 +17,27 @@ export default function BulkWallPanel() {
   const selected = selectedWallIds.map(id => walls[id]).filter(Boolean)
   if (selected.length === 0) return null
 
-  // Derive whether values are uniform across selected walls
-  const heights     = [...new Set(selected.map(w => w.height ?? 10))]
-  const thicknesses = [...new Set(selected.map(w => w.thickness ?? 0.5))]
+  // Derive whether values are uniform across selected walls. Storage is
+  // INCHES for both height and thickness (matches setWallHeight /
+  // setWallThickness semantics). Display layer converts: height shown in
+  // feet via FeetInchesInput, thickness shown in inches via InchesInput.
+  const heights     = [...new Set(selected.map(w => w.height ?? DEFAULT_WALL_HEIGHT_IN))]
+  const thicknesses = [...new Set(selected.map(w => w.thickness ?? DEFAULT_WALL_THICK_IN))]
   const allPlot     = selected.every(w => w.isPlot)
   const anyPlot     = selected.some(w => w.isPlot)
   const allVirtual  = selected.every(w => w.isVirtual)
   const anyVirtual  = selected.some(w => w.isVirtual)
 
-  const uniformHeight = heights.length === 1 ? heights[0] : ''
-  const uniformThick  = thicknesses.length === 1 ? thicknesses[0] : ''
+  // Mixed → null (FeetInchesInput / InchesInput render placeholder).
+  const uniformHeightIn = heights.length === 1 ? heights[0] : null
+  const uniformThickIn  = thicknesses.length === 1 ? thicknesses[0] : null
 
-  function applyHeight(val) {
-    const h = parseFloat(val)
-    if (h > 0) setBulkWallProp(selectedWallIds, 'height', h)
+  function applyHeightFt(ft) {
+    if (ft > 0) setBulkWallProp(selectedWallIds, 'height', ft * GRID_IN)
   }
 
-  function applyThickness(val) {
-    const t = parseFloat(val)
-    if (t > 0) setBulkWallProp(selectedWallIds, 'thickness', t)
+  function applyThicknessIn(inches) {
+    if (inches > 0) setBulkWallProp(selectedWallIds, 'thickness', inches)
   }
 
   const checkLabel = (active) => ({
@@ -60,19 +66,25 @@ export default function BulkWallPanel() {
       position={{ top: 56, left: 16 }}
       className="ui-panel--bulk"
     >
-      {/* Height */}
-      <Field label="Height" inline hint="ft">
-        <input type="number" defaultValue={uniformHeight} placeholder={heights.length > 1 ? 'mixed' : ''} min={1}
-          onBlur={e => applyHeight(e.target.value)}
-          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') applyHeight(e.target.value) }}
+      {/* Height — stored in inches, displayed as feet */}
+      <Field label="Height" inline>
+        <FeetInchesInput
+          value={uniformHeightIn !== null ? uniformHeightIn / GRID_IN : null}
+          onCommit={applyHeightFt}
+          min={1}
+          precision={DEFAULT_PRECISION.height}
+          placeholder={heights.length > 1 ? 'mixed' : ''}
         />
       </Field>
 
-      {/* Thickness */}
-      <Field label="Thickness" inline hint="ft">
-        <input type="number" defaultValue={uniformThick} placeholder={thicknesses.length > 1 ? 'mixed' : ''} min={0.1} step={0.1}
-          onBlur={e => applyThickness(e.target.value)}
-          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') applyThickness(e.target.value) }}
+      {/* Thickness — stored in inches, displayed as inches */}
+      <Field label="Thickness" inline>
+        <InchesInput
+          value={uniformThickIn}
+          onCommit={applyThicknessIn}
+          min={1}
+          precision="1"
+          placeholder={thicknesses.length > 1 ? 'mixed' : ''}
         />
       </Field>
 

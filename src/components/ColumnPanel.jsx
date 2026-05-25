@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { useUnits } from '../hooks/useUnits'
 import { getColumnDimLabel } from '../lib/columnShapes'
 import { resolveColumnReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
@@ -33,6 +34,7 @@ function resolutionBadge(source) {
 }
 
 export default function ColumnPanel() {
+  const { fmtCoord } = useUnits()
   const selectedColumnId = useStore(s => s.selectedColumnId)
   const columns          = useStore(s => s.columns)
   const projectSettings  = useStore(s => s.projectSettings)
@@ -61,8 +63,7 @@ export default function ColumnPanel() {
   const columnTypes = projectSettings?.columnTypes ?? []
   const colType = columnTypes.find(t => t.id === column.columnTypeId)
 
-  const xFt = (column.x / 12).toFixed(2)
-  const yFt = (column.y / 12).toFixed(2)
+  const positionLabel = fmtCoord(column.x / 12, column.y / 12)
 
   const dimLabel = colType ? getColumnDimLabel(colType) : '—'
 
@@ -99,7 +100,7 @@ export default function ColumnPanel() {
 
       <div style={fieldRow}>
         <div style={label}>Position</div>
-        <div style={{ fontSize: 'var(--text-base)' }}>{xFt} ft, {yFt} ft</div>
+        <div style={{ fontSize: 'var(--text-base)' }}>{positionLabel}</div>
       </div>
 
       <div style={{ ...fieldRow, ...rowStyle }}>

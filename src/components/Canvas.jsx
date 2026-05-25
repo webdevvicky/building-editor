@@ -8,6 +8,8 @@ import {
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
 import { getNearestWallToPoint } from '../topology/index.js'
+import { formatLength } from '../lib/units.js'
+import FeetInchesInput from './ui/FeetInchesInput.jsx'
 import PlumbingOverlay from './canvas/PlumbingOverlay.jsx'
 import ElectricalOverlay from './canvas/ElectricalOverlay.jsx'
 import HvacOverlay from './canvas/HvacOverlay.jsx'
@@ -103,9 +105,10 @@ function wallLength(a, b) {
   return Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN * 10) / 10
 }
 
+// Mode-aware length formatter — single source from src/lib/units.js.
+// In 'ft-in' mode renders 10'-6"; in 'm' converts to metres; otherwise ft.
 function fmtLen(ft, unit) {
-  if (unit === 'm') return `${Math.round(ft * 0.3048 * 100) / 100} m`
-  return `${ft} ft`
+  return formatLength(ft, unit)
 }
 
 const ROOM_COLORS = ['#3498db','#e74c3c','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#16a085']
@@ -297,6 +300,9 @@ export default function Canvas() {
   useEffect(() => { if (!drawStartId) setLockedLength('') }, [drawStartId])
 
   const startNode    = drawStartId ? nodes[drawStartId] : null
+  // lockedLength may be '' (free draw) or a number-as-string ('10.5') or a
+  // number — FeetInchesInput commits numbers, the legacy clear button
+  // commits ''. parseFloat handles all three.
   const parsedLength = parseFloat(lockedLength)
   const hasLock      = !isNaN(parsedLength) && parsedLength > 0
 
@@ -647,13 +653,15 @@ export default function Canvas() {
         gap: 8, fontSize: 13, boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
       }}>
         <span style={{ color: '#555' }}>Length</span>
-        <input type="number" value={lockedLength} min={1} placeholder="free"
-          onChange={e => setLockedLength(e.target.value)}
-          onKeyDown={e => e.stopPropagation()}
-          style={{ width: 64, padding: '3px 8px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13 }}
-        />
-        <span style={{ color: '#999', fontSize: 11 }}>ft</span>
-        {lockedLength && (
+        <div style={{ width: 72 }}>
+          <FeetInchesInput
+            value={hasLock ? parsedLength : null}
+            onCommit={ft => setLockedLength(ft > 0 ? ft : '')}
+            min={0}
+            placeholder="free"
+          />
+        </div>
+        {lockedLength !== '' && (
           <button onClick={() => setLockedLength('')}
             style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 14 }}>×</button>
         )}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
+import { useUnits } from '../hooks/useUnits'
 import { MATERIAL_LIBRARY } from '../materials'
 import {
   explainWallArea, explainFlooring,
@@ -206,6 +207,7 @@ export default function BOQPanel() {
   const foundations     = useStore(s => s.foundations)
   const projectSettings = useStore(s => s.projectSettings)
   const unit            = useStore(s => s.unit)
+  const { fmtLength, fmtArea: fmtAreaUnit } = useUnits()
   const currentFloorId  = useStore(s => s.currentFloorId)
   // Selection actions for clickable validation issues.
   const selectWall   = useStore(s => s.selectWall)
@@ -422,7 +424,10 @@ export default function BOQPanel() {
   function handleExportPDF() {
     try {
       exportBoqPdf(liveState, rates, {
-        projectName: 'Layout', preparedBy: '-', unitSystem: unit === 'm' ? 'metric' : 'ft (Indian)',
+        projectName: 'Layout',
+        preparedBy: '-',
+        unit,
+        unitSystem: unit === 'm' ? 'metric' : 'ft (Indian)',
       })
       toast.success('BOQ exported as PDF.')
     } catch (err) {
@@ -432,7 +437,7 @@ export default function BOQPanel() {
 
   function handleExportExcel() {
     try {
-      exportBoqExcel(liveState, rates, { projectName: 'Layout' })
+      exportBoqExcel(liveState, rates, { projectName: 'Layout', unit })
       toast.success('BOQ exported as Excel.')
     } catch (err) {
       toast.error('Export failed.')
@@ -466,15 +471,11 @@ export default function BOQPanel() {
     else if (s.stamps?.[id])  selectStamp(id)
   }
 
-  // Unit-aware area / length display for the summary section.
-  function fmtLen(ft) {
-    if (unit === 'm') return `${Math.round(ft * 0.3048 * 100) / 100} m`
-    return `${ft} ft`
-  }
-  function fmtArea(sqFt) {
-    if (unit === 'm') return `${Math.round(sqFt * 0.0929 * 100) / 100} m²`
-    return `${sqFt} ft²`
-  }
+  // Unit-aware area / length display for the summary section — delegated
+  // to useUnits() so 'ft' / 'ft-in' / 'm' modes all render consistently
+  // with the rest of the app.
+  const fmtLen  = (ft)   => fmtLength(ft)
+  const fmtArea = (sqFt) => fmtAreaUnit(sqFt)
 
   // Civil-row label cleanup: strip "Sump – " / "Septic Tank – " prefix
   // (stamp type is the group header).

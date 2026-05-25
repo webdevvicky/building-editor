@@ -12,16 +12,13 @@ function fmtCost(n) {
 
 // Format a BoqLine's qty for display. Honors the user's unit preference
 // for area/volume; other unit types pass through.
+// Rev 2 + units phase: route through formatQuantity so feet-inches mode +
+// Indian unit labels (Sft / Cft / Rft) are honored consistently with
+// Canvas / panels / PDF / Excel.
+import { formatQuantity, normalizeUnitMode } from '../../lib/units.js'
 export function fmtLineQty(line, unit) {
-  const q = line.qty
-  if (line.unit === 'ft²') {
-    return unit === 'm' ? `${Math.round(q * 0.0929 * 100) / 100} m²` : `${q} ft²`
-  }
-  if (line.unit === 'ft³') {
-    return unit === 'm' ? `${Math.round(q * 0.0283 * 100) / 100} m³` : `${q} ft³`
-  }
-  if (line.unit === 'nos') return q.toLocaleString('en-IN')
-  return `${q} ${line.unit}`
+  const mode = normalizeUnitMode(unit)
+  return formatQuantity(line.qty, line.unit, mode)
 }
 
 export function SectionHeader({ title }) {

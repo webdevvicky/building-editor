@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { useUnits } from '../hooks/useUnits'
 import { listPointTypes, getPointType } from '../mep/catalogs/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
@@ -40,6 +41,7 @@ const labelStyle = {
 }
 
 export default function ElectricalPointPanel() {
+  const { fmtCoord } = useUnits()
   const selectedElectricalPointId = useStore(s => s.selectedElectricalPointId)
   const electricalPoints          = useStore(s => s.electricalPoints)
   const rooms                     = useStore(s => s.rooms)
@@ -161,7 +163,7 @@ export default function ElectricalPointPanel() {
       <div style={fieldRow}>
         <div style={labelStyle}>Position</div>
         <div style={{ fontSize: 'var(--text-sm)' }}>
-          {(point.x / 12).toFixed(2)} ft, {(point.y / 12).toFixed(2)} ft
+          {fmtCoord(point.x / 12, point.y / 12)}
         </div>
       </div>
 

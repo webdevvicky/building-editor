@@ -7,6 +7,9 @@ import { toast } from './ui/Toast'
 import { Panel } from './ui/Panel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import FeetInchesInput from './ui/FeetInchesInput'
+import InchesInput from './ui/InchesInput'
+import { DEFAULT_PRECISION } from '../lib/units'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -127,21 +130,23 @@ export default function OpeningPanel() {
         </Button>
       </div>
 
-      {/* Wall height */}
-      <Field label="Height" inline hint="ft">
-        <input type="number" value={wallHeight} min={1}
-          onChange={e => setWallHeight(selectedWallId, Number(e.target.value) * GRID_IN)}
-          onKeyDown={e => e.stopPropagation()}
+      {/* Wall height — stored in inches, displayed in feet (FeetInchesInput) */}
+      <Field label="Height" inline>
+        <FeetInchesInput
+          value={(wall.height ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN}
+          onCommit={ft => setWallHeight(selectedWallId, ft * GRID_IN)}
+          min={1}
+          precision={DEFAULT_PRECISION.height}
         />
       </Field>
 
-      {/* Wall thickness */}
-      <Field label="Thickness" inline hint="ft">
-        <input type="number"
-          value={Math.round((wall.thickness ?? DEFAULT_WALL_THICK_IN) / GRID_IN * 100) / 100}
-          min={0.1} step={0.1}
-          onChange={e => setWallThickness(selectedWallId, Number(e.target.value) * GRID_IN)}
-          onKeyDown={e => e.stopPropagation()}
+      {/* Wall thickness — stored in inches, displayed as inches (InchesInput) */}
+      <Field label="Thickness" inline>
+        <InchesInput
+          value={wall.thickness ?? DEFAULT_WALL_THICK_IN}
+          onCommit={inches => setWallThickness(selectedWallId, inches)}
+          min={1}
+          precision="1"
         />
       </Field>
 
@@ -291,15 +296,19 @@ export default function OpeningPanel() {
       {/* W × H */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
         <Field label="W" inline>
-          <input type="number" value={width} min={1}
-            onChange={e => setWidth(e.target.value)}
-            onKeyDown={e => e.stopPropagation()}
+          <FeetInchesInput
+            value={Number(width)}
+            onCommit={ft => setWidth(ft)}
+            min={0.5}
+            precision={DEFAULT_PRECISION.opening}
           />
         </Field>
         <Field label="H" inline error={errHeight ? ' ' : undefined}>
-          <input type="number" value={height} min={1}
-            onChange={e => setHeight(e.target.value)}
-            onKeyDown={e => e.stopPropagation()}
+          <FeetInchesInput
+            value={Number(height)}
+            onCommit={ft => setHeight(ft)}
+            min={0.5}
+            precision={DEFAULT_PRECISION.opening}
           />
         </Field>
       </div>
@@ -330,10 +339,12 @@ export default function OpeningPanel() {
 
       {/* Offset */}
       <div style={{ marginBottom: 'var(--space-1)' }}>
-        <Field label="Starts at" inline hint="ft from start" error={(errFit || errNeg) ? ' ' : undefined}>
-          <input type="number" value={offset} min={0} step={0.5}
-            onChange={e => setOffset(e.target.value)}
-            onKeyDown={e => e.stopPropagation()}
+        <Field label="Starts at" inline hint="from start" error={(errFit || errNeg) ? ' ' : undefined}>
+          <FeetInchesInput
+            value={Number(offset)}
+            onCommit={ft => setOffset(ft)}
+            min={0}
+            precision={DEFAULT_PRECISION.opening}
           />
         </Field>
         <div style={{ display: 'flex', gap: 'var(--space-1)', marginTop: 'var(--space-1)' }}>

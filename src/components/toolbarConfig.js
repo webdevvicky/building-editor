@@ -115,8 +115,9 @@ export const TOOL_CLUSTERS = Object.freeze([
         title: 'Units',
         items: [
           { type: 'segmented', storeKey: 'unit', options: [
-            { value: 'ft', label: 'ft' },
-            { value: 'm',  label: 'm'  },
+            { value: 'ft',    label: 'ft'    },
+            { value: 'ft-in', label: 'ft-in' },
+            { value: 'm',     label: 'm'     },
           ] },
         ],
       },

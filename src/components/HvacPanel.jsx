@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { useUnits } from '../hooks/useUnits'
 import { listHvacUnits, getHvacUnit } from '../mep/catalogs/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
@@ -46,6 +47,7 @@ function isOutdoorUnit(type) {
 }
 
 export default function HvacPanel() {
+  const { fmtCoord } = useUnits()
   const selectedHvacUnitId = useStore(s => s.selectedHvacUnitId)
   const hvacUnits          = useStore(s => s.hvacUnits)
   const rooms              = useStore(s => s.rooms)
@@ -202,7 +204,7 @@ export default function HvacPanel() {
       <div style={fieldRow}>
         <div style={labelStyle}>Position</div>
         <div style={{ fontSize: 'var(--text-sm)' }}>
-          {(unit.x / 12).toFixed(2)} ft, {(unit.y / 12).toFixed(2)} ft
+          {fmtCoord(unit.x / 12, unit.y / 12)}
         </div>
       </div>
 

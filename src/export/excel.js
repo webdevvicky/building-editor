@@ -9,6 +9,7 @@
 
 import * as XLSX from 'xlsx'
 import { getBoqLines, groupBoqLinesByCategory, totalBoqCost } from '../boq/lines'
+import { formatQuantity, normalizeUnitMode } from '../lib/units.js'
 
 const CATEGORY_SHEETS = {
   finishes:     'Finishes',
@@ -48,10 +49,15 @@ function parseRate(rateStr) {
   return r
 }
 
-// Build a sheet for a single category. Columns: ID | Label | Qty | Unit | Rate | Amount.
-// Amount is a live formula referring to Qty (col C) and Rate (col E).
-function buildCategorySheet(lines, rates) {
-  const aoa = [['ID', 'Label', 'Qty', 'Unit', 'Rate', 'Amount']]
+// Build a sheet for a single category. Columns:
+//   A: ID | B: Label | C: Quantity (decimal) | D: Quantity (display) |
+//   E: Unit | F: Rate | G: Amount
+// "Quantity (decimal)" stays numeric so SUM() and the Amount formula
+// keep working; "Quantity (display)" carries the human-readable string
+// (feet-inches in ft-in mode, metric in m mode) for inspection.
+// Amount formula references C (decimal qty) and F (rate).
+function buildCategorySheet(lines, rates, displayMode) {
+  const aoa = [['ID', 'Label', 'Quantity (decimal)', 'Quantity (display)', 'Unit', 'Rate', 'Amount']]
   lines.forEach((l, i) => {
     const rowNum = i + 2 // 1-based, header is row 1
     const rate   = parseRate(rates ? rates[l.rateKey] : '')
@@ -59,28 +65,29 @@ function buildCategorySheet(lines, rates) {
       l.id,
       l.label,
       r2(l.qty),
+      formatQuantity(l.qty, l.unit, displayMode),
       l.unit || '',
       rate === null ? '' : rate,
-      // Formula cell, refers to C (qty) and E (rate) on this row.
-      { f: l.isPer1000 ? `(C${rowNum}/1000)*E${rowNum}` : `C${rowNum}*E${rowNum}` },
+      // Formula cell, refers to C (qty) and F (rate) on this row.
+      { f: l.isPer1000 ? `(C${rowNum}/1000)*F${rowNum}` : `C${rowNum}*F${rowNum}` },
     ])
   })
 
   // Append subtotal row.
   const subRow = lines.length + 2
-  aoa.push(['', 'Subtotal', '', '', '', { f: `SUM(F2:F${subRow - 1})` }])
+  aoa.push(['', 'Subtotal', '', '', '', '', { f: `SUM(G2:G${subRow - 1})` }])
 
   const ws = XLSX.utils.aoa_to_sheet(aoa)
 
   // Column widths.
   ws['!cols'] = [
-    { wch: 22 }, { wch: 36 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 14 },
+    { wch: 22 }, { wch: 36 }, { wch: 14 }, { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 },
   ]
 
-  // Number format on Rate + Amount columns.
+  // Number format on Rate (col F = 5) + Amount (col G = 6) columns.
   for (let r = 1; r < aoa.length; r++) {
-    const rateCell = XLSX.utils.encode_cell({ r, c: 4 })
-    const amtCell  = XLSX.utils.encode_cell({ r, c: 5 })
+    const rateCell = XLSX.utils.encode_cell({ r, c: 5 })
+    const amtCell  = XLSX.utils.encode_cell({ r, c: 6 })
     if (ws[rateCell] && typeof ws[rateCell].v === 'number') ws[rateCell].z = '#,##0.00'
     if (ws[amtCell]) ws[amtCell].z = '#,##0.00'
   }
@@ -109,12 +116,13 @@ function buildSummarySheet(grouped, grandTotal) {
   return ws
 }
 
-function buildRawSheet(lines, rates) {
+function buildRawSheet(lines, rates, displayMode) {
   const rows = lines.map(l => ({
     id:        l.id,
     category:  l.category,
     label:     l.label,
     qty:       r2(l.qty),
+    qtyDisplay: formatQuantity(l.qty, l.unit, displayMode),
     unit:      l.unit || '',
     rateKey:   l.rateKey,
     rate:      parseRate(rates ? rates[l.rateKey] : '') ?? '',
@@ -125,7 +133,7 @@ function buildRawSheet(lines, rates) {
   }))
   const ws = XLSX.utils.json_to_sheet(rows)
   ws['!cols'] = [
-    { wch: 26 }, { wch: 14 }, { wch: 36 }, { wch: 10 }, { wch: 8 },
+    { wch: 26 }, { wch: 14 }, { wch: 36 }, { wch: 10 }, { wch: 18 }, { wch: 8 },
     { wch: 26 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 22 },
   ]
   return ws
@@ -133,6 +141,11 @@ function buildRawSheet(lines, rates) {
 
 export function exportBoqExcel(state, rates, opts = {}) {
   const projectName = opts.projectName || 'Untitled'
+  // Display mode for the human-readable "Quantity (display)" column.
+  // Prefer explicit `unit`, fall back to legacy unitSystem string, then 'ft-in'.
+  const displayMode = normalizeUnitMode(
+    opts.unit ?? (opts.unitSystem === 'metric' ? 'm' : 'ft-in')
+  )
   const lines       = getBoqLines(state, rates || {})
   const grouped     = groupBoqLinesByCategory(lines)
   const grand       = totalBoqCost(lines)
@@ -146,13 +159,13 @@ export function exportBoqExcel(state, rates, opts = {}) {
   for (const cat of CATEGORY_ORDER) {
     const ls = grouped[cat]
     if (!ls || ls.length === 0) continue
-    const ws   = buildCategorySheet(ls, rates)
+    const ws   = buildCategorySheet(ls, rates, displayMode)
     const name = (CATEGORY_SHEETS[cat] || cat).slice(0, 31) // Excel sheet name limit
     XLSX.utils.book_append_sheet(wb, ws, name)
   }
 
   // Raw data dump last — every field on every line.
-  XLSX.utils.book_append_sheet(wb, buildRawSheet(lines, rates), 'Raw Data')
+  XLSX.utils.book_append_sheet(wb, buildRawSheet(lines, rates, displayMode), 'Raw Data')
 
   XLSX.writeFile(wb, `boq-${safeFile(projectName)}-${todayStamp()}.xlsx`)
 }

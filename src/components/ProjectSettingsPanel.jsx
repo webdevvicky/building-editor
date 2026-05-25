@@ -3,6 +3,9 @@ import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
+import { Field } from './ui/Field.jsx'
+import FeetInchesInput from './ui/FeetInchesInput.jsx'
+import { DEFAULT_PRECISION } from '../lib/units.js'
 
 const sectionHead = {
   fontSize: 'var(--text-xs)',
@@ -92,6 +95,21 @@ function NumField({ label, value, onChange, min = 0, step = 0.5 }) {
   )
 }
 
+// FtField — feet-inches aware sibling of NumField. State stays in decimal feet;
+// the input renders feet-inches in 'ft-in' mode and decimal feet otherwise.
+function FtField({ label, value, onChange, min = 0, precision = DEFAULT_PRECISION.foundation }) {
+  return (
+    <Field label={label} inline>
+      <FeetInchesInput
+        value={value ?? 0}
+        onCommit={ft => onChange(ft)}
+        min={min}
+        precision={precision}
+      />
+    </Field>
+  )
+}
+
 function CheckField({ label, value, onChange }) {
   return (
     <div style={{ ...fieldRow, cursor: 'pointer' }} onClick={() => onChange(!value)}>
@@ -172,15 +190,17 @@ export default function ProjectSettingsPanel() {
     >
       {/* 1. Floor Heights */}
       <div style={sectionHead}>Floor Heights</div>
-      <NumField
-        label="Plinth height (ft)" step={0.5}
+      <FtField
+        label="Plinth height"
         value={heights.plinthHeightFt}
         onChange={v => setHeights({ plinthHeightFt: v })}
+        precision={DEFAULT_PRECISION.height}
       />
-      <NumField
-        label="Floor height (ft)" step={0.5}
+      <FtField
+        label="Floor height"
         value={heights.floorHeightFt}
         onChange={v => setHeights({ floorHeightFt: v })}
+        precision={DEFAULT_PRECISION.height}
       />
 
       <div style={divider} />
@@ -206,10 +226,11 @@ export default function ProjectSettingsPanel() {
 
       {/* 1c. Foundation Defaults (Phase 1.6e — plum concrete) */}
       <div style={sectionHead}>Foundation Defaults</div>
-      <NumField
-        label="Plum concrete depth (ft)" step={0.25} min={0}
+      <FtField
+        label="Plum concrete depth" min={0}
         value={projectSettings?.foundationDefaults?.plumDepthFt ?? 0}
         onChange={v => setFoundationDefaults({ plumDepthFt: v })}
+        precision={DEFAULT_PRECISION.foundation}
       />
       <div style={hintText}>
         Mass concrete (typically M15 with 30–40% stone) under footings. 0 disables.
@@ -278,10 +299,11 @@ export default function ProjectSettingsPanel() {
         value={sunshadeSettings.enabled}
         onChange={v => setSunshadeSettings({ enabled: v })}
       />
-      <NumField
-        label="Projection (ft)" step={0.5}
+      <FtField
+        label="Projection"
         value={sunshadeSettings.projectionFt}
         onChange={v => setSunshadeSettings({ projectionFt: v })}
+        precision={DEFAULT_PRECISION.foundation}
       />
       <NumField
         label="Thickness (in)" step={1}
@@ -298,10 +320,11 @@ export default function ProjectSettingsPanel() {
         value={parapetSettings.enabled}
         onChange={v => setParapetSettings({ enabled: v })}
       />
-      <NumField
-        label="Height (ft)" step={0.5}
+      <FtField
+        label="Height"
         value={parapetSettings.heightFt}
         onChange={v => setParapetSettings({ heightFt: v })}
+        precision={DEFAULT_PRECISION.foundation}
       />
       <NumField
         label="Thickness (in)" step={1}
@@ -378,12 +401,15 @@ export default function ProjectSettingsPanel() {
           >
             Footing
           </div>
-          <NumField label="Length (ft)" step={0.5} value={ct.footingLengthFt ?? 4}
-            onChange={v => setColumnTypeEntry(ct.id, { footingLengthFt: v })} />
-          <NumField label="Width (ft)" step={0.5} value={ct.footingWidthFt ?? 4}
-            onChange={v => setColumnTypeEntry(ct.id, { footingWidthFt: v })} />
-          <NumField label="Depth (ft)" step={0.25} value={ct.footingDepthFt ?? 1}
-            onChange={v => setColumnTypeEntry(ct.id, { footingDepthFt: v })} />
+          <FtField label="Length" value={ct.footingLengthFt ?? 4}
+            onChange={v => setColumnTypeEntry(ct.id, { footingLengthFt: v })}
+            precision={DEFAULT_PRECISION.foundation} />
+          <FtField label="Width" value={ct.footingWidthFt ?? 4}
+            onChange={v => setColumnTypeEntry(ct.id, { footingWidthFt: v })}
+            precision={DEFAULT_PRECISION.foundation} />
+          <FtField label="Depth" value={ct.footingDepthFt ?? 1}
+            onChange={v => setColumnTypeEntry(ct.id, { footingDepthFt: v })}
+            precision={DEFAULT_PRECISION.foundation} />
         </div>
       ))}
       <Button variant="primary" size="sm" onClick={() => addColumnType({})}>
@@ -409,20 +435,23 @@ export default function ProjectSettingsPanel() {
         value={staircaseDefaults.waistSlabIn}
         onChange={v => setStaircaseDefaults({ waistSlabIn: v })}
       />
-      <NumField
-        label="Landing width (ft)" step={0.5}
+      <FtField
+        label="Landing width"
         value={staircaseDefaults.landingFtWidth}
         onChange={v => setStaircaseDefaults({ landingFtWidth: v })}
+        precision={DEFAULT_PRECISION.staircase}
       />
-      <NumField
-        label="Landing length (ft)" step={0.5}
+      <FtField
+        label="Landing length"
         value={staircaseDefaults.landingFtLength}
         onChange={v => setStaircaseDefaults({ landingFtLength: v })}
+        precision={DEFAULT_PRECISION.staircase}
       />
-      <NumField
-        label="Flight width (ft)" step={0.5}
+      <FtField
+        label="Flight width"
         value={staircaseDefaults.flightWidthFt}
         onChange={v => setStaircaseDefaults({ flightWidthFt: v })}
+        precision={DEFAULT_PRECISION.staircase}
       />
     </Modal>
   )

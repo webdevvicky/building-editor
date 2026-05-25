@@ -10,13 +10,15 @@
 //   - Window sunshade flag (when type === 'window')
 //   - Delete button (dialog.confirm + toast.action undo)
 
-import { useState, useEffect } from 'react'
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { GRID_IN } from '../geometry'
 import { Panel } from './ui/Panel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import FeetInchesInput from './ui/FeetInchesInput'
+import { DEFAULT_PRECISION } from '../lib/units'
+import { useUnits } from '../hooks/useUnits'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { getOpeningSubtypesByParent, SUBTYPE_SOURCE } from '../constants/joinery'
@@ -40,23 +42,11 @@ export default function OpeningDetailPanel() {
   const setOpeningSubtype = useStore(s => s.setOpeningSubtype)
   const setOpeningGrill   = useStore(s => s.setOpeningGrill)
   const undo             = useStore(s => s.undo)
+  const { fmtLength }    = useUnits()
 
   // Resolve the selected opening. Bail out gracefully if anything is missing.
   const wall    = sel ? walls[sel.wallId] : null
   const opening = wall ? (wall.openings ?? []).find(o => o.id === sel.openingId) : null
-
-  // Local form state — committed to the store on blur / Enter so undo
-  // history doesn't fill with per-keystroke entries.
-  const [width,  setWidth]  = useState('')
-  const [height, setHeight] = useState('')
-  const [offset, setOffset] = useState('')
-
-  useEffect(() => {
-    if (!opening) return
-    setWidth((opening.width  / GRID_IN).toString())
-    setHeight((opening.height / GRID_IN).toString())
-    setOffset((opening.offset / GRID_IN).toString())
-  }, [opening?.id, opening?.width, opening?.height, opening?.offset])
 
   if (!sel || !wall || !opening) return null
 
@@ -64,31 +54,6 @@ export default function OpeningDetailPanel() {
   const isDoor   = opening.type === 'door'
   const isWindow = opening.type === 'window'
 
-  // ── Commit handlers ────────────────────────────────────────────────────
-  function commitWidth() {
-    const v = Number(width)
-    if (!Number.isFinite(v) || v <= 0) {
-      setWidth((opening.width / GRID_IN).toString())
-      return
-    }
-    updateOpening(sel.wallId, sel.openingId, { width: v * GRID_IN })
-  }
-  function commitHeight() {
-    const v = Number(height)
-    if (!Number.isFinite(v) || v <= 0) {
-      setHeight((opening.height / GRID_IN).toString())
-      return
-    }
-    updateOpening(sel.wallId, sel.openingId, { height: v * GRID_IN })
-  }
-  function commitOffset() {
-    const v = Number(offset)
-    if (!Number.isFinite(v) || v < 0) {
-      setOffset((opening.offset / GRID_IN).toString())
-      return
-    }
-    updateOpening(sel.wallId, sel.openingId, { offset: v * GRID_IN })
-  }
   function setOffsetQuick(pos) {
     const widthIn = opening.width
     const wallIn  = wallLenFt * GRID_IN
@@ -154,35 +119,32 @@ export default function OpeningDetailPanel() {
 
       {/* Width × Height */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-        <Field label="W (ft)" inline>
-          <input
-            type="number" min={1} step={0.5}
-            value={width}
-            onChange={e => setWidth(e.target.value)}
-            onBlur={commitWidth}
-            onKeyDown={e => { if (e.key === 'Enter') commitWidth(); e.stopPropagation() }}
+        <Field label="W" inline>
+          <FeetInchesInput
+            value={opening.width / GRID_IN}
+            onCommit={ft => updateOpening(sel.wallId, sel.openingId, { width: ft * GRID_IN })}
+            min={0.5}
+            precision={DEFAULT_PRECISION.opening}
           />
         </Field>
-        <Field label="H (ft)" inline>
-          <input
-            type="number" min={1} step={0.5}
-            value={height}
-            onChange={e => setHeight(e.target.value)}
-            onBlur={commitHeight}
-            onKeyDown={e => { if (e.key === 'Enter') commitHeight(); e.stopPropagation() }}
+        <Field label="H" inline>
+          <FeetInchesInput
+            value={opening.height / GRID_IN}
+            onCommit={ft => updateOpening(sel.wallId, sel.openingId, { height: ft * GRID_IN })}
+            min={0.5}
+            precision={DEFAULT_PRECISION.opening}
           />
         </Field>
       </div>
 
       {/* Offset + quick buttons */}
       <div style={{ marginBottom: 'var(--space-2)' }}>
-        <Field label="Starts at (ft)" inline hint={`Wall is ${wallLenFt.toFixed(2)} ft long`}>
-          <input
-            type="number" min={0} step={0.5}
-            value={offset}
-            onChange={e => setOffset(e.target.value)}
-            onBlur={commitOffset}
-            onKeyDown={e => { if (e.key === 'Enter') commitOffset(); e.stopPropagation() }}
+        <Field label="Starts at" inline hint={`Wall is ${fmtLength(wallLenFt)} long`}>
+          <FeetInchesInput
+            value={opening.offset / GRID_IN}
+            onCommit={ft => updateOpening(sel.wallId, sel.openingId, { offset: ft * GRID_IN })}
+            min={0}
+            precision={DEFAULT_PRECISION.opening}
           />
         </Field>
         <div style={{ display: 'flex', gap: 'var(--space-1)', marginTop: 'var(--space-1)' }}>

@@ -2,6 +2,9 @@ import { useStore } from '../store'
 import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
+import { Field } from './ui/Field.jsx'
+import FeetInchesInput from './ui/FeetInchesInput.jsx'
+import { DEFAULT_PRECISION } from '../lib/units.js'
 
 const floorCard = {
   border: '1px solid var(--color-border)',
@@ -183,25 +186,23 @@ export default function FloorsManagerPanel() {
               </Button>
             </div>
 
-            <div style={fieldRow}>
-              <span style={lbl}>Plinth height (ft)</span>
-              <input
-                type="number" min={0} step={0.5} style={numInput}
+            <Field label="Plinth height" inline>
+              <FeetInchesInput
                 value={f.plinthHeightFt ?? 0}
-                onKeyDown={e => e.stopPropagation()}
-                onChange={e => updateFloor(f.id, { plinthHeightFt: parseFloat(e.target.value) })}
+                onCommit={ft => updateFloor(f.id, { plinthHeightFt: ft })}
+                min={0}
+                precision={DEFAULT_PRECISION.height}
               />
-            </div>
+            </Field>
 
-            <div style={fieldRow}>
-              <span style={lbl}>Floor height (ft)</span>
-              <input
-                type="number" min={0} step={0.5} style={numInput}
+            <Field label="Floor height" inline>
+              <FeetInchesInput
                 value={f.floorHeightFt ?? 0}
-                onKeyDown={e => e.stopPropagation()}
-                onChange={e => updateFloor(f.id, { floorHeightFt: parseFloat(e.target.value) })}
+                onCommit={ft => updateFloor(f.id, { floorHeightFt: ft })}
+                min={0}
+                precision={DEFAULT_PRECISION.height}
               />
-            </div>
+            </Field>
 
             <div style={fieldRow}>
               <span style={lbl}>Slab thickness (in)</span>

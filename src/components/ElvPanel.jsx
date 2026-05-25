@@ -16,6 +16,7 @@ import { toast } from './ui/Toast'
 import { Panel } from './ui/Panel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import { useUnits } from '../hooks/useUnits'
 
 // Sub-system grouping (display only — drives the badge in the panel).
 // CCTV bucket covers video surveillance; DATA bucket covers structured
@@ -64,6 +65,7 @@ export default function ElvPanel() {
   const selectElvDevice      = useStore(s => s.selectElvDevice)
   const applyRoomMepDefaults = useStore(s => s.applyRoomMepDefaults)
   const undo                 = useStore(s => s.undo)
+  const { fmtCoord }         = useUnits()
   const suggestFn            = useSuggestFn()
 
   if (!selectedElvDeviceId) return null
@@ -190,7 +192,7 @@ export default function ElvPanel() {
       <div style={fieldRow}>
         <div style={labelStyle}>Position</div>
         <div style={{ fontSize: 'var(--text-sm)' }}>
-          {(device.x / 12).toFixed(2)} ft, {(device.y / 12).toFixed(2)} ft
+          {fmtCoord(device.x / 12, device.y / 12)}
         </div>
       </div>
 
