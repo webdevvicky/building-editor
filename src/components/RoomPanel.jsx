@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { ROOM_TYPES, ROOM_TYPE_LABELS } from '../roomPresets'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 
@@ -89,11 +89,10 @@ export default function RoomPanel() {
   }
 
   return (
-    <Panel
+    <SelectionPanel
       title="Room Tool"
       onClose={() => setTool('select')}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       {/* Instructions */}
       {pendingWallIds.length === 0 ? (
@@ -238,6 +237,6 @@ export default function RoomPanel() {
           </div>
         </div>
       )}
-    </Panel>
+    </SelectionPanel>
   )
 }

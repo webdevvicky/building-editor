@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { GRID_IN } from '../geometry'
 import { toast } from './ui/Toast'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 
@@ -93,11 +93,10 @@ export default function StampPanel() {
   }
 
   return (
-    <Panel
+    <SelectionPanel
       title={label}
       onClose={() => selectStamp(null)}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       <div style={{ marginBottom: 'var(--space-3)' }}>
         <Button
@@ -167,6 +166,6 @@ export default function StampPanel() {
       }}>
         Drag to reposition · Delete key to remove
       </div>
-    </Panel>
+    </SelectionPanel>
   )
 }

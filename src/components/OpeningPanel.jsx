@@ -4,12 +4,13 @@ import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geome
 import { MATERIAL_LIBRARY } from '../materials'
 import { MASONRY_SYSTEMS } from '../specs/masonrySystems'
 import { toast } from './ui/Toast'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 import FeetInchesInput from './ui/FeetInchesInput'
 import InchesInput from './ui/InchesInput'
 import { DEFAULT_PRECISION } from '../lib/units'
+import { useUnits } from '../hooks/useUnits'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -47,6 +48,7 @@ export default function OpeningPanel() {
   const setOpeningSunshade  = useStore(s => s.setOpeningSunshade)
   const selectWall          = useStore(s => s.selectWall)
   const selectOpening       = useStore(s => s.selectOpening)
+  const { fmtLength }       = useUnits()
 
   const [type,   setType]   = useState('door')
   const [width,  setWidth]  = useState(3)
@@ -79,8 +81,8 @@ export default function OpeningPanel() {
   const h = Number(height)
   const o = Number(offset)
 
-  const errHeight  = h > wallHeight ? `Opening height (${h} ft) exceeds wall height (${wallHeight} ft)` : null
-  const errFit     = (o + w) > wallLen ? `Doesn't fit — ${o} + ${w} = ${o + w} ft, wall is ${wallLen} ft` : null
+  const errHeight  = h > wallHeight ? `Opening height (${fmtLength(h)}) exceeds wall height (${fmtLength(wallHeight)})` : null
+  const errFit     = (o + w) > wallLen ? `Doesn't fit — ${fmtLength(o)} + ${fmtLength(w)} = ${fmtLength(o + w)}, wall is ${fmtLength(wallLen)}` : null
   const errOverlap = openings.some(ex => !(o + w <= ex.offset / GRID_IN || o >= ex.offset / GRID_IN + ex.width / GRID_IN))
     ? 'Overlaps an existing opening' : null
   const errNeg     = o < 0 ? 'Offset cannot be negative' : null
@@ -111,11 +113,10 @@ export default function OpeningPanel() {
   }
 
   return (
-    <Panel
+    <SelectionPanel
       title="Wall Properties"
       onClose={() => selectWall(null)}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       <div style={{ marginBottom: 'var(--space-3)' }}>
         <Button
@@ -170,7 +171,7 @@ export default function OpeningPanel() {
       </Field>
 
       <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', marginBottom: 'var(--space-3)' }}>
-        Length: {wallLen} ft
+        Length: {fmtLength(wallLen)}
       </div>
 
       {/* Plot boundary toggle */}
@@ -405,7 +406,7 @@ export default function OpeningPanel() {
           >
             <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
               {op.type === 'window' ? '▭ Window' : '▮ Door'}{' '}
-              {Math.round(op.width/GRID_IN*10)/10}×{Math.round(op.height/GRID_IN*10)/10} ft @ {Math.round(op.offset/GRID_IN*10)/10} ft
+              {fmtLength(op.width / GRID_IN)} × {fmtLength(op.height / GRID_IN)} @ {fmtLength(op.offset / GRID_IN)}
             </span>
             <span style={{
               color: 'var(--color-text-muted)',
@@ -414,6 +415,6 @@ export default function OpeningPanel() {
           </button>
         ))}
       </div>
-    </Panel>
+    </SelectionPanel>
   )
 }

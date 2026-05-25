@@ -14,7 +14,7 @@ import { useUnits } from '../hooks/useUnits'
 import { listHvacUnits, getHvacUnit } from '../mep/catalogs/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 
@@ -145,11 +145,10 @@ export default function HvacPanel() {
   }
 
   return (
-    <Panel
+    <SelectionPanel
       title="HVAC unit"
       onClose={() => selectHvacUnit(null)}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       <div style={{ marginBottom: 'var(--space-2)' }}>
         <Button variant="danger" size="sm" onClick={handleDelete}>
@@ -305,6 +304,6 @@ export default function HvacPanel() {
           </Button>
         </div>
       )}
-    </Panel>
+    </SelectionPanel>
   )
 }

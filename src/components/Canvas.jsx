@@ -982,6 +982,12 @@ export default function Canvas() {
                           e.stopPropagation()
                           selectOpening(wall.id, op.id)
                         }}
+                        // BUG 3 fix: mousedown stopPropagation does NOT stop the
+                        // synthesized click event chain — without this, the wall
+                        // group's onClick fires after mouseup and selectWall()
+                        // would clear selectedOpening. Belt: this. Suspenders:
+                        // defensive guard in selectWall (store.js).
+                        onClick={e => e.stopPropagation()}
                         style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
                       />
                       {isSel && (

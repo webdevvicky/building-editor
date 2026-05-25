@@ -13,7 +13,7 @@ import { useStore } from '../store'
 import { listElvDevices, getElvDevice } from '../mep/catalogs/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 import { useUnits } from '../hooks/useUnits'
@@ -117,11 +117,10 @@ export default function ElvPanel() {
   }
 
   return (
-    <Panel
+    <SelectionPanel
       title="ELV device"
       onClose={() => selectElvDevice(null)}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       <div style={{ marginBottom: 'var(--space-2)' }}>
         <Button variant="danger" size="sm" onClick={handleDelete}>
@@ -230,6 +229,6 @@ export default function ElvPanel() {
           </Button>
         </div>
       )}
-    </Panel>
+    </SelectionPanel>
   )
 }

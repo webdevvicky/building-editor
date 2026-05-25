@@ -4,7 +4,7 @@ import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
 import { toast } from './ui/Toast'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 
@@ -165,11 +165,10 @@ export default function RoomDetailPanel() {
   )
 
   return (
-    <Panel
+    <SelectionPanel
       title={title}
       onClose={() => selectRoom(null)}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       {!valid && (
         <div style={{
@@ -380,6 +379,6 @@ export default function RoomDetailPanel() {
           </Button>
         </div>
       </div>
-    </Panel>
+    </SelectionPanel>
   )
 }

@@ -103,7 +103,11 @@ export const useStore = create((set, get) => ({
   pendingWallIds:  [],
   draftOpening:    null,
 
-  unit:           'ft',
+  // Default display unit. 'ft-in' targets Indian residential construction
+  // (engineers think 10'-6" not 10.5 ft). Existing projects whose autosave
+  // restored an explicit preference keep it; this only governs first load
+  // on a new browser / fresh state.
+  unit:           'ft-in',
   showDimensions: false,
   layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
 
@@ -342,7 +346,15 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  selectWall(wallId) { set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null }) },
+  selectWall(wallId) {
+    // BUG 3 defensive guard — preserve an active opening selection when the
+    // wall click resolves to the SAME wall that owns the opening. Prevents
+    // the canvas opening-hit-target → wall-group click chain from clearing
+    // selectedOpening between mousedown (opening) and click (wall).
+    const cur = get().selectedOpening
+    if (cur && wallId && cur.wallId === wallId) return
+    set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null })
+  },
   selectRoom(roomId) { set({ selectedRoomId: roomId, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null }) },
 
   // Select a single opening within its parent wall. Pass (null, null) to clear.

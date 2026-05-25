@@ -1,6 +1,6 @@
 import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Field } from './ui/Field'
 import FeetInchesInput from './ui/FeetInchesInput'
 import InchesInput from './ui/InchesInput'
@@ -59,11 +59,10 @@ export default function BulkWallPanel() {
   )
 
   return (
-    <Panel
+    <SelectionPanel
       title={title}
       onClose={cancelAction}
       width={260}
-      position={{ top: 56, left: 16 }}
       className="ui-panel--bulk"
     >
       {/* Height — stored in inches, displayed as feet */}
@@ -115,6 +114,6 @@ export default function BulkWallPanel() {
       <div style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
         Press Esc or click empty canvas to deselect
       </div>
-    </Panel>
+    </SelectionPanel>
   )
 }

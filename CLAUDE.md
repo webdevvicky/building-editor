@@ -1,5 +1,61 @@
 # Building Editor — Developer Notes
 
+## SelectionPanel primitive + click-priority fix (2026-05-25)
+
+**New primitive: `<SelectionPanel>`** (`src/components/ui/SelectionPanel.jsx`).
+Wraps `<Panel>` with locked `position: { top: 56, left: 16 }`, locked
+`zIndex: var(--z-selection-panel)` (30), and a `max-height: calc(100vh
+- 56px - 120px); overflow: hidden auto` body wrapper so tall selection
+panels never run off-screen into the LayersPanel zone at the bottom.
+
+Use `<SelectionPanel>` for every selection-driven side panel — the
+ones gated on `selectedWallId`, `selectedOpening`, `selectedColumnId`,
+`selectedBeamId`, `selectedRoomId`, `selectedStampId`, MEP device
+selections, etc. NOT for modals (settings, BBS specs, foundations),
+NOT for floating non-modal panels like LayersPanel.
+
+**Why:** LayersPanel uses `var(--z-overlay)` (50) and was rendering
+ABOVE selection panels (which had no explicit z-index → resolved to
+`auto`/0). The Add-door button at the bottom of OpeningPanel got
+covered. New `--z-selection-panel: 30` token sits between
+`--z-panel` (10) and `--z-overlay` (50). Selection panels now win the
+z-fight against LayersPanel, AND the max-height cap means they don't
+visually extend into LayersPanel's footprint even on short viewports.
+
+Panels migrated in one pass: OpeningPanel, OpeningDetailPanel,
+RoomPanel, RoomDetailPanel, ColumnPanel, BeamPanel, StampPanel,
+BulkWallPanel, PlumbingFixturePanel, ElectricalPointPanel, HvacPanel,
+FirePanel, ElvPanel. Adding a new selection panel = use
+`<SelectionPanel>` and don't pass `position` or `zIndex`.
+
+---
+
+## Opening-click priority (canvas hit-test fix)
+
+Canvas opening hit-target sits inside the wall `<g>` group. The
+opening uses `onMouseDown` for immediate selection feedback; the wall
+uses `onClick`. `stopPropagation()` on **mousedown** does NOT prevent
+the synthesized **click** event from bubbling to the wall — they're
+two independent React event chains. Result: clicking an opening was
+selecting it (mousedown), then `selectWall` was clearing it (click).
+
+**Fix shipped in two layers:**
+1. **Canvas opening hit-target** gets BOTH `onMouseDown` (existing,
+   does the selection) AND `onClick={e => e.stopPropagation()}` (new,
+   prevents the synthesized click from reaching the wall).
+2. **`selectWall` defensive guard** in `store.js`: when called with
+   the same wallId as the currently-selected opening's parent wall,
+   `selectWall` is a no-op. Belt-and-suspenders protection against
+   any future code path that calls `selectWall(parentWallId)` while
+   an opening on that wall is active.
+
+When adding a new hit-target inside a parent `<g>`, follow the same
+pattern: both `onMouseDown` + `onClick` stopPropagation. Or move the
+parent handler to `onMouseDown` too — pick one event for the whole
+canvas hit-test layer.
+
+---
+
 ## Feet-Inches Display Mode (2026-05-25)
 
 Indian construction engineers think in feet-inches (`10'-6"`, `9"`) not

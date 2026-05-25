@@ -104,12 +104,13 @@
   --weight-bold:     700;
 
   /* ---------- Z-index ---------- */
-  --z-base:    1;
-  --z-panel:   10;
-  --z-overlay: 50;
-  --z-modal:   100;
-  --z-dialog:  200;
-  --z-toast:   300;
+  --z-base:            1;
+  --z-panel:           10;
+  --z-selection-panel: 30;   /* selection-driven panels above LayersPanel */
+  --z-overlay:         50;
+  --z-modal:           100;
+  --z-dialog:          200;
+  --z-toast:           300;
 
   /* ---------- Motion: subtle only ---------- */
   --motion-fast:   100ms;

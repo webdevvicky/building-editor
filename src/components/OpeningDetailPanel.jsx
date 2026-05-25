@@ -13,7 +13,7 @@
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { GRID_IN } from '../geometry'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 import FeetInchesInput from './ui/FeetInchesInput'
@@ -93,11 +93,10 @@ export default function OpeningDetailPanel() {
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (
-    <Panel
+    <SelectionPanel
       title={isDoor ? 'Door' : 'Window'}
       onClose={() => selectOpening(null, null)}
       width={280}
-      position={{ top: 56, left: 16 }}
     >
       {/* Type switcher */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
@@ -249,6 +248,6 @@ export default function OpeningDetailPanel() {
           Delete {isDoor ? 'door' : 'window'}
         </Button>
       </div>
-    </Panel>
+    </SelectionPanel>
   )
 }

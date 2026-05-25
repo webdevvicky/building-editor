@@ -4,7 +4,7 @@ import { getColumnDimLabel } from '../lib/columnShapes'
 import { resolveColumnReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
-import { Panel } from './ui/Panel'
+import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 
@@ -77,11 +77,10 @@ export default function ColumnPanel() {
   }
 
   return (
-    <Panel
+    <SelectionPanel
       title="Column"
       onClose={() => selectColumn(null)}
       width={260}
-      position={{ top: 56, left: 16 }}
     >
       <div style={{ marginBottom: 'var(--space-2)' }}>
         <Button variant="danger" size="sm" onClick={handleDelete}>Delete</Button>
@@ -240,6 +239,6 @@ export default function ColumnPanel() {
           </div>
         )
       })()}
-    </Panel>
+    </SelectionPanel>
   )
 }
