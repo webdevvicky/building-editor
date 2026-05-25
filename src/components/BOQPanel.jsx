@@ -3,7 +3,9 @@ import { useStore } from '../store'
 import { MATERIAL_LIBRARY } from '../materials'
 import {
   explainWallArea, explainFlooring,
-  explainPlasterWalls, explainPlasterCeiling,
+  explainPlasterWalls,
+  explainPlasterWallsInternal, explainPlasterWallsExternal,
+  explainPlasterCeiling,
   explainPaintWalls, explainPaintCeiling,
   explainWaterproofing, explainRoofing,
   explainUnits, explainCement, explainSand, explainAdhesive,
@@ -63,8 +65,10 @@ function r2(n) { return Math.round(n * 100) / 100 }
 const EXACT_HANDLERS = {
   wallArea:       s => explainWallArea(s),
   flooring:       s => explainFlooring(s),
-  plasterWalls:   s => explainPlasterWalls(s),
-  plasterCeiling: s => explainPlasterCeiling(s),
+  plasterWalls:         s => explainPlasterWalls(s),         // legacy id, kept for safety
+  plasterWallsInternal: s => explainPlasterWallsInternal(s),
+  plasterWallsExternal: s => explainPlasterWallsExternal(s),
+  plasterCeiling:       s => explainPlasterCeiling(s),
   paintWalls:     s => explainPaintWalls(s),
   paintCeiling:   s => explainPaintCeiling(s),
   waterproofing:  s => explainWaterproofing(s),

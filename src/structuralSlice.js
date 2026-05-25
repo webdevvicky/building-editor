@@ -85,7 +85,8 @@ export const DEFAULT_PROJECT_SETTINGS = {
   mortarRatio: '1:6',
   wastagePercent: 5,
   plasterThicknessMm: { internal: 12, ceiling: 10, external: 15 },  // legacy; superseded by defaultPlasterSystemId
-  defaultPlasterSystemId: DEFAULT_PLASTER_SYSTEM_ID,
+  defaultPlasterSystemId:         DEFAULT_PLASTER_SYSTEM_ID,
+  defaultExternalPlasterSystemId: 'CEMENT_SAND_EXTERNAL',
 
   // Floor list — multi-floor expansion lives in floors[]. Phase 1.9 adds the
   // floor switcher UI. heights{} below is retained as the legacy single-floor

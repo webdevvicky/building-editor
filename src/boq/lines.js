@@ -72,9 +72,18 @@ export function getBoqLines(state, rates, opts = {}) {
   }
 
   // ── 1. Finishes (room-flag-gated areas) ───────────────────────────────
-  push({ id: 'finishes_flooring',        category: 'finishes', label: 'Flooring',          qty: state.getTotalFlooringArea(),       unit: 'ft²', rateKey: 'flooring',       formulaId: 'flooring' })
-  push({ id: 'finishes_plaster_walls',   category: 'finishes', label: 'Plaster (walls)',   qty: state.getTotalWallArea(),           unit: 'ft²', rateKey: 'plasterWalls',   formulaId: 'plasterWalls' })
-  push({ id: 'finishes_plaster_ceiling', category: 'finishes', label: 'Plaster (ceiling)', qty: state.getTotalCeilingPlasterArea(), unit: 'ft²', rateKey: 'plasterCeiling', formulaId: 'plasterCeiling' })
+  // Plaster split per Indian residential BOQ practice:
+  //   - "Plaster (internal walls + columns)" — inner faces of every wall
+  //     (partitions counted twice = both rooms plaster their side) plus
+  //     every column's perimeter × exposed height. 12 mm cement-sand mix.
+  //   - "Plaster (external walls)" — outer faces of external walls only.
+  //     15 mm cement-sand mix (weatherproof).
+  //   Ceiling unchanged. See src/quantities/plaster.js ROOM_FACE_ACCUMULATION_V2.
+  const plasterQ = computePlasterQuantities(state)
+  push({ id: 'finishes_flooring',                 category: 'finishes', label: 'Flooring',                            qty: state.getTotalFlooringArea(),       unit: 'ft²', rateKey: 'flooring',              formulaId: 'flooring' })
+  push({ id: 'finishes_plaster_walls_internal',   category: 'finishes', label: 'Plaster (internal walls + columns)',  qty: plasterQ.totals.internalWallsAndColumnsFt2, unit: 'ft²', rateKey: 'plasterWallsInternal', formulaId: 'plasterWallsInternal' })
+  push({ id: 'finishes_plaster_walls_external',   category: 'finishes', label: 'Plaster (external walls)',            qty: plasterQ.totals.externalWallsFt2,           unit: 'ft²', rateKey: 'plasterWallsExternal', formulaId: 'plasterWallsExternal' })
+  push({ id: 'finishes_plaster_ceiling',          category: 'finishes', label: 'Plaster (ceiling)',                   qty: state.getTotalCeilingPlasterArea(), unit: 'ft²', rateKey: 'plasterCeiling',        formulaId: 'plasterCeiling' })
   push({ id: 'finishes_paint_walls',     category: 'finishes', label: 'Paint (walls)',     qty: state.getTotalPaintWallsArea(),     unit: 'ft²', rateKey: 'paintWalls',     formulaId: 'paintWalls' })
   push({ id: 'finishes_paint_ceiling',   category: 'finishes', label: 'Paint (ceiling)',   qty: state.getTotalPaintCeilingArea(),   unit: 'ft²', rateKey: 'paintCeiling',   formulaId: 'paintCeiling' })
   push({ id: 'finishes_waterproofing',   category: 'finishes', label: 'Waterproofing',     qty: state.getTotalWaterproofingArea(),  unit: 'ft²', rateKey: 'waterproofing',  formulaId: 'waterproofing' })
@@ -291,7 +300,8 @@ export function getBoqLines(state, rates, opts = {}) {
   }
 
   // ── 10. Plaster materials by system (Phase 1.6f) ──────────────────────
-  const plasterQ = computePlasterQuantities(state)
+  // Reuses the same plasterQ computed at the top of the finishes section
+  // (line ~80). One compute, two consumers (visible totals + material rows).
   for (const sys of Object.values(plasterQ.bySystem)) {
     if (sys.kind === PLASTER_KIND.CEMENT_SAND) {
       push({ id: `plaster_${sys.systemId}_cement`, category: 'plaster', label: `Plaster ${sys.label} — Cement`, qty: sys.cementBags, unit: 'bags', rateKey: `plaster_${sys.systemId}_cement`, formulaId: `plaster_${sys.systemId}`, meta: { plasterSystemId: sys.systemId } })

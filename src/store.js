@@ -974,7 +974,9 @@ export const useStore = create((set, get) => ({
         // Layer 5 migration: inject rccSpecs default for saves without it.
         const rccSpecs = psRest.rccSpecs ?? DEFAULT_PROJECT_SETTINGS.rccSpecs
         // Stage 0 T2 migration: inject defaultPlasterSystemId for saves without it.
-        const defaultPlasterSystemId = psRest.defaultPlasterSystemId ?? DEFAULT_PROJECT_SETTINGS.defaultPlasterSystemId
+        const defaultPlasterSystemId         = psRest.defaultPlasterSystemId         ?? DEFAULT_PROJECT_SETTINGS.defaultPlasterSystemId
+        // Plaster split (v2): inject defaultExternalPlasterSystemId for saves without it.
+        const defaultExternalPlasterSystemId = psRest.defaultExternalPlasterSystemId ?? DEFAULT_PROJECT_SETTINGS.defaultExternalPlasterSystemId
         // Stage 0 T1 migration: synthesize floors[] from legacy heights if absent.
         const floors = psRest.floors ?? [
           { id: DEFAULT_FLOOR_ID, label: 'Floor 1', sequence: 0,
@@ -982,7 +984,7 @@ export const useStore = create((set, get) => ({
             floorHeightFt:  psRest.heights?.floorHeightFt  ?? 10,
             meta: null },
         ]
-        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs, defaultPlasterSystemId, floors }
+        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs, defaultPlasterSystemId, defaultExternalPlasterSystemId, floors }
       })(),
       columns:     migratedColumns,
       beams:       migratedBeams,

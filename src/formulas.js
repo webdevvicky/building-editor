@@ -1,5 +1,6 @@
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from './geometry'
+import { computePlasterQuantities } from './quantities/plaster'
 
 export * from './formulas/structuralFormulas'
 
@@ -86,22 +87,52 @@ export function explainFlooring(state) {
   }
 }
 
-export function explainPlasterWalls({ walls, nodes }) {
-  const nonVirtual = Object.values(walls).filter(w => !w.isVirtual)
-  let grossFt2 = 0, openingFt2 = 0
-  for (const w of nonVirtual) {
-    grossFt2   += wallLengthFt(w, nodes) * ((w.height ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN)
-    openingFt2 += wallOpeningAreaFt2(w)
+// Backward-compat alias — some legacy code paths may still call this.
+// Forwards to the internal-walls breakdown.
+export function explainPlasterWalls(state) {
+  return explainPlasterWallsInternal(state)
+}
+
+export function explainPlasterWallsInternal(state) {
+  // Lazy import keeps formula module dependency-light + avoids circular refs.
+  const q = computePlasterQuantities(state)
+  const m = q._meta
+  const steps = []
+  for (const r of m.perRoom) {
+    if (r.wallSumFt2 === 0) continue
+    steps.push({ label: r.name || r.roomId.slice(0, 6), value: `${r.wallSumFt2} ft²` })
   }
+  if (m.perColumn.length > 0) {
+    steps.push({ label: `Columns (${m.perColumn.length})`, value: `${m.totalsByFace.columnFaces} ft²` })
+  }
+  steps.push({
+    label: 'Total (inner faces + columns)',
+    value: `${q.totals.internalWallsAndColumnsFt2} ft²`,
+    bold: true,
+  })
   return {
-    title: 'Plaster (Walls)',
-    steps: [
-      { label: 'Non-virtual walls',              value: String(nonVirtual.length) },
-      { label: 'Gross area (Σ length × height)', value: `${r2(grossFt2)} ft²` },
-      { label: 'Openings deducted',              value: `${r2(openingFt2)} ft²` },
-      { label: 'Net area (one face per wall)',    value: `${r2(Math.max(0, grossFt2 - openingFt2))} ft²`, bold: true },
-    ],
-    note: 'Currently computed across all walls (ungated). Per-room wall plaster finish flag deferred to Phase 1.5 — will be gated by room.finishes.wallPlaster when implemented.',
+    title: 'Plaster (internal walls + columns)',
+    steps,
+    note: `${m.algorithm}. Partition walls count both inner faces (both rooms plaster their side); external walls count their inner face here (outer face goes to "Plaster (external walls)"). Columns add perimeter × per-floor exposed height. Openings deducted per face by getWallArea.`,
+  }
+}
+
+export function explainPlasterWallsExternal(state) {
+  const q = computePlasterQuantities(state)
+  const m = q._meta
+  const steps = m.perExternalWall.map(w => ({
+    label: `Wall ${w.wallId.slice(0, 6)} (${w.lengthFt}×${w.heightFt} ft)`,
+    value: `${w.netOuterAreaFt2} ft²`,
+  }))
+  steps.push({
+    label: 'Total (outer faces)',
+    value: `${q.totals.externalWallsFt2} ft²`,
+    bold: true,
+  })
+  return {
+    title: 'Plaster (external walls)',
+    steps,
+    note: `${m.algorithm}. Outer face of every external wall (adjacency = 1). Openings deducted once per wall. 15 mm cement-sand mix per catalog default.`,
   }
 }
 
