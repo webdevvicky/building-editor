@@ -3,6 +3,7 @@ import Toolbar from './components/Toolbar'
 import RoomPanel from './components/RoomPanel'
 import BOQPanel from './components/BOQPanel'
 import OpeningPanel from './components/OpeningPanel'
+import OpeningDetailPanel from './components/OpeningDetailPanel'
 import StampPanel from './components/StampPanel'
 import BulkWallPanel from './components/BulkWallPanel'
 import RoomDetailPanel from './components/RoomDetailPanel'
@@ -39,6 +40,7 @@ export default function App() {
         <FloorSwitcher />
         <RoomPanel />
         <OpeningPanel />
+        <OpeningDetailPanel />
         <StampPanel />
         <BulkWallPanel />
         <RoomDetailPanel />

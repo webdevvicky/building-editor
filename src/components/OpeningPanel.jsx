@@ -43,6 +43,7 @@ export default function OpeningPanel() {
   const classifyWallBeamFlags = useStore(s => s.classifyWallBeamFlags)
   const setOpeningSunshade  = useStore(s => s.setOpeningSunshade)
   const selectWall          = useStore(s => s.selectWall)
+  const selectOpening       = useStore(s => s.selectOpening)
 
   const [type,   setType]   = useState('door')
   const [width,  setWidth]  = useState(3)
@@ -357,6 +358,9 @@ export default function OpeningPanel() {
       </div>
 
       {/* Opening list */}
+      {/* Existing openings — clickable rows that open OpeningDetailPanel.
+          Per-opening edit / delete now lives in that detail panel; this
+          list is a navigation overview only. */}
       <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 'var(--space-3)' }}>
         {openings.length === 0 && (
           <div style={{
@@ -366,58 +370,37 @@ export default function OpeningPanel() {
           }}>No openings</div>
         )}
         {openings.map(op => (
-          <div key={op.id} style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: 'var(--space-1) 0',
-            borderBottom: '1px solid var(--color-bg-muted)',
-          }}>
-            <div>
-              <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-                {op.type === 'window' ? '▭ Window' : '▮ Door'}{' '}
-                {Math.round(op.width/GRID_IN*10)/10}×{Math.round(op.height/GRID_IN*10)/10} ft @ {Math.round(op.offset/GRID_IN*10)/10} ft
-              </span>
-              {/* Flip swing button for existing doors */}
-              {op.type === 'door' && (
-                <span style={{ marginLeft: 'var(--space-2)' }}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setOpeningOrient(selectedWallId, op.id, ((op.orient ?? 0) + 1) % 4)}
-                    title={`Swing: ${ORIENT_TIPS[(op.orient ?? 0)]}\nClick to flip`}
-                  >
-                    {ORIENT_LABELS[op.orient ?? 0]}
-                  </Button>
-                </span>
-              )}
-              {/* Sunshade toggle for existing windows */}
-              {op.type === 'window' && (
-                <label style={{
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  marginLeft: 'var(--space-2)',
-                }}>
-                  <input type="checkbox"
-                    checked={op.hasSunshade ?? false}
-                    onChange={e => setOpeningSunshade(selectedWallId, op.id, e.target.checked)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  shade
-                </label>
-              )}
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => removeOpening(selectedWallId, op.id)}
-              title="Remove opening"
-            >
-              ×
-            </Button>
-          </div>
+          <button
+            key={op.id}
+            type="button"
+            onClick={() => selectOpening(selectedWallId, op.id)}
+            title="Click to edit or delete this opening"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              width: '100%',
+              padding: 'var(--space-1) var(--space-2)',
+              borderBottom: '1px solid var(--color-bg-muted)',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              textAlign: 'left',
+              transition: 'background var(--motion-fast) var(--ease-out)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+              {op.type === 'window' ? '▭ Window' : '▮ Door'}{' '}
+              {Math.round(op.width/GRID_IN*10)/10}×{Math.round(op.height/GRID_IN*10)/10} ft @ {Math.round(op.offset/GRID_IN*10)/10} ft
+            </span>
+            <span style={{
+              color: 'var(--color-text-muted)',
+              fontSize: 'var(--text-xs)',
+            }}>Edit →</span>
+          </button>
         ))}
       </div>
     </Panel>

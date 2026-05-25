@@ -150,6 +150,8 @@ export default function Canvas() {
   const drawStartId    = useStore(s => s.drawStartId)
   const selectedWallId  = useStore(s => s.selectedWallId)
   const selectedWallIds = useStore(s => s.selectedWallIds)
+  const selectedOpening = useStore(s => s.selectedOpening)
+  const selectOpening   = useStore(s => s.selectOpening)
   const selectedStampId = useStore(s => s.selectedStampId)
   const pendingWallIds = useStore(s => s.pendingWallIds)
   const drawVirtual    = useStore(s => s.drawVirtual)
@@ -948,6 +950,46 @@ export default function Canvas() {
                   )}
                 </>
               })()}
+              {/* Per-opening hit targets — clickable when select tool active.
+                  Renders a transparent fat stroke over each opening's gap
+                  region so users can click the door/window directly on the
+                  canvas. Inside the wall <g>, so floor-ghost opacity applies. */}
+              {activeTool === 'select' && fWall.pointerEvents !== 'none' &&
+                (wall.openings || []).map(op => {
+                  if (totalPx === 0) return null
+                  const gStart = Math.min(op.offset * PX_PER_INCH, totalPx)
+                  const gEnd   = Math.min(gStart + op.width * PX_PER_INCH, totalPx)
+                  if (gEnd - gStart <= 0) return null
+                  const x1 = ax + gStart * ux
+                  const y1 = ay + gStart * uy
+                  const x2 = ax + gEnd   * ux
+                  const y2 = ay + gEnd   * uy
+                  const isSel = selectedOpening?.wallId === wall.id &&
+                                selectedOpening?.openingId === op.id
+                  return (
+                    <g key={`opening-hit-${op.id}`}>
+                      <line x1={x1} y1={y1} x2={x2} y2={y2}
+                        stroke="transparent" strokeWidth={14}
+                        onMouseDown={e => {
+                          e.stopPropagation()
+                          selectOpening(wall.id, op.id)
+                        }}
+                        style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+                      />
+                      {isSel && (
+                        <line
+                          key={`pulse-opening-${op.id}`}
+                          className="canvas-selection-pulse"
+                          x1={x1} y1={y1} x2={x2} y2={y2}
+                          stroke="var(--color-primary)" strokeWidth={10}
+                          strokeLinecap="round"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                      )}
+                    </g>
+                  )
+                })
+              }
               {/* Door swing arcs — computed in SVG-group space (Y-flipped ux/uy correct for screen) */}
               {(wall.openings || []).filter(op => op.type === 'door').map(op => {
                 if (totalPx === 0) return null

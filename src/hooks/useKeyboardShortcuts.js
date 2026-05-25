@@ -158,7 +158,21 @@ async function handleDelete() {
   const s = useStore.getState()
   let entityType, entityId, entityLabel, deleteFn
 
-  if (s.selectedWallId) {
+  // Opening selection takes priority — a door/window is a sub-entity of a
+  // wall, so when the user has explicitly clicked one we delete the opening,
+  // not the parent wall.
+  if (s.selectedOpening?.wallId && s.selectedOpening?.openingId) {
+    const { wallId, openingId } = s.selectedOpening
+    const wall = s.walls?.[wallId]
+    const op   = (wall?.openings ?? []).find(o => o.id === openingId)
+    entityType  = op?.type === 'window' ? 'window' : 'door'
+    entityId    = openingId
+    entityLabel = entityType
+    deleteFn = () => {
+      useStore.getState().removeOpening?.(wallId, openingId)
+      useStore.getState().selectOpening?.(null, null)
+    }
+  } else if (s.selectedWallId) {
     entityType = 'wall'
     entityId = s.selectedWallId
     entityLabel = 'wall'

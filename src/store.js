@@ -72,6 +72,10 @@ export const useStore = create((set, get) => ({
   selectedWallIds: [],
   selectedStampId: null,
   selectedRoomId:  null,
+  // Selected opening (door/window) — { wallId, openingId } | null.
+  // Openings live inside walls; we carry both ids so the detail panel can
+  // resolve the opening without iterating every wall's openings[] array.
+  selectedOpening: null,
   pendingWallIds:  [],
   draftOpening:    null,
 
@@ -184,7 +188,7 @@ export const useStore = create((set, get) => ({
   // ── Tools ─────────────────────────────────────────────────────────────
 
   setTool(tool) {
-    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [], draftOpening: null })
+    set({ activeTool: tool, drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, selectedOpening: null, pendingWallIds: [], draftOpening: null })
   },
 
   toggleDrawVirtual()    { set(s => ({ drawVirtual: !s.drawVirtual })) },
@@ -309,12 +313,33 @@ export const useStore = create((set, get) => ({
       Object.values(s.rooms).forEach(r => {
         rooms[r.id] = { ...r, wallIds: r.wallIds.filter(id => id !== wallId) }
       })
-      return { walls, nodes, rooms, selectedWallId: null }
+      const clearOpening = s.selectedOpening?.wallId === wallId
+      return { walls, nodes, rooms, selectedWallId: null, ...(clearOpening ? { selectedOpening: null } : {}) }
     })
   },
 
-  selectWall(wallId) { set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedBeamId: null, draftOpening: null }) },
-  selectRoom(roomId) { set({ selectedRoomId: roomId, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, draftOpening: null }) },
+  selectWall(wallId) { set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null }) },
+  selectRoom(roomId) { set({ selectedRoomId: roomId, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null }) },
+
+  // Select a single opening within its parent wall. Pass (null, null) to clear.
+  // Clears every other entity selection so panels remain mutually exclusive.
+  selectOpening(wallId, openingId) {
+    if (!wallId || !openingId) {
+      set({ selectedOpening: null })
+      return
+    }
+    set({
+      selectedOpening: { wallId, openingId },
+      selectedWallId: null,
+      selectedWallIds: [],
+      selectedStampId: null,
+      selectedRoomId: null,
+      selectedColumnId: null,
+      selectedFoundationId: null,
+      selectedBeamId: null,
+      draftOpening: null,
+    })
+  },
 
   toggleWallMultiSelect(wallId) {
     set(s => {
@@ -445,7 +470,54 @@ export const useStore = create((set, get) => ({
     set(s => {
       const wall = s.walls[wallId]
       if (!wall) return {}
-      return { walls: { ...s.walls, [wallId]: { ...wall, openings: wall.openings.filter(o => o.id !== openingId) } } }
+      const wasSelected =
+        s.selectedOpening?.wallId === wallId &&
+        s.selectedOpening?.openingId === openingId
+      return {
+        walls: { ...s.walls, [wallId]: { ...wall, openings: wall.openings.filter(o => o.id !== openingId) } },
+        ...(wasSelected ? { selectedOpening: null } : {}),
+      }
+    })
+  },
+
+  // Partial update on one opening within its parent wall's openings[] array.
+  // When `fields.type` flips, normalize role-specific fields so the opening
+  // keeps a clean shape:
+  //   door → window: hasSunshade=false, orient cleared
+  //   window → door: orient=0,         hasSunshade cleared
+  // Clamps width/offset to (wallLengthIn - offset) and (wallLengthIn - width)
+  // respectively. Height clamped to [12in, 144in].
+  updateOpening(wallId, openingId, fields) {
+    get()._save()
+    set(s => {
+      const wall = s.walls[wallId]
+      if (!wall) return {}
+      const current = (wall.openings || []).find(o => o.id === openingId)
+      if (!current) return {}
+      // Wall length in inches for clamping.
+      const n1 = s.nodes[wall.n1], n2 = s.nodes[wall.n2]
+      const wallLenIn = (n1 && n2) ? Math.hypot(n2.x - n1.x, n2.y - n1.y) : 0
+      let next = { ...current, ...fields }
+      // Type-swap normalization
+      if (fields.type && fields.type !== current.type) {
+        if (fields.type === 'window') {
+          next.hasSunshade = next.hasSunshade ?? (s.projectSettings?.sunshadeSettings?.enabled ?? true)
+          next.orient = 0
+        } else {
+          next.hasSunshade = false
+          next.orient = next.orient ?? 0
+        }
+      }
+      // Clamp dimensions
+      if (typeof next.width === 'number')  next.width  = Math.max(12, Math.min(next.width,  Math.max(12, wallLenIn - (next.offset ?? 0))))
+      if (typeof next.height === 'number') next.height = Math.max(12, Math.min(next.height, 144))
+      if (typeof next.offset === 'number') next.offset = Math.max(0,  Math.min(next.offset, Math.max(0, wallLenIn - (next.width ?? 0))))
+      return {
+        walls: { ...s.walls, [wallId]: {
+          ...wall,
+          openings: (wall.openings || []).map(o => o.id === openingId ? next : o),
+        } },
+      }
     })
   },
 
@@ -585,7 +657,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  selectStamp(stampId) { set({ selectedStampId: stampId, selectedWallId: null, selectedBeamId: null }) },
+  selectStamp(stampId) { set({ selectedStampId: stampId, selectedWallId: null, selectedBeamId: null, selectedOpening: null }) },
 
   // ── Rooms ─────────────────────────────────────────────────────────────
 
