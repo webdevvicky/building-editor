@@ -41,6 +41,25 @@ primitive in `src/components/ui/Dropdown.jsx`. Single-source tool
 registry in `src/components/toolbarConfig.js`. See "Toolbar conventions"
 section below.
 
+Door / window edit + delete (commit `f0b83d0`, 2026-05-18): doors and
+windows are now first-class selectable entities. Click any opening on
+the canvas → `OpeningDetailPanel` opens with W / H / offset / type
+switcher / swing-or-sunshade / Delete button. New `selectedOpening`
+store state + `selectOpening` / `updateOpening` actions. Existing
+`OpeningPanel` per-opening list rows became clickable. Del/Backspace
+shortcut deletes the selected opening. See "Architectural reminders"
+below.
+
+Plaster quantity split (commit `f5b4655`, 2026-05-19): visible "Plaster
+(walls)" line replaced with two lines — "Plaster (internal walls +
+columns)" (12 mm cement-sand) and "Plaster (external walls)" (15 mm
+cement-sand). Internal counts partition walls on both inner faces
+(per-room iteration) plus every column's perimeter × per-floor exposed
+height. External counts each external wall's outer face. New
+`ROOM_FACE_ACCUMULATION_V2` algorithm in
+`src/quantities/plaster.js`. Closes the 25% gap vs Indian residential
+reference BOQ. See "Plaster Quantities (v2)" section below.
+
 ERP integration (replace static MATERIAL_LIBRARY + MEP catalogs + add live
 rate catalog) is the next major work item; foundation for it is in place
 via the canonical `getBoqLines()` pipeline and the versioned
@@ -1498,9 +1517,146 @@ Deferred categories (Phase 2.3 / 2.4): `solar_pv`, `solar_wiring_dc`,
 - BOQ rendering primitives (`BoqRow`, `SectionHeader`, etc.) — those live
   in `src/components/boq/BoqRow.jsx`. MEP sections consume them.
 
-## Architectural reminders
+## Plaster Quantities (v2 — ROOM_FACE_ACCUMULATION_V2)
 
-- `getValidRoomIds()` is the filter for ALL finish-gated and floor area totals. Never iterate `Object.keys(rooms)` directly for BOQ.
+Plaster math lives in **`src/quantities/plaster.js::computePlasterQuantities`**.
+Two-pass topology model matches Indian residential BOQ practice.
+
+### Two-pass model (canonical)
+
+```
+PASS 1 — Room iteration (Internal bucket):
+  For each valid room (getValidRoomIds):
+    For each wallId in room.wallIds:
+      SKIP if wall.isVirtual || wall.isPlot
+      accumulate state.getWallArea(wallId)   // single-face, openings-deducted
+    Plus room.finishes.ceilingPlaster → state.getRoomArea(roomId)
+  Plus per-column: getColumnPerimeterFt × per-floor exposed height
+    (NOT structural state.getColumnHeightFt which includes plinth + slab).
+
+PASS 2 — Wall iteration (External bucket):
+  For each wall in state.walls:
+    SKIP if isVirtual || isPlot
+    SKIP if !isExternalWall(state, wallId)
+    accumulate state.getWallArea(wallId)     // interpreted as OUTER face
+```
+
+### Face ownership matrix (no double-count by construction)
+
+| Wall kind | Inner face(s) | Outer face | Bucket |
+|---|---|---|---|
+| **External** (adj=1) | counted ×1 in Pass 1 (one parent room) | counted ×1 in Pass 2 | inner→Internal; outer→External |
+| **Partition** (adj=2) | counted ×2 in Pass 1 (each parent room) | none | both→Internal |
+| **Plot** | — | — | EXCLUDED |
+| **Virtual** | — | — | EXCLUDED |
+| **Column** | perimeter × exposed-height | — | Internal (default system) |
+| **Ceiling** (room flag) | floor area | — | Internal (room's system) |
+
+Pass 2 (wall iteration) skips `!isExternalWall` so partitions never
+enter the External bucket. Pass 1 (room iteration) only visits walls
+in `room.wallIds`, which never contains an outer-face entry, so outer
+faces never enter the Internal bucket.
+
+### Opening subtraction contract
+
+`getWallArea(wallId)` deducts opening area once per face. The
+contract falls out naturally from the per-face iteration:
+
+- **Partition opening:** deducted twice (each parent room's
+  `getWallArea` call), both inside Internal bucket.
+- **External opening:** deducted once inside Internal (room's inner
+  face) + once inside External (outer face) = 2× total across the
+  two BOQ lines.
+
+The implementation **never accounts for openings explicitly** — it
+just calls `getWallArea` once per face it intends to count.
+
+### Wall height resolution
+
+| Quantity | Height source |
+|---|---|
+| Wall plaster (inner + outer) | `wall.height` (existing, via `getWallArea`) — FFL to slab bottom |
+| **Column plaster** | per-floor `floor.floorHeightFt` of `column.baseFloorId`, NOT the structural multi-span `state.getColumnHeightFt(col)` |
+| Ceiling | `getRoomArea(roomId)` |
+
+Multi-storey columns are plastered per floor — each floor's column
+contribution uses that floor's exposed height. `boq/scope.js`
+floor-scope filters `state.columns` per floor, so the per-floor sum
+emerges naturally from the existing scope wrapper.
+
+### BOQ output (visible finishes lines)
+
+```
+finishes_plaster_walls_internal  → "Plaster (internal walls + columns)"
+                                    rateKey: plasterWallsInternal
+                                    qty = plasterQ.totals.internalWallsAndColumnsFt2
+finishes_plaster_walls_external  → "Plaster (external walls)"
+                                    rateKey: plasterWallsExternal
+                                    qty = plasterQ.totals.externalWallsFt2
+finishes_plaster_ceiling         → "Plaster (ceiling)" (unchanged)
+```
+
+`plasterQ` is computed ONCE per `getBoqLines()` call near the top of
+the finishes section, and reused for the per-system materials lines
+in the plaster section (cement bags + sand m³ / gypsum kg / POP kg).
+Single compute, two consumers.
+
+### `_meta` payload (debug + popovers + audit)
+
+Every return from `computePlasterQuantities` carries a `_meta` block:
+
+```js
+_meta: {
+  algorithm:          'ROOM_FACE_ACCUMULATION_V2',
+  calculationVersion: '<date-string>',
+  floorId:            <scoped floor or null>,
+  totalsByFace: {
+    partitionInnerFaces, externalInnerFaces,
+    externalOuterFaces,  columnFaces, ceilingFaces,
+  },
+  perRoom:         [{ roomId, plasterSystemId, wallContributions[{ wallId, wallType:'EXTERNAL'|'PARTITION', faceAreaFt2, openingDeductionFt2 }], wallSumFt2, ceilingFt2, isCeilingPlastered }],
+  perColumn:       [{ columnId, columnTypeId, perimeterFt, exposedHeightFt, floorId, areaFt2, plasterSystemId }],
+  perExternalWall: [{ wallId, lengthFt, heightFt, grossOuterAreaFt2, openings[], netOuterAreaFt2, plasterSystemId }],
+  excluded:        { virtualWalls, plotWalls, invalidRooms },
+  warnings:        [{ code, columnId?, message }],
+}
+```
+
+Two version-tag fields by design — `algorithm` is a stable algorithm
+identifier (changes only when the math model changes); `calculationVersion`
+is a date-string that ticks every release. Comparing old PDFs vs
+regenerated BOQs: `algorithm` explains WHY numbers differ;
+`calculationVersion` explains WHEN they were regenerated.
+
+**`_meta` is NEVER exported to PDF / Excel / CSV** — it's an internal
+introspection aid consumed by formula popovers and DevTools.
+
+### Mandatory invariant (locked in the function header)
+
+> Quantity engines MUST NEVER consume rendered or visual geometry.
+> Only topology APIs and canonical state geometry are allowed.
+> No SVG-derived lengths, no overlay offsets, no visual wall thickness
+> adjustments. Width × height × adjacency math from the store only.
+
+This applies to every quantity aggregator under `src/quantities/`,
+not just plaster.
+
+### Adding / changing plaster rules
+
+- New plaster system kind (e.g. dry-lining gypsum board): add to
+  `src/specs/plasterSystems.js` with appropriate `appliesContext`
+  ('internal' / 'external'). No changes to the aggregator needed if
+  it's a cement-sand or gypsum/POP variant.
+- Different default external system: update
+  `DEFAULT_PROJECT_SETTINGS.defaultExternalPlasterSystemId` in
+  `src/structuralSlice.js` + extend the Stage 0 T2 default-injection
+  block in `store.js::loadProject` for old saves.
+- Beam side faces (downstand) — deferred Phase 2.x. Add a project
+  setting toggle + a third accumulation block in the room-iteration
+  pass that consults `getAllBeams(state)`. Documented as a TODO in
+  the function body.
+
+
 - `getTotalWallArea()` iterates the walls map directly (not room.wallIds) to avoid double-counting shared walls. Do not change this.
 - `getTotalPaintWallsArea()` iterates per room (not the walls map) because both faces of a shared wall between two painted rooms should be counted.
 - `getMaterialQuantities()` iterates the walls map directly (same reason — each wall counted once for volume).
@@ -1558,6 +1714,9 @@ Deferred categories (Phase 2.3 / 2.4): `solar_pv`, `solar_wiring_dc`,
 - **Use UI primitives — never hand-roll.** `<Button>` for any styled button, `<Panel>` for side panels, `<Modal>` for centered overlays (backdrop + ESC + focus trap are owned by the primitive — don't reimplement), `<Field>` for label + input pairs, `<Dropdown>` + `<DropdownGroup>` + `<DropdownItem>` + `<DropdownToggle>` + `<DropdownSegmented>` for cluster menus (used by the toolbar; available to any panel that needs a flyout list). All in `src/components/ui/`.
 - **Toolbar is config-driven via `src/components/toolbarConfig.js`.** Adding a new tool = one entry in `TOOL_CLUSTERS`. `Toolbar.jsx` is purely a renderer that iterates the config and dispatches by item type (`tool` / `toggle` / `segmented` / `action`). Active-cluster detection runs through `collectToolIds(cluster)` from the same file. NEVER inline tool definitions in `Toolbar.jsx` — the registry is the single source of truth.
 - **Cross-component close events: `toolbar:close-dropdowns`** is the toolbar's equivalent of `boq:toggle`. Dispatched on every keyboard shortcut that affects tool state (see `useKeyboardShortcuts.js`) AND on every `DropdownItem` click (the primitive dispatches it before bubbling). Each open `<Dropdown>` listens and closes itself. Use this same window-event pattern for any future cross-component toggle that shouldn't reach into the store. Namespace new events under `panel:` / `toolbar:` / `boq:` so they're greppable.
+- **Plaster math lives ONLY in `src/quantities/plaster.js::computePlasterQuantities`** (algorithm tag `ROOM_FACE_ACCUMULATION_V2`). Two-pass model — room iteration → Internal bucket (partition walls counted on both inner faces, external walls on inner face, columns by perimeter × per-floor exposed height, ceiling per room); wall iteration → External bucket (each external wall's outer face). Plot + virtual walls excluded in both passes. `boq/lines.js` calls the aggregator ONCE and uses the result for both visible BOQ lines AND the per-system materials rows — never compute plaster numbers anywhere else. The legacy `state.getTotalWallArea()` is masonry-only (single-face by design); never use it for plaster. See "Plaster Quantities (v2)" section above.
+- **Quantity engines must never consume rendered or visual geometry.** Only topology APIs and canonical state geometry (walls, nodes, rooms, columns, beams, openings as stored). No SVG-derived lengths, no overlay offsets, no visual wall thickness adjustments. This invariant is documented inside `computePlasterQuantities` and applies to every aggregator under `src/quantities/` — width × height × adjacency math from the store only.
+- **Selected opening as first-class entity.** Doors and windows are clickable on the canvas — `state.selectedOpening = { wallId, openingId } | null`. `selectOpening(wallId, openingId)` action clears every other entity selection (mutually exclusive panel UX). `updateOpening(wallId, openingId, fields)` is the generic partial update with type-swap normalization (door→window clears orient + sets hasSunshade=false; window→door clears hasSunshade + sets orient=0) and clamps width/height/offset against wall length inside the action. `OpeningDetailPanel.jsx` self-mounts on `selectedOpening`; `removeOpening` auto-clears the selection when it deletes the selected opening; `deleteWall` auto-clears when the parent wall is removed. Canvas hit-targets only fire when `activeTool === 'select'` (so draw / room / etc. clicks fall through). Del/Backspace deletes opening before falling through to wall delete.
 - **No `window.alert / .confirm / .prompt` in component code.** Use `dialog.alert / .confirm / .prompt` (imperative API from `src/components/ui/Dialog.jsx`). The fallback path inside `Dialog.jsx` itself is the only allowed usage. After a destructive action with the `dialog.confirm` gate, fire `toast.action(msg, { label: 'Undo', onClick: () => undo(), duration: 5000 })`.
 - **Toolbar buttons use `lucide-react` icons exclusively.** No emoji anywhere in UI output. Active tool state via `variant="primary"` (token-driven), inactive via `variant="ghost"`. Never inline `background:` for active state.
 - **BOQ rows use the `1fr 76px 104px 90px` grid.** Rate inputs are composed `.boq-rate-input` divs with a `₹` prefix span — never bare `<input>`. Row striping via `.boq-group .boq-row:nth-of-type(even)`. Sections wrap their rows in `<div class="boq-group">` to scope the striping.
