@@ -25,8 +25,32 @@ import {
   getActiveFloorNodes,
   getActiveFloorWalls,
 } from './topology/floor.js'
+import {
+  OPENING_SUBTYPE, SUBTYPE_SOURCE,
+  VENTILATOR_MAX_HEIGHT_IN, VENTILATOR_MAX_WIDTH_IN,
+} from './constants/joinery.js'
 
 const uid = () => crypto.randomUUID()
+
+// Default opening subtype — pure heuristic by size + type. Used at creation
+// time (addOpening) and as loadProject fallback when subtype is absent.
+//
+// Doors: default INTERNAL_DOOR. Promotion to MAIN_DOOR happens when:
+//   - addOpening sees an external wall AND no other MAIN_DOOR exists on
+//     the same floor yet.
+// Windows: small openings (≤18in tall, ≤36in wide) → VENTILATOR.
+function _deriveSubtypeBySize(opening) {
+  if (opening.type === 'window') {
+    const w = opening.width  ?? 0
+    const h = opening.height ?? 0
+    if (h <= VENTILATOR_MAX_HEIGHT_IN && w <= VENTILATOR_MAX_WIDTH_IN) {
+      return OPENING_SUBTYPE.VENTILATOR
+    }
+    return OPENING_SUBTYPE.WINDOW
+  }
+  if (opening.type === 'door') return OPENING_SUBTYPE.INTERNAL_DOOR
+  return null
+}
 
 function getStampDimensionsFt(stamp) {
   const wFt = (stamp.w || 0) / 12
@@ -448,7 +472,66 @@ export const useStore = create((set, get) => ({
       if (!wall) return {}
       const sunshadeOn = s.projectSettings?.sunshadeSettings?.enabled ?? true
       const hasSunshade = type === 'window' ? sunshadeOn : false
-      return { walls: { ...s.walls, [wallId]: { ...wall, openings: [...(wall.openings || []), { id, offset, width, height, type, orient, hasSunshade }] } } }
+      // Rev 2 — subtype derivation. Size-based default; for doors, promote to
+      // MAIN_DOOR when the wall is external AND this floor has no MAIN_DOOR
+      // yet (lazy check against the current state). subtypeSource records
+      // whether the value came from the heuristic vs an explicit user pick.
+      const seed = { id, offset, width, height, type, orient, hasSunshade }
+      let subtype = _deriveSubtypeBySize(seed)
+      if (type === 'door') {
+        const adjCount = s.getWallAdjacencyCount?.() ?? {}
+        const isExternal = (adjCount[wallId] ?? 0) === 1 && !wall.isPlot && !wall.isVirtual
+        if (isExternal) {
+          const floorId = wall.floorId ?? DEFAULT_FLOOR_ID
+          let alreadyHasMain = false
+          outer: for (const w of Object.values(s.walls)) {
+            if ((w.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+            for (const o of (w.openings ?? [])) {
+              if (o.subtype === OPENING_SUBTYPE.MAIN_DOOR) { alreadyHasMain = true; break outer }
+            }
+          }
+          if (!alreadyHasMain) subtype = OPENING_SUBTYPE.MAIN_DOOR
+        }
+      }
+      const opening = { ...seed, subtype, subtypeSource: SUBTYPE_SOURCE.HEURISTIC, hasGrill: null }
+      return { walls: { ...s.walls, [wallId]: { ...wall, openings: [...(wall.openings || []), opening] } } }
+    })
+  },
+
+  // Rev 2 — explicit per-opening subtype assignment (panel-driven).
+  setOpeningSubtype(wallId, openingId, subtype) {
+    get()._save()
+    set(s => {
+      const wall = s.walls[wallId]
+      if (!wall) return {}
+      return {
+        walls: { ...s.walls, [wallId]: {
+          ...wall,
+          openings: (wall.openings || []).map(o =>
+            o.id === openingId
+              ? { ...o, subtype, subtypeSource: SUBTYPE_SOURCE.EXPLICIT }
+              : o
+          ),
+        } },
+      }
+    })
+  },
+
+  // Rev 2 — explicit per-opening grill override. null = inherit project
+  // setting (projectSettings.grills.windowGrillEnabled / mainDoorSafetyGrillEnabled).
+  setOpeningGrill(wallId, openingId, hasGrill) {
+    get()._save()
+    set(s => {
+      const wall = s.walls[wallId]
+      if (!wall) return {}
+      return {
+        walls: { ...s.walls, [wallId]: {
+          ...wall,
+          openings: (wall.openings || []).map(o =>
+            o.id === openingId ? { ...o, hasGrill } : o
+          ),
+        } },
+      }
     })
   },
 
@@ -507,6 +590,10 @@ export const useStore = create((set, get) => ({
           next.hasSunshade = false
           next.orient = next.orient ?? 0
         }
+        // Rev 2 — subtype must follow the parent type when it swaps.
+        // Reset to heuristic default for the new type; clear EXPLICIT flag.
+        next.subtype       = _deriveSubtypeBySize(next)
+        next.subtypeSource = SUBTYPE_SOURCE.HEURISTIC
       }
       // Clamp dimensions
       if (typeof next.width === 'number')  next.width  = Math.max(12, Math.min(next.width,  Math.max(12, wallLenIn - (next.offset ?? 0))))
@@ -751,6 +838,40 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // Rev 2 — per-room dado override. null = inherit project setting
+  // (projectSettings.tileDefaults.dadoHeightsFt[room.type]).
+  setRoomDado(roomId, dadoHeightFt) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, dadoHeightFt } } }
+    })
+  },
+
+  // Rev 2 — per-room kitchen counter override. null = inherit
+  // (projectSettings.kitchenCounter; lengthMode derives geometry).
+  setRoomKitchenCounter(roomId, kitchenCounter) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, kitchenCounter } } }
+    })
+  },
+
+  // Rev 2 — per-BALCONY-room handrail override.
+  // Shape: { enabled: boolean | null, heightFt: number | null } | null
+  // null = full inherit; { enabled: false } disables on this balcony only.
+  setRoomBalconyHandrail(roomId, balconyHandrail) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, balconyHandrail } } }
+    })
+  },
+
   renameRoom(roomId, name) {
     set(s => {
       const room = s.rooms[roomId]
@@ -839,23 +960,44 @@ export const useStore = create((set, get) => ({
     }
 
     // ── Migrate walls: inject materialKey + floor/classification/meta defaults ──
+    // Rev 2: inject hasBalconyRailingEdge: null (future-ready slot — no UI in
+    // current iteration; programmatic via setWallBalconyRailingEdge or DXF
+    // import). Inject opening.subtype + subtypeSource via size-based heuristic
+    // when absent (greenfield rule — no migration script, just normalize).
     const migratedWalls = {}
     for (const [id, wall] of Object.entries(data.walls || {})) {
+      const openings = (wall.openings ?? []).map(o => {
+        if (o.subtype && o.subtypeSource) return o
+        const subtype = o.subtype ?? _deriveSubtypeBySize(o)
+        return {
+          ...o,
+          subtype,
+          subtypeSource: o.subtypeSource ?? SUBTYPE_SOURCE.HEURISTIC,
+          hasGrill:      o.hasGrill ?? null,
+        }
+      })
       migratedWalls[id] = {
-        materialKey:    'IS_MODULAR_BRICK',
-        floorId:        DEFAULT_FLOOR_ID,
-        classification: null,
-        meta:           null,
+        materialKey:            'IS_MODULAR_BRICK',
+        floorId:                DEFAULT_FLOOR_ID,
+        classification:         null,
+        meta:                   null,
+        hasBalconyRailingEdge:  null,
         ...wall,
+        openings,
       }
     }
 
     // Rooms already migrated above; add floor/classification/meta where missing.
+    // Rev 2 also injects tile/counter/handrail per-room override slots
+    // (null = inherit projectSettings defaults).
     for (const id of Object.keys(migratedRooms)) {
       const r = migratedRooms[id]
-      if (r.floorId === undefined)        r.floorId        = DEFAULT_FLOOR_ID
-      if (r.classification === undefined) r.classification = null
-      if (r.meta === undefined)           r.meta           = null
+      if (r.floorId === undefined)         r.floorId         = DEFAULT_FLOOR_ID
+      if (r.classification === undefined)  r.classification  = null
+      if (r.meta === undefined)            r.meta            = null
+      if (r.dadoHeightFt === undefined)    r.dadoHeightFt    = null
+      if (r.kitchenCounter === undefined)  r.kitchenCounter  = null
+      if (r.balconyHandrail === undefined) r.balconyHandrail = null
     }
 
     // ── Migrate stamps (v1/v2/v3 → v4): inject depth/name defaults for civil types ──
@@ -916,12 +1058,14 @@ export const useStore = create((set, get) => ({
     }
 
     // ── Migrate staircases: inject floor/fromFloor/toFloor + meta ──
+    // Rev 2: inject hasHandrail: null (null = inherit projectSettings.grills).
     const migratedStaircases = Object.fromEntries(
       Object.entries(data.staircases ?? {}).map(([id, sc]) => [id, {
-        floorId:     DEFAULT_FLOOR_ID,
-        fromFloorId: DEFAULT_FLOOR_ID,
-        toFloorId:   DEFAULT_FLOOR_ID,
-        meta:        null,
+        floorId:      DEFAULT_FLOOR_ID,
+        fromFloorId:  DEFAULT_FLOOR_ID,
+        toFloorId:    DEFAULT_FLOOR_ID,
+        meta:         null,
+        hasHandrail:  null,
         ...sc,
       }])
     )
@@ -984,7 +1128,27 @@ export const useStore = create((set, get) => ({
             floorHeightFt:  psRest.heights?.floorHeightFt  ?? 10,
             meta: null },
         ]
-        return { ...psRest, columnTypes: migratedColumnTypes, rccSpecs, defaultPlasterSystemId, defaultExternalPlasterSystemId, floors }
+        // Rev 2 — inject tile / kitchen counter / grills defaults if absent.
+        // Deep-merge dadoHeightsFt so saves that defined a partial map
+        // (e.g. only TOILET) still pick up the other defaults.
+        const tileDefaults = (() => {
+          const def = DEFAULT_PROJECT_SETTINGS.tileDefaults
+          const got = psRest.tileDefaults
+          if (!got) return def
+          return {
+            ...def,
+            ...got,
+            dadoHeightsFt: { ...def.dadoHeightsFt, ...(got.dadoHeightsFt ?? {}) },
+          }
+        })()
+        const kitchenCounter = psRest.kitchenCounter ?? DEFAULT_PROJECT_SETTINGS.kitchenCounter
+        const grills         = { ...DEFAULT_PROJECT_SETTINGS.grills, ...(psRest.grills ?? {}) }
+        return {
+          ...psRest,
+          columnTypes: migratedColumnTypes,
+          rccSpecs, defaultPlasterSystemId, defaultExternalPlasterSystemId, floors,
+          tileDefaults, kitchenCounter, grills,
+        }
       })(),
       columns:     migratedColumns,
       beams:       migratedBeams,

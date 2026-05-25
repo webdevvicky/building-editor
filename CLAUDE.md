@@ -1,5 +1,118 @@
 # Building Editor — Developer Notes
 
+## Rev 2 — Joinery + Tiles + Grills + Room-Wise BOQ (2026-05-25)
+
+New BOQ categories and centralized registries shipped on top of the
+existing plaster/masonry/RCC/steel/MEP pipeline:
+
+- **Joinery** (`src/quantities/joinery.js`) — every opening rolls into
+  one of 4 subtypes: `MAIN_DOOR | INTERNAL_DOOR | WINDOW | VENTILATOR`.
+  Frame perimeter Rft + shutter area Sft per subtype. Subtype lives on
+  `opening.subtype`; `opening.subtypeSource ∈ EXPLICIT | HEURISTIC`
+  drives the "Auto-detected" badge in `OpeningDetailPanel`. Main-door
+  heuristic: first external-wall door per floor wins.
+- **Tiles** (`src/quantities/tiles.js`) — per-room floor tiles
+  (wastage 1.05), wall tiles via dado height map, skirting Rft for
+  non-wet rooms (dado supersedes), kitchen counter Sft from
+  `projectSettings.kitchenCounter`.
+- **Grills** (`src/quantities/grills.js`) — window grills (Sft, gated
+  by external-only filter), main-door safety grill count, staircase
+  handrails (2 sides × per-flight hypotenuse + landing edges), balcony
+  handrails (polygon edges where wall is external OR
+  `wall.hasBalconyRailingEdge === true`).
+- **Room-wise BOQ** — `getBoqLines(state, rates, { floorId, roomId,
+  roomType })`. `scopeStateToRoom` / `scopeStateToRoomType` in
+  `src/boq/scope.js` are PURE FILTERS (no `_roomShareFactor` injection
+  on entities). Each aggregator owns its attribution policy.
+
+### Architectural rules locked by Rev 2 (mandatory)
+
+1. **Scope wrappers filter entities only.** Never inject synthetic
+   fields on wall / room / opening shapes. Aggregators implement their
+   own attribution policy:
+   - `computeMasonryQuantities` — partition walls × 0.5 (HALF_PARTITION)
+   - `computePlasterQuantities` — both inner faces (DUAL_FACE, correct
+     under room iteration)
+   - `computeTileQuantities` — INTERIOR_ONLY
+   - `computeJoineryQuantities` / `computeGrillQuantities` — OWNING_ROOM
+2. **Geometric room properties derive from `getRoomPolygon` edge loop.**
+   `getRoomPerimeterFt` + `getLongestPolygonEdgeFt` live in
+   `src/topology/rooms.js`. Never sum `room.wallIds` lengths for any
+   perimeter / longest-edge / linear-feet math — splits drift those.
+   (Sum of `wallArea` over `wallIds` for plaster surface area is
+   different — area math is fine.)
+3. **Joinery units locked.** Frame = `2*(w+h)/12` **Rft**.
+   Shutter = `(w*h)/144` **Sft**. Ventilator emits area Sft (no shutter
+   line).
+4. **`wall.hasBalconyRailingEdge: boolean | null`** future-ready slot.
+   `null` → balcony-handrail heuristic (external + no door > 4 ft).
+   `true/false` → explicit override. No UI; programmatic via
+   `setWallBalconyRailingEdge` or DXF import. `loadProject` injects
+   `null` for absent saves.
+5. **`scopeSupport: BOQ_SCOPE[]` per line.** Every BOQ line carries a
+   subset of `['PROJECT','FLOOR','ROOM','ROOM_TYPE']`. Push helper in
+   `boq/lines.js` auto-stamps from
+   `DEFAULT_SCOPE_SUPPORT_BY_CATEGORY`; per-line override allowed
+   (used for `grills_staircase_handrail` = `[PROJECT, FLOOR]`).
+   `filterLinesByScope(lines, activeScope)` in `boq/lines.js` is the
+   single filter — UI and exports use it; no hardcoded category lists.
+
+### Central registries (Rev 2 additions)
+
+- `src/constants/units.js` — `UNITS` (NOS, RFT, SFT, CFT, KG, BAG, M3,
+  FT, FT2, FT3). All `unit:` fields in `boq/lines.js` use these.
+- `src/constants/joinery.js` — `OPENING_SUBTYPE`,
+  `OPENING_SUBTYPE_REGISTRY`, `SUBTYPE_SOURCE`,
+  `VENTILATOR_MAX_*_IN`.
+- `src/constants/boqCategories.js` — `BOQ_CATEGORIES`, `BOQ_LINE_IDS`
+  (static), `BOQ_LINE_ID` (parametric builders), `BOQ_SCOPE`,
+  `DEFAULT_SCOPE_SUPPORT_BY_CATEGORY`. **All emitters import from
+  here — zero raw string IDs in `src/boq/`.**
+- `src/quantities/_metaContract.js` — `buildMeta()` helper +
+  `ATTRIBUTION_POLICY` enum + `isScopedState()` detector. Every
+  aggregator's `_meta` carries `{ algorithm, calculationVersion,
+  attributionPolicy, scoped, generatedAt, ...extras }`. New
+  aggregators (joinery / tiles / grills) use it natively; existing
+  ones (plaster) wrapped to match. Apply same pattern when touching
+  BBS / foundations / excavation / shuttering.
+
+### Schema additions (loadProject auto-normalizes)
+
+- `projectSettings.tileDefaults: { dadoHeightsFt, skirtingHeightIn,
+  skirtingApplyToTypes, floorTileAllowance, wallTileAllowance }`
+- `projectSettings.kitchenCounter: { defaultDepthFt, defaultLengthMode }`
+  (`'longest_wall' | 'half_perimeter' | 'manual'`)
+- `projectSettings.grills: { windowGrillEnabled,
+  windowGrillExternalOnly, mainDoorSafetyGrillEnabled,
+  staircaseHandrailEnabled, staircaseHandrailHeightFt,
+  balconyHandrailEnabled, balconyHandrailHeightFt }`
+- `opening.subtype` (required, derived if absent on load)
+  `opening.subtypeSource: 'EXPLICIT' | 'HEURISTIC'`,
+  `opening.hasGrill: boolean | null`
+- `wall.hasBalconyRailingEdge: boolean | null`
+- `staircase.hasHandrail: boolean | null`
+- `room.dadoHeightFt: number | null`
+- `room.kitchenCounter: { lengthFt, depthFt } | null`
+- `room.balconyHandrail: { enabled, heightFt } | null`
+
+### Store setters (new)
+
+- `setTileDefaults`, `setKitchenCounter`, `setGrills` — project-level
+- `setOpeningSubtype`, `setOpeningGrill` — opening-level
+- `setRoomDado`, `setRoomKitchenCounter`, `setRoomBalconyHandrail`
+- `setStaircaseHandrail`
+- `setWallBalconyRailingEdge` (programmatic only; no UI yet)
+
+### Grep guards
+
+- `grep -rn "_roomShareFactor" src/` — only in comment docstring; never
+  injected on entities.
+- `grep -n "id: '" src/boq/lines.js` — zero matches.
+- `grep -n "unit: '" src/boq/lines.js` — zero matches.
+- `grep -rln "scopeSupport" src/boq/` — at least `lines.js` + `scope.js`.
+
+---
+
 ## Current Phase Status
 
 Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +

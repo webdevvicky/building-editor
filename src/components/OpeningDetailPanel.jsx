@@ -19,6 +19,7 @@ import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
+import { getOpeningSubtypesByParent, SUBTYPE_SOURCE } from '../constants/joinery'
 
 // 4 door orientations — mirrored from OpeningPanel.jsx
 const ORIENT_LABELS = ['↖', '↙', '↗', '↘']
@@ -36,6 +37,8 @@ export default function OpeningDetailPanel() {
   const updateOpening    = useStore(s => s.updateOpening)
   const removeOpening    = useStore(s => s.removeOpening)
   const selectOpening    = useStore(s => s.selectOpening)
+  const setOpeningSubtype = useStore(s => s.setOpeningSubtype)
+  const setOpeningGrill   = useStore(s => s.setOpeningGrill)
   const undo             = useStore(s => s.undo)
 
   // Resolve the selected opening. Bail out gracefully if anything is missing.
@@ -210,6 +213,42 @@ export default function OpeningDetailPanel() {
               </Button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Subtype dropdown (Rev 2) */}
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <Field label="Subtype" inline hint={opening.subtypeSource === SUBTYPE_SOURCE.HEURISTIC ? 'Auto-detected' : null}>
+          <select
+            value={opening.subtype ?? ''}
+            onChange={e => setOpeningSubtype(sel.wallId, sel.openingId, e.target.value)}
+          >
+            {getOpeningSubtypesByParent(opening.type).map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      {/* Grill checkbox (Rev 2) — visible on windows + main doors */}
+      {(isWindow || opening.subtype === 'MAIN_DOOR') && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+          marginBottom: 'var(--space-3)',
+        }}>
+          <input
+            type="checkbox" id="opening-detail-grill"
+            checked={opening.hasGrill === true}
+            onChange={e => setOpeningGrill(sel.wallId, sel.openingId, e.target.checked ? true : null)}
+            style={{ cursor: 'pointer' }}
+          />
+          <label htmlFor="opening-detail-grill" style={{
+            fontSize: 'var(--text-sm)',
+            color: 'var(--color-text-secondary)',
+            cursor: 'pointer',
+          }}>
+            Has MS grill
+          </label>
         </div>
       )}
 

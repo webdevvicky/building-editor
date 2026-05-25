@@ -20,6 +20,9 @@ import ShutteringSection   from './boq/ShutteringSection'
 import ExcavationSection   from './boq/ExcavationSection'
 import PlumConcreteRow     from './boq/PlumConcreteRow'
 import PlasterSection      from './boq/PlasterSection'
+import JoineryBoqSection   from './boq/JoineryBoqSection'
+import TilesBoqSection     from './boq/TilesBoqSection'
+import GrillsBoqSection    from './boq/GrillsBoqSection'
 import PlumbingBoqSection  from './boq/PlumbingBoqSection'
 import ElectricalBoqSection from './boq/ElectricalBoqSection'
 import HvacBoqSection       from './boq/HvacBoqSection'
@@ -264,6 +267,10 @@ export default function BOQPanel() {
   const excavationLines   = linesByCat.excavation   ?? []
   const plasterLines      = linesByCat.plaster      ?? []
   const plumLines         = linesByCat.plumConcrete ?? []
+  // Rev 2 — new categories.
+  const joineryLines      = linesByCat.joinery      ?? []
+  const tilesLines        = linesByCat.tiles        ?? []
+  const grillsLines       = linesByCat.grills       ?? []
   const plumbingSupplyLines   = linesByCat.plumbing_supply   ?? []
   const plumbingDrainageLines = linesByCat.plumbing_drainage ?? []
   const plumbingFixturesLines = linesByCat.plumbing_fixtures ?? []
@@ -679,6 +686,24 @@ export default function BOQPanel() {
 
       {/* Plaster materials by system */}
       <PlasterSection lines={plasterLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
+      {/* Tiles / skirting / kitchen counter (Rev 2) */}
+      <TilesBoqSection lines={tilesLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
+      {/* Joinery — doors / windows / ventilators (Rev 2) */}
+      <JoineryBoqSection lines={joineryLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
+      {/* MS Grills & Handrails (Rev 2) */}
+      <GrillsBoqSection lines={grillsLines}
         rates={rates} onRateChange={setRate}
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity} />

@@ -143,6 +143,42 @@ export const DEFAULT_PROJECT_SETTINGS = {
     plumDepthFt: 0,    // 0 = no plum concrete; user can enable per project.
   },
 
+  // Rev 2 — tile defaults (floor tiles + dado + skirting + counter wastage).
+  // Dado height keyed by room type; per-room override slot at room.dadoHeightFt.
+  tileDefaults: {
+    dadoHeightsFt: {
+      TOILET:  7,
+      KITCHEN: 2,
+      UTILITY: 4,
+      BALCONY: 0,
+      OTHER:   0,
+    },
+    skirtingHeightIn:     4,
+    skirtingApplyToTypes: ['BEDROOM','LIVING','DINING','FOYER','POOJA','STUDY','STORE','PARKING'],
+    floorTileAllowance:   1.05,
+    wallTileAllowance:    1.10,
+  },
+
+  // Rev 2 — kitchen granite counter defaults.
+  // Per-room override slot at room.kitchenCounter.
+  kitchenCounter: {
+    defaultDepthFt:    2.0,
+    defaultLengthMode: 'longest_wall',   // | 'half_perimeter' | 'manual'
+  },
+
+  // Rev 2 — grills + handrails project defaults.
+  // Per-entity overrides at opening.hasGrill, staircase.hasHandrail,
+  // room.balconyHandrail, wall.hasBalconyRailingEdge.
+  grills: {
+    windowGrillEnabled:           true,
+    windowGrillExternalOnly:      true,
+    mainDoorSafetyGrillEnabled:   false,
+    staircaseHandrailEnabled:     true,
+    staircaseHandrailHeightFt:    3.0,
+    balconyHandrailEnabled:       true,
+    balconyHandrailHeightFt:      3.5,
+  },
+
   // Phase 1.7 — reinforcement spec catalog (specId → spec) populated by user
   // via BBSSpecPanel. Empty until user applies presets or creates specs.
   reinforcementSpecs: {},
@@ -348,6 +384,37 @@ export const createStructuralSlice = (set, get, uid) => ({
     projectSettings: {
       ...state.projectSettings,
       foundationDefaults: { ...state.projectSettings.foundationDefaults, ...partial },
+    },
+  })),
+
+  // Rev 2 — tile / counter / grills project-settings setters.
+
+  setTileDefaults: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      tileDefaults: {
+        ...state.projectSettings.tileDefaults,
+        ...partial,
+        // Deep merge dadoHeightsFt if partial supplied — otherwise the
+        // shallow spread above replaces the whole map.
+        ...(partial?.dadoHeightsFt ? {
+          dadoHeightsFt: { ...state.projectSettings.tileDefaults.dadoHeightsFt, ...partial.dadoHeightsFt },
+        } : {}),
+      },
+    },
+  })),
+
+  setKitchenCounter: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      kitchenCounter: { ...state.projectSettings.kitchenCounter, ...partial },
+    },
+  })),
+
+  setGrills: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      grills: { ...state.projectSettings.grills, ...partial },
     },
   })),
 
@@ -824,6 +891,17 @@ export const createStructuralSlice = (set, get, uid) => ({
     }))
   },
 
+  // Rev 2 — per-staircase handrail override. null = inherit project setting
+  // (projectSettings.grills.staircaseHandrailEnabled).
+  setStaircaseHandrail: (id, hasHandrail) => {
+    get()._save()
+    set(state => {
+      const sc = state.staircases[id]
+      if (!sc) return {}
+      return { staircases: { ...state.staircases, [id]: { ...sc, hasHandrail } } }
+    })
+  },
+
   // ── Wall / opening actions ─────────────────────────────────────────────────
 
   setWallBeamFlags: (wallId, flags) => {
@@ -831,6 +909,19 @@ export const createStructuralSlice = (set, get, uid) => ({
     set(state => ({
       walls: { ...state.walls, [wallId]: { ...state.walls[wallId], ...flags } },
     }))
+  },
+
+  // Rev 2 future-ready slot — programmatic override of the balcony-railing-edge
+  // heuristic. Null = inherit heuristic (external + bounds a BALCONY room, no
+  // large door). true/false = explicit. No UI in current iteration; provided
+  // for DXF importers / clone tools / power users via DevTools.
+  setWallBalconyRailingEdge: (wallId, hasBalconyRailingEdge) => {
+    get()._save()
+    set(state => {
+      const wall = state.walls[wallId]
+      if (!wall) return {}
+      return { walls: { ...state.walls, [wallId]: { ...wall, hasBalconyRailingEdge } } }
+    })
   },
 
   setOpeningSunshade: (wallId, openingId, hasSunshade) => {

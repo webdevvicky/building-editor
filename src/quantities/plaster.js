@@ -53,6 +53,7 @@ import {
 } from '../specs/plasterSystems'
 import { isExternalWall } from '../topology/walls.js'
 import { getColumnPerimeterFt } from '../lib/columnShapes.js'
+import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
 
 const DEFAULT_FLOOR_HEIGHT_FT = 10
 const DEFAULT_EXTERNAL_SYSTEM_ID = 'CEMENT_SAND_EXTERNAL'
@@ -297,22 +298,26 @@ export function computePlasterQuantities(state) {
     bySystem,
     totalAreaFt2,
     totals,
-    _meta: {
+    _meta: buildMeta({
       algorithm:          'ROOM_FACE_ACCUMULATION_V2',
-      calculationVersion: '2026-05-19-internal-external-split',
-      floorId:            scopedFloorId,
-      totalsByFace: {
-        partitionInnerFaces: r2(totalsByFace.partitionInnerFaces),
-        externalInnerFaces:  r2(totalsByFace.externalInnerFaces),
-        externalOuterFaces:  r2(totalsByFace.externalOuterFaces),
-        columnFaces:         r2(totalsByFace.columnFaces),
-        ceilingFaces:        r2(totalsByFace.ceilingFaces),
+      calculationVersion: '2026-05-25',
+      attributionPolicy:  ATTRIBUTION_POLICY.DUAL_FACE,
+      scoped:             isScopedState(state),
+      extras: {
+        floorId: scopedFloorId,
+        totalsByFace: {
+          partitionInnerFaces: r2(totalsByFace.partitionInnerFaces),
+          externalInnerFaces:  r2(totalsByFace.externalInnerFaces),
+          externalOuterFaces:  r2(totalsByFace.externalOuterFaces),
+          columnFaces:         r2(totalsByFace.columnFaces),
+          ceilingFaces:        r2(totalsByFace.ceilingFaces),
+        },
+        perRoom:         perRoomMeta,
+        perColumn:       perColumnMeta,
+        perExternalWall: perExternalWallMeta,
+        excluded,
+        warnings,
       },
-      perRoom:         perRoomMeta,
-      perColumn:       perColumnMeta,
-      perExternalWall: perExternalWallMeta,
-      excluded,
-      warnings,
-    },
+    }),
   }
 }

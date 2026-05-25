@@ -657,3 +657,213 @@ export function scopeStateToFloor(state, floorId) {
   scopedStateRef = scopedState
   return scopedState
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rev 2 — Room scope wrapper.
+//
+// scopeStateToRoom(state, roomId) returns a state-shaped object where:
+//   - rooms = single-room map { [roomId]: room }
+//   - walls = walls in room.wallIds (untouched shape — no synthetic fields)
+//   - project-level collections (foundations, columns, beams, slabs,
+//     staircases, stamps, MEP networks) = empty maps so emitters skip them
+//   - room-attributable aggregators (masonry, flooring, plaster, paint,
+//     waterproofing, roofing) are re-implemented honoring per-aggregator
+//     attribution policy (see CLAUDE.md "Attribution Policies").
+//
+// CORRECTION 1 — wrappers filter entities only. No `_roomShareFactor` or
+// any other scope-aware field is injected on walls or rooms. Each aggregator
+// implements its own attribution policy:
+//   - masonry: partition walls × 0.5  (HALF_PARTITION)
+//   - plaster: both inner faces (DUAL_FACE — already correct under room
+//     iteration because Pass 1 only visits this room's wallIds)
+//   - tiles / joinery / grills: pure-function aggregators auto-scope
+//     because they iterate state.walls / state.rooms directly
+// ─────────────────────────────────────────────────────────────────────────
+
+export function scopeStateToRoom(state, roomId) {
+  if (!roomId) return state
+  const room = state.rooms?.[roomId]
+  if (!room) return state
+  return _buildRoomLikeScope(state, {
+    rooms: { [roomId]: room },
+    marker: { _scopedRoomId: roomId },
+  })
+}
+
+export function scopeStateToRoomType(state, roomType) {
+  if (!roomType) return state
+  const matchedRooms = {}
+  for (const [id, room] of Object.entries(state.rooms ?? {})) {
+    if (room.type === roomType) matchedRooms[id] = room
+  }
+  if (Object.keys(matchedRooms).length === 0) return state
+  return _buildRoomLikeScope(state, {
+    rooms: matchedRooms,
+    marker: { _scopedRoomType: roomType },
+  })
+}
+
+// Shared builder for room-id and room-type scopes. The two differ only in
+// which rooms enter the scoped collection — every other aggregator behaves
+// identically.
+function _buildRoomLikeScope(liveState, { rooms, marker }) {
+  // Collect wall ids referenced by any room in scope.
+  const wallIdSet = new Set()
+  for (const room of Object.values(rooms)) {
+    for (const wid of (room.wallIds ?? [])) wallIdSet.add(wid)
+  }
+  const walls = {}
+  for (const wid of wallIdSet) {
+    const w = liveState.walls?.[wid]
+    if (w) walls[wid] = w
+  }
+
+  // Project-level collections — empty so scopeSupport filter hides their
+  // BOQ lines AND BBS/steel/concrete aggregators return zero.
+  const EMPTY = Object.freeze({})
+  const stamps      = EMPTY
+  const columns     = EMPTY
+  const beams       = EMPTY
+  const slabs       = EMPTY
+  const staircases  = EMPTY
+  const foundations = EMPTY
+  const plumbingFixtures = EMPTY
+  const electricalPoints = EMPTY
+  const hvacUnits   = EMPTY
+  const fireDevices = EMPTY
+  const elvDevices  = EMPTY
+  const solarEquipment = EMPTY
+  const risers      = EMPTY
+
+  // Wall-adjacency uses the LIVE state so partition detection still works
+  // (a partition wall is one bordering ≥2 rooms in the live world, even if
+  // only one of those rooms is in scope).
+  const liveAdjCount = liveState.getWallAdjacencyCount?.() ?? {}
+
+  const roomIdSet = new Set(Object.keys(rooms))
+
+  // Per-entity helpers delegate to the live store (they're pure on id).
+  const getWallArea     = (id) => wallIdSet.has(id) ? liveState.getWallArea(id) : 0
+  const getWallLength   = (id) => wallIdSet.has(id) ? liveState.getWallLength(id) : 0
+  const getRoomArea     = (id) => roomIdSet.has(id) ? liveState.getRoomArea(id) : 0
+  const getRoomWallArea = (id) => roomIdSet.has(id) ? liveState.getRoomWallArea(id) : 0
+  const getRoomPolygon  = (id) => roomIdSet.has(id) ? liveState.getRoomPolygon(id) : null
+  const isRoomStructurallyValid = (id) => roomIdSet.has(id) ? liveState.isRoomStructurallyValid(id) : false
+
+  const getValidRoomIds = () => liveState.getValidRoomIds().filter(id => roomIdSet.has(id))
+
+  const sumRoomAreas = (pred) => Math.round(
+    getValidRoomIds().filter(id => pred(rooms[id])).reduce((t, id) => t + getRoomArea(id), 0) * 100
+  ) / 100
+
+  const getTotalFloorArea          = () => Math.round(getValidRoomIds().reduce((t, id) => t + getRoomArea(id), 0) * 100) / 100
+  const getTotalFlooringArea       = () => sumRoomAreas(r => r?.finishes?.flooring)
+  const getTotalCeilingPlasterArea = () => sumRoomAreas(r => r?.finishes?.ceilingPlaster)
+  const getTotalWaterproofingArea  = () => sumRoomAreas(r => r?.finishes?.waterproofing)
+  const getTotalRoofingArea        = () => sumRoomAreas(r => r?.finishes?.roofing)
+  const getTotalPaintCeilingArea   = () => sumRoomAreas(r => r?.finishes?.paint)
+  const getTotalPaintWallsArea     = () => Math.round(
+    getValidRoomIds().filter(id => rooms[id]?.finishes?.paint).reduce((t, id) => t + getRoomWallArea(id), 0) * 100
+  ) / 100
+
+  // Masonry — HALF_PARTITION attribution. Partition walls (adj=2) get
+  // halved per room; external walls (adj=1) get full credit.
+  const getMaterialQuantities = () => {
+    const WASTAGE = 1.05
+    const acc = {}
+    for (const w of Object.values(walls)) {
+      if (w.isVirtual) continue
+      const matKey = w.materialKey ?? 'IS_MODULAR_BRICK'
+      const mat = MATERIAL_LIBRARY[matKey]
+      if (!mat) continue
+      const adj = liveAdjCount[w.id] ?? 1
+      const shareFactor = adj >= 2 ? 0.5 : 1.0
+      const faceAreaFt2 = getWallArea(w.id) * shareFactor
+      const thicknessFt = (w.thickness ?? 9) / 12
+      if (!acc[matKey]) acc[matKey] = { volFt3: 0, faceAreaFt2: 0 }
+      acc[matKey].volFt3      += faceAreaFt2 * thicknessFt
+      acc[matKey].faceAreaFt2 += faceAreaFt2
+    }
+    const result = {}
+    for (const [matKey, { volFt3, faceAreaFt2 }] of Object.entries(acc)) {
+      const mat = MATERIAL_LIBRARY[matKey]
+      const unitPer = mat.bricksPerFt3 ?? mat.blocksPerFt3
+      const entry = {
+        volFt3:      r2(volFt3),
+        faceAreaFt2: r2(faceAreaFt2),
+        unitCount:   Math.ceil(volFt3 * unitPer * WASTAGE),
+      }
+      if (mat.bondingType === BONDING.CEMENT_SAND) {
+        const mortarVol = volFt3 * mat.mortarVolPerFt3Wall
+        entry.cementBags = Math.ceil(mortarVol * mat.cementBagsPerFt3Mortar)
+        entry.sandFt3    = r2(mortarVol * mat.sandFt3PerFt3Mortar)
+      } else {
+        const adhesiveKg = faceAreaFt2 * mat.adhesiveKgPerFt2
+        entry.adhesiveKg    = r2(adhesiveKg)
+        entry.adhesiveBags  = Math.ceil(adhesiveKg / mat.adhesiveBagKg)
+      }
+      result[matKey] = entry
+    }
+    return result
+  }
+  // No beam deduction in room scope (beams suppressed; HALF_PARTITION
+  // already accounts for the dominant deduction users care about).
+  const getMasonryWithBeamDeduction = () => getMaterialQuantities()
+
+  // Project-level shapes return empty results so structural emitters no-op.
+  const ZERO_Q = Object.freeze({})
+  const EMPTY_BEAM_Q = Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.id, null]))
+  const getColumnQuantities       = () => ZERO_Q
+  const getFoundationQuantities   = () => ({ byFoundation: ZERO_Q, byColumnTypeInline: ZERO_Q })
+  const getFootingQuantities      = () => ZERO_Q
+  const getBeamQuantities         = () => EMPTY_BEAM_Q
+  const getSlabQuantities         = () => ({ mainAreaFt2: 0, mainVolFt3: 0, sunkenAreaFt2: 0, sunkenVolFt3: 0, sunkenRooms: [] })
+  const getStaircaseQuantities    = () => []
+  const getSunshadeQuantities     = () => ({ count: 0, totalVolFt3: 0 })
+  const getParapetQuantities      = () => ({ totalLenFt: 0, heightFt: 0, thicknessIn: 0, totalVolFt3: 0, materialKey: null })
+  const getSteelQuantities        = () => ({ footing: 0, column: 0, beam: 0, slab: 0, staircase: 0, civilStamp: 0, total: 0 })
+  const getConcreteByGrade        = () => ({})
+  const getDerivedWallBeams       = () => []
+  const getAllBeams               = () => []
+  const getSumpCivilQty           = () => ({ excavFt3: 0, brickFt3: 0, rccBottomFt3: 0, rccTopFt3: 0, plasterFt2: 0 })
+  const getSepticCivilQty         = () => ({ excavFt3: 0, brickFt3: 0, rccBottomFt3: 0, rccTopFt3: 0, plasterFt2: 0 })
+  const getStampsByType           = () => []
+  const getTotalExcavationVolumeFt3 = () => 0
+
+  const EMPTY_DISCIPLINE_Q = Object.freeze({ perSystem: {}, risers: [], totals: {} })
+  const EMPTY_GRAPH        = Object.freeze({ nodes: {}, edges: {}, systems: [], branches: [] })
+  const EMPTY_ROUTES       = Object.freeze([])
+  const stubNet = () => EMPTY_GRAPH
+  const stubRoutes = () => EMPTY_ROUTES
+  const stubQty = () => EMPTY_DISCIPLINE_Q
+
+  // Build scoped state. Spread liveState first so projectSettings + nodes
+  // pass through; then override with the room-scoped substitutions.
+  const scopedState = {
+    ...liveState,
+    walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
+    plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices,
+    solarEquipment, risers,
+    getWallArea, getWallLength, getRoomArea, getRoomWallArea, getRoomPolygon,
+    isRoomStructurallyValid,
+    getValidRoomIds, sumRoomAreas, getTotalFloorArea,
+    getTotalFlooringArea, getTotalCeilingPlasterArea, getTotalWaterproofingArea,
+    getTotalRoofingArea, getTotalPaintCeilingArea, getTotalPaintWallsArea,
+    getMaterialQuantities, getMasonryWithBeamDeduction,
+    getColumnQuantities, getFoundationQuantities, getFootingQuantities,
+    getDerivedWallBeams, getAllBeams, getBeamQuantities,
+    getSlabQuantities, getStaircaseQuantities,
+    getSunshadeQuantities, getParapetQuantities,
+    getSteelQuantities, getConcreteByGrade,
+    getSumpCivilQty, getSepticCivilQty, getStampsByType,
+    getTotalExcavationVolumeFt3,
+    getPlumbingNetwork: stubNet, getPlumbingRoutes: stubRoutes, getPlumbingQuantities: stubQty,
+    getElectricalNetwork: stubNet, getElectricalRoutes: stubRoutes, getElectricalQuantities: stubQty,
+    getHvacNetwork: stubNet, getHvacRoutes: stubRoutes, getHvacQuantities: stubQty,
+    getFireNetwork: stubNet, getFireRoutes: stubRoutes, getFireQuantities: stubQty,
+    getElvNetwork: stubNet, getElvRoutes: stubRoutes, getElvQuantities: stubQty,
+    getSolarNetwork: stubNet, getSolarRoutes: stubRoutes, getSolarQuantities: stubQty,
+    ...marker,
+  }
+  return scopedState
+}

@@ -207,6 +207,48 @@ export function getRoofPolygon(state, floorId) {
   return bestPoly
 }
 
+// ── Polygon-derived geometric helpers (Rev 2 Correction 2) ─────────────────
+//
+// Perimeter and longest-edge MUST derive from getRoomPolygon edge loop,
+// NEVER from summing wall.wallIds entity lengths. Walls are topology
+// artifacts that change shape after splitWall (one wall becomes two,
+// midpoint nodes get inserted on partition walls). Polygon perimeter
+// is geometric truth — invariant under wall splitting.
+//
+// Consumers: skirting Rft, dado Sft, kitchen counter `longest_wall`
+// mode, balcony handrail length. Any future cornice / facade / railing
+// math also lands here.
+
+// Sum of edge lengths around the room polygon, in feet.
+// Returns 0 for malformed rooms (no polygon).
+export function getRoomPerimeterFt(state, roomId) {
+  const poly = getRoomPolygon(state, roomId)
+  if (!poly || poly.length < 3) return 0
+  let totalIn = 0
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % poly.length]
+    totalIn += Math.hypot(b.x - a.x, b.y - a.y)
+  }
+  return r2(totalIn / GRID_IN)
+}
+
+// Longest single polygon edge, in feet. Used by kitchen counter
+// `defaultLengthMode: 'longest_wall'` to pick the dominant edge to
+// place the counter against.
+export function getLongestPolygonEdgeFt(state, roomId) {
+  const poly = getRoomPolygon(state, roomId)
+  if (!poly || poly.length < 3) return 0
+  let bestIn = 0
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % poly.length]
+    const lenIn = Math.hypot(b.x - a.x, b.y - a.y)
+    if (lenIn > bestIn) bestIn = lenIn
+  }
+  return r2(bestIn / GRID_IN)
+}
+
 // Returns polygons of all SHAFT rooms on a floor (rooms with type 'SHAFT' or
 // room.isShaft truthy). Risers prefer to traverse these; validation checks
 // that riser XY lies inside at least one shaft polygon.

@@ -20,6 +20,7 @@ export {
   isRoomStructurallyValid, hasRoomOverlap, getOverlappingRoomName,
   getValidRoomIds, sumRoomAreas,
   getRoomCentroid, getRoofPolygon, getShaftPolygons,
+  getRoomPerimeterFt, getLongestPolygonEdgeFt,
 } from './rooms.js'
 
 // Floor scope
@@ -43,6 +44,8 @@ export {
 export {
   getOpeningsOnWall, getDoorOpenings, getWindowOpenings, getSunshadeOpenings,
   getOpeningArea, getTotalOpeningAreaForWall,
+  deriveOpeningSubtype, getMainDoorCandidate, getOpeningsBySubtype,
+  OPENING_SUBTYPE, SUBTYPE_SOURCE,
 } from './openings.js'
 
 // Columns
