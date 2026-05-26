@@ -1,10 +1,9 @@
 import { CONCRETE_GRADE, PCC_BEDDING_THICKNESS_FT, BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnAreaFt2, getColumnFormulaLabel } from '../lib/columnShapes'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 // state = full Zustand store state (passed in — never imported from store.js)
 // All functions return { title, steps: [{ label, value, bold? }], note? }
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 // ── explainColumnRCC ──────────────────────────────────────────────────────────
 

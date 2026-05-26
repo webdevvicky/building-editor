@@ -41,8 +41,7 @@ import {
   resolveFootingReinforcementSpec,
 } from '../specs/resolution'
 import { resolveBeamEndpoint } from '../topology/beams.js'
-
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 function groupByResolvedSpec(rows, extraFields = () => ({})) {
   const byKey = new Map()

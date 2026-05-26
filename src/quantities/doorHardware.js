@@ -22,11 +22,10 @@ import { getHardwareItem, HW_CATEGORY } from '../specs/hardware/hardwareItems.js
 import { CATALOG_VERSIONS } from '../specs/hardware/hardwareSets.js'
 import { OPENING_SUBTYPE } from '../constants/joinery.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const ALGORITHM    = 'OPENING_HARDWARE_ROLLUP_V1'
 const CALC_VERSION = '2026-05-26'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 export function computeDoorHardwareQuantities(state) {
   if (!state) {

@@ -17,8 +17,7 @@
 
 import { getColumnPerimeterFt } from '../lib/columnShapes'
 import { computeFoundationQuantities } from './foundations'
-
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 export function computeShutteringQuantities(state) {
   const { projectSettings } = state

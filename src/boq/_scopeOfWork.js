@@ -2,8 +2,7 @@
 // Excel summary sheet + PDF cover. Pure state read; no mutation.
 
 import { OPENING_SUBTYPE } from '../constants/joinery.js'
-
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 export function computeScopeOfWork(state) {
   if (!state) {

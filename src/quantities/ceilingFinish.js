@@ -14,13 +14,12 @@ import {
   DEFAULT_CEILING_FINISH_SYSTEM_ID,
 } from '../specs/ceilingFinishSystems.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const ALGORITHM    = 'ROOM_CEILING_FINISH_ROLLUP_V1'
 const CALC_VERSION = '2026-05-26'
 
 const SFT_TO_SQM = 0.0929   // 1 ft² = 0.0929 m²
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function _resolveSystemId(state, room) {
   if (room?.ceilingFinishId) return room.ceilingFinishId

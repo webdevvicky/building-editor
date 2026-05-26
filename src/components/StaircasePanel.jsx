@@ -37,6 +37,7 @@ export default function StaircasePanel() {
   const stamps          = useStore(s => s.stamps)
   const staircases      = useStore(s => s.staircases)
   const updateStaircase = useStore(s => s.updateStaircase)
+  const setStaircaseHandrail = useStore(s => s.setStaircaseHandrail)
   const projectSettings = useStore(s => s.projectSettings)
   const selectStamp     = useStore(s => s.selectStamp)
 
@@ -118,6 +119,56 @@ export default function StaircasePanel() {
       <FtField  fieldLabel="Landing width"  fieldKey="landingFtWidth"  value={sc.landingFtWidth}  min={1}   onUpdate={update} />
       <FtField  fieldLabel="Landing length" fieldKey="landingFtLength" value={sc.landingFtLength} min={1}   onUpdate={update} />
       <FtField  fieldLabel="Flight width"   fieldKey="flightWidthFt"   value={sc.flightWidthFt}   min={1}   onUpdate={update} />
+
+      {/* Handrail override (Arch 8 Phase 1) — tri-state matches room.includeSkirting pattern. */}
+      {(() => {
+        const handrailEnabled = projectSettings?.grills?.staircaseHandrailEnabled ?? true
+        const mode = sc.hasHandrail === true  ? 'on'
+                   : sc.hasHandrail === false ? 'off'
+                   : 'default'
+        const effective = sc.hasHandrail ?? handrailEnabled
+        const badge = mode === 'default'
+          ? `Default (${handrailEnabled ? 'included' : 'excluded'})`
+          : mode === 'on'  ? 'Included (override)'
+          :                  'Excluded (override)'
+        const segBtn = (label, active, onClick, title) => (
+          <button key={label} type="button" onClick={onClick} title={title}
+            style={{
+              flex: 1, fontSize: 'var(--text-xs)', padding: '4px var(--space-2)',
+              border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
+              background: active ? 'var(--color-primary-bg)' : 'var(--color-surface)',
+              color:      active ? 'var(--color-primary)'   : 'var(--color-text-secondary)',
+              fontWeight: active ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+              cursor: 'pointer',
+            }}>
+            {label}
+          </button>
+        )
+        return (
+          <div style={{ marginTop: 'var(--space-2)' }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+              marginBottom: 4,
+            }}>
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                Handrail
+              </span>
+              <span style={{
+                fontSize: 'var(--text-xs)',
+                color: mode !== 'default' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                fontWeight: mode !== 'default' ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+              }}>
+                {badge}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+              {segBtn('Default',   mode === 'default', () => setStaircaseHandrail(selectedStampId, null),  'Use project setting')}
+              {segBtn('Force on',  mode === 'on',      () => setStaircaseHandrail(selectedStampId, true),  'Always include handrail')}
+              {segBtn('Force off', mode === 'off',     () => setStaircaseHandrail(selectedStampId, false), 'Always exclude handrail')}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Derived metrics — verifies dog-legged formula at a glance */}
       <div style={{

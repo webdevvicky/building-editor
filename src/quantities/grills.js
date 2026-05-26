@@ -25,13 +25,12 @@ import { getValidRoomIds, getRoomPolygon } from '../topology/rooms.js'
 import { isExternalWall } from '../topology/walls.js'
 import { getWallSurfaces } from '../topology/surfaces.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const ALGORITHM = 'GRILL_ROLLUP_V1'
 const CALC_VERSION = '2026-05-25'
 const GRID_IN = 12
 const LARGE_DOOR_FT = 4  // doors wider than this cut a balcony rail
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 // Resolve effective opening-grill flag (per-opening override → project default).
 function _openingHasGrill(state, wall, opening, projectSettings) {

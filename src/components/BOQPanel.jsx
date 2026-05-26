@@ -40,6 +40,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   BoqRow, BoqSubRow, SectionHeader, SubSectionHeader, InfoIcon, fmtLineQty,
 } from './boq/BoqRow'
+import { safeR2 as r2 } from '../lib/numbers.js'
 import './boq/boq.css'
 
 // localStorage key for collapse preference
@@ -59,8 +60,6 @@ function fmtCost(n) {
   if (n === null || n === undefined) return '—'
   return '₹' + Math.round(n).toLocaleString('en-IN')
 }
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 // ── formula dispatcher ───────────────────────────────────────────────────────
 // Registry maps exact id → handler, or prefix → handler with id extraction.

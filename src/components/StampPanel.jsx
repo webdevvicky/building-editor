@@ -55,6 +55,9 @@ export default function StampPanel() {
 
   const label        = STAMP_LABELS[stamp.type] || stamp.type
   const hasExcavation = stamp.type === 'sump' || stamp.type === 'septic_tank'
+  // OHT volume display (Arch 8) — sits on roof slab, no excavation, but
+  // capacity readout matters for procurement (tank size selection).
+  const hasVolumeOnly = stamp.type === 'overhead_tank'
 
   function handleW(val) {
     setW(val)
@@ -156,6 +159,22 @@ export default function StampPanel() {
           color: 'var(--color-text-secondary)',
         }}>
           Excavation: <strong>{fmtVol()}</strong>
+        </div>
+      )}
+
+      {hasVolumeOnly && (
+        <div style={{
+          marginTop: 'var(--space-1)',
+          padding: 'var(--space-2)',
+          background: 'var(--color-bg-muted)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: 'var(--text-xs)',
+          color: 'var(--color-text-secondary)',
+        }}>
+          Tank capacity: <strong>{fmtVol()}</strong>
+          <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            Sits on roof slab — no excavation. Material formulas deferred (CLAUDE.md Known Issues).
+          </div>
         </div>
       )}
 

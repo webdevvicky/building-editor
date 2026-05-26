@@ -140,47 +140,76 @@ export default function LayersPanel() {
 
       {expanded && (
         <div style={{ padding: '0 var(--space-3) var(--space-2)' }}>
-          {LAYER_GROUPS.map(group => (
-            <div key={group.title} style={{ marginBottom: 'var(--space-2)' }}>
-              <div style={{
-                fontSize: 'var(--text-xs)',
-                color: 'var(--color-text-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: 0.5,
-                fontWeight: 'var(--weight-semibold)',
-                marginBottom: 'var(--space-1)',
-              }}>
-                {group.title}
+          {LAYER_GROUPS.map(group => {
+            // Per-discipline master toggle (Arch 8 Phase 1).
+            // Tri-state: all-on / partial / all-off. Click flips entire group
+            // to the opposite of its current dominant state.
+            const groupStates = group.keys.map(k => layerVisibility[k] ?? true)
+            const allOnGroup  = groupStates.every(Boolean)
+            const allOffGroup = groupStates.every(v => !v)
+            const partial     = !allOnGroup && !allOffGroup
+            const indicator   = allOnGroup ? '☑' : allOffGroup ? '☐' : '◪'
+            const flipGroup = () => {
+              const nextValue = !allOnGroup   // if any off → on; if all on → all off
+              const patch = {}
+              for (const k of group.keys) patch[k] = nextValue
+              setLayerVisibility(patch)
+            }
+            return (
+              <div key={group.title} style={{ marginBottom: 'var(--space-2)' }}>
+                <button
+                  onClick={flipGroup}
+                  title={allOnGroup ? `Hide all ${group.title}` : `Show all ${group.title}`}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    fontSize: 'var(--text-xs)',
+                    color: partial ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    fontWeight: 'var(--weight-semibold)',
+                    marginBottom: 'var(--space-1)',
+                  }}
+                >
+                  <span>{group.title}</span>
+                  <span style={{ fontSize: 'var(--text-sm)' }}>{indicator}</span>
+                </button>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 'var(--space-1) var(--space-3)',
+                }}>
+                  {group.keys.map(key => (
+                    <label
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-1)',
+                        cursor: 'pointer',
+                        fontSize: 'var(--text-xs)',
+                        color: 'var(--color-text-secondary)',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility[key] ?? true}
+                        onChange={e => setLayerVisibility({ [key]: e.target.checked })}
+                        style={{ cursor: 'pointer', accentColor: 'var(--color-primary)' }}
+                      />
+                      {LAYER_LABELS[key] ?? key}
+                    </label>
+                  ))}
+                </div>
               </div>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 'var(--space-1) var(--space-3)',
-              }}>
-                {group.keys.map(key => (
-                  <label
-                    key={key}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-1)',
-                      cursor: 'pointer',
-                      fontSize: 'var(--text-xs)',
-                      color: 'var(--color-text-secondary)',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={layerVisibility[key] ?? true}
-                      onChange={e => setLayerVisibility({ [key]: e.target.checked })}
-                      style={{ cursor: 'pointer', accentColor: 'var(--color-primary)' }}
-                    />
-                    {LAYER_LABELS[key] ?? key}
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
+            )
+          })}
           <Button
             variant="ghost"
             size="sm"

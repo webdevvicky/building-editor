@@ -35,10 +35,9 @@ import { SHEET_BUCKETS, bucketLines, bucketIsMulti, bucketSystemLabel } from '..
 import { resolveContingencyPctForLine, resolveContingencyDefaults } from './_contingencyResolver.js'
 import { computeScopeOfWork } from './_scopeOfWork.js'
 import { computeProjectCosts, DEFAULT_PROJECT_COSTS } from './projectCosts.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 export const PRESENTATION_VERSION = '2026-05-26-V1'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function parseRate(rateStr) {
   if (rateStr === undefined || rateStr === null || rateStr === '') return null

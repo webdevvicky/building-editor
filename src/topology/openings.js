@@ -11,8 +11,7 @@ import {
   VENTILATOR_MAX_HEIGHT_IN, VENTILATOR_MAX_WIDTH_IN,
 } from '../constants/joinery.js'
 import { isExternalWall } from './walls.js'
-
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 // Returns the openings on wallId (empty array if no wall or no openings).
 export function getOpeningsOnWall(state, wallId) {

@@ -36,13 +36,12 @@
 import { getValidRoomIds, getRoomArea, getRoomPerimeterFt, getLongestPolygonEdgeFt } from '../topology/rooms.js'
 import { getRoomsForWall } from '../topology/walls.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const ALGORITHM = 'ROOM_TILE_ROLLUP_V1'
 const CALC_VERSION = '2026-05-26'
 
 const FULL_SENTINEL = 'FULL'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 // Compute "full height" for tiles = floor-height − slab-thickness, in feet.
 // Picks the floor matching room.floorId; defaults to floors[0]; falls back

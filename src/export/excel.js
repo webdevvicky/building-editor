@@ -32,7 +32,7 @@ function safeFile(name) {
   return String(name || 'project').replace(/[^a-z0-9_\-]+/gi, '_').slice(0, 60) || 'project'
 }
 
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 function fmtPct(p) {
   if (!p) return ''

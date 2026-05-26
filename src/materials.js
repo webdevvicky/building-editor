@@ -3,9 +3,34 @@
 // catalog fetch. Consumers (getMaterialQuantities, OpeningPanel, BOQPanel) stay the
 // same — only this import source changes.
 
-export const BONDING = {
+// BONDING — frozen enum mapping logical key → wire value.
+// 2026-05-26 (Arch 8 Phase 1) — runtime guard + freeze. Documents the
+// CLAUDE.md "Known issues" entry: business logic compares against the
+// KEY (BONDING.CEMENT_SAND === 'CEMENT_SAND_MORTAR'), never the value
+// string directly. The dev-mode assertion catches drift if a future
+// edit changes a value without updating its consumers.
+export const BONDING = Object.freeze({
   CEMENT_SAND: 'CEMENT_SAND_MORTAR',
   THIN_BED:    'THIN_BED_ADHESIVE',
+})
+
+// Keys list — iterate in normalized order (e.g. for UI dropdowns or
+// validation rule registration). NEVER compare keys as strings outside
+// this list.
+export const BONDING_KEYS = Object.freeze(['CEMENT_SAND', 'THIN_BED'])
+
+// Dev-only contract assertion. Runs once at module load. In production
+// builds the if-block is dead-code-eliminated by Vite.
+if (typeof process === 'undefined' || process.env?.NODE_ENV !== 'production') {
+  if (BONDING.CEMENT_SAND !== 'CEMENT_SAND_MORTAR') {
+    throw new Error('BONDING.CEMENT_SAND contract drift — expected CEMENT_SAND_MORTAR')
+  }
+  if (BONDING.THIN_BED !== 'THIN_BED_ADHESIVE') {
+    throw new Error('BONDING.THIN_BED contract drift — expected THIN_BED_ADHESIVE')
+  }
+  if (BONDING_KEYS.length !== Object.keys(BONDING).length) {
+    throw new Error('BONDING_KEYS / BONDING object out of sync')
+  }
 }
 
 // Field naming:

@@ -43,11 +43,10 @@ import { computeFireQuantities } from '../mep/quantities/fire.js'
 import { buildElvSystemGraph } from '../mep/elv/network.js'
 import { buildElvRoutes } from '../mep/elv/routing.js'
 import { computeElvQuantities } from '../mep/quantities/elv.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const FT3_TO_M3 = 0.0283168
 const DEFAULT_FLOOR_ID = 'F1'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function filterMap(map, pred) {
   const out = {}

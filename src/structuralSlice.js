@@ -58,10 +58,10 @@ import {
   getColumnsByFoundation as topoGetColumnsByFoundation,
 } from './topology/foundations.js'
 
+import { safeR2 as r2 } from './lib/numbers.js'
+
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 // Fix 3: a slab's structural role is derived from its position in the floor stack.
 // Top floor → ROOF, intermediate → FLOOR. Sunken/staircase callers override the role.

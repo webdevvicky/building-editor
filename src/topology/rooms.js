@@ -11,10 +11,9 @@
 // so topology calls auto-scope when invoked via the scoped state.
 
 import { GRID_IN, doRoomsOverlap } from '../geometry.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const DEFAULT_FLOOR_ID = 'F1'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 // ── Pure polygon helpers ────────────────────────────────────────────────────
 

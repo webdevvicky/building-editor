@@ -2,7 +2,7 @@
 // Each function: (state) => { title, steps: [{ label, value, bold? }], note? }
 // state is the full Zustand store state — no store imports needed.
 
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 // ---------------------------------------------------------------------------
 // 1. Main slab

@@ -20,11 +20,10 @@ import {
 } from '../specs/paintSystems.js'
 import { computePlasterQuantities } from './plaster.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const ALGORITHM     = 'PAINT_SYSTEM_LAYER_ROLLUP_V1'
 const CALC_VERSION  = '2026-05-26'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function _resolveInteriorSystemId(state) {
   return state?.projectSettings?.defaultInteriorPaintSystemId ?? DEFAULT_INTERIOR_PAINT_SYSTEM_ID

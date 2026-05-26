@@ -5,9 +5,9 @@ import {
   AGGREGATE_M3_PER_M3_DRY,
   AGGREGATE_SPLIT,
 } from '../constants/structural'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const FT3_TO_M3 = 0.0283168
-const r2 = (n) => Math.round(n * 100) / 100
 
 const STEEL_NOTE =
   'Steel quantity = RCC volume × reinforcement density. Density reflects typical residential construction; verify with structural engineer for actual BBS.'

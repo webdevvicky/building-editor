@@ -29,8 +29,7 @@
 
 import { PCC_BEDDING_THICKNESS_FT } from '../constants/structural'
 import { computeFoundationQuantities } from './foundations'
-
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const DEFAULT_WORKING_MARGIN_FT = 0.5
 

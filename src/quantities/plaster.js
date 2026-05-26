@@ -54,11 +54,10 @@ import {
 import { isExternalWall } from '../topology/walls.js'
 import { getColumnPerimeterFt } from '../lib/columnShapes.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const DEFAULT_FLOOR_HEIGHT_FT = 10
 const DEFAULT_EXTERNAL_SYSTEM_ID = 'CEMENT_SAND_EXTERNAL'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function resolveInternalSystemId(room, projectSettings) {
   return room?.plasterSystemId

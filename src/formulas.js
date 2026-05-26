@@ -1,6 +1,7 @@
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from './geometry'
 import { computePlasterQuantities } from './quantities/plaster'
+import { safeR2 as r2 } from './lib/numbers.js'
 
 export * from './formulas/structuralFormulas'
 
@@ -8,8 +9,6 @@ export * from './formulas/structuralFormulas'
 // All functions return { title, steps: [{label, value, bold?}], note? }
 
 const WASTAGE = 1.05
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function wallLengthFt(wall, nodes) {
   const a = nodes[wall.n1], b = nodes[wall.n2]

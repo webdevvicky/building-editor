@@ -3,8 +3,7 @@
 // state must expose: walls, nodes, projectSettings, classifyWallBeamFlags(wallId)
 
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
-
-function r2(n) { return Math.round(n * 100) / 100 }
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 // Returns display label for a beam level, annotating auto-derived flags.
 // wall[flag] === null means the flag was not set explicitly — resolved via room adjacency.

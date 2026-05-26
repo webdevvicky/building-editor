@@ -16,6 +16,8 @@
 //
 // Renders on Summary sheet / PDF cover — NOT as BOQ lines.
 
+import { safeR2 as r2 } from '../lib/numbers.js'
+
 export const DEFAULT_PROJECT_COSTS = Object.freeze({
   laborMode:          'percent',
   laborPercent:       15,
@@ -28,8 +30,6 @@ export const DEFAULT_PROJECT_COSTS = Object.freeze({
   gstPercent:         18,
   gstAppliesToLabor:  false,
 })
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function _component(mode, percent, lumpsum, base) {
   if (mode === 'lumpsum') return Math.max(0, lumpsum ?? 0)

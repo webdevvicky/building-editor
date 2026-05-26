@@ -56,10 +56,9 @@ import { emitElectricalLines }         from './emitters/electrical.js'
 import { emitHvacLines }               from './emitters/hvac.js'
 import { emitFireLines }               from './emitters/fire.js'
 import { emitElvLines }                from './emitters/elv.js'
+import { safeR2 as r2 } from '../lib/numbers.js'
 
 const DEFAULT_FLOOR = 'F1'
-
-function r2(n) { return Math.round(n * 100) / 100 }
 
 function calcCost(qty, rateStr, isPer1000 = false) {
   const r = parseFloat(rateStr)
