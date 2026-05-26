@@ -1215,6 +1215,91 @@ check('Export drift guard: model.grandTotal === projectCosts.grandTotal',
       modelA.grandTotal === modelA.projectCosts.grandTotal,
       `model=${modelA.grandTotal}, pc=${modelA.projectCosts.grandTotal}`)
 
+header('17. Tile per-room overrides (RoomDetailPanel + ProjectSettingsPanel)')
+
+// Reset to a single-room project, then exercise the override paths.
+resetStore()
+buildSimpleRoom('Toilet', 'TOILET', 0, 0, 5, 8)
+const tileMod = await import('../src/quantities/tiles.js')
+const toiletRoom = Object.values(s().rooms).find(r => r.type === 'TOILET')
+
+// (a) Default — TOILET inherits 7 ft from tileDefaults
+check('dado default: TOILET resolves to 7 ft (project default)',
+      tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt === 7,
+      `got ${tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt}`)
+check('dado default: source === default',
+      tileMod.computeTileQuantities(s()).perRoom[0].dadoSource === 'default')
+
+// (b) Explicit numeric override
+s().setRoomDado(toiletRoom.id, 9.5)
+check('dado override: 9.5 ft persists',
+      tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt === 9.5,
+      `got ${tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt}`)
+check('dado override: source === override',
+      tileMod.computeTileQuantities(s()).perRoom[0].dadoSource === 'override')
+
+// (c) FULL sentinel → resolved = floorHeight - slabThickness/12
+s().setRoomDado(toiletRoom.id, 'FULL')
+const slabThkIn = s().projectSettings.slabSettings.mainThicknessIn
+const floorHt   = s().projectSettings.floors[0].floorHeightFt
+const fullResolved = Math.max(0, floorHt - slabThkIn / 12)
+check('dado FULL sentinel resolves to floor-height − slab-thickness',
+      Math.abs(tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt - fullResolved) < 0.01,
+      `got ${tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt}, expected ${fullResolved}`)
+check('dado FULL: source === override-full',
+      tileMod.computeTileQuantities(s()).perRoom[0].dadoSource === 'override-full')
+
+// (d) Floor-height change propagates through FULL sentinel.
+const f1Id = s().projectSettings.floors[0].id
+const beforeDado = tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt
+s().updateFloor(f1Id, { floorHeightFt: 12 })
+const afterDado = tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt
+check('FULL sentinel recomputes after floor-height change',
+      afterDado > beforeDado,
+      `before=${beforeDado}, after=${afterDado}`)
+// Restore floor height for downstream tests.
+s().updateFloor(f1Id, { floorHeightFt: 10 })
+
+// (e) Clear → revert to project default
+s().setRoomDado(toiletRoom.id, null)
+check('dado clear: reverts to project default (7 ft)',
+      tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt === 7,
+      `got ${tileMod.computeTileQuantities(s()).perRoom[0].dadoHeightFt}`)
+
+// (f) Skirting include override
+buildSimpleRoom('Bed', 'BEDROOM', 20, 0, 10, 10)
+const bedroom = Object.values(s().rooms).find(r => r.type === 'BEDROOM')
+const bedRowDefault = tileMod.computeTileQuantities(s()).perRoom.find(p => p.roomId === bedroom.id)
+check('skirting default: BEDROOM included (in skirtingApplyToTypes)',
+      bedRowDefault.skirtingRft > 0, `got ${bedRowDefault.skirtingRft}`)
+
+s().setRoomIncludeSkirting(bedroom.id, false)
+const bedRowOff = tileMod.computeTileQuantities(s()).perRoom.find(p => p.roomId === bedroom.id)
+check('skirting force-exclude works',
+      bedRowOff.skirtingRft === 0 && bedRowOff.skirtingSource === 'override-off',
+      `skirtingRft=${bedRowOff.skirtingRft}, source=${bedRowOff.skirtingSource}`)
+
+s().setRoomIncludeSkirting(bedroom.id, true)
+const bedRowOn = tileMod.computeTileQuantities(s()).perRoom.find(p => p.roomId === bedroom.id)
+check('skirting force-include works',
+      bedRowOn.skirtingRft > 0 && bedRowOn.skirtingSource === 'override-on',
+      `skirtingRft=${bedRowOn.skirtingRft}, source=${bedRowOn.skirtingSource}`)
+
+// (g) Project-default FULL sentinel
+s().setRoomIncludeSkirting(bedroom.id, null)
+s().setTileDefaults({ dadoHeightsFt: { TOILET: 'FULL' } })
+s().setRoomDado(toiletRoom.id, null)
+const projFullRow = tileMod.computeTileQuantities(s()).perRoom.find(p => p.roomId === toiletRoom.id)
+check('dado project-default FULL sentinel resolves per room',
+      Math.abs(projFullRow.dadoHeightFt - fullResolved) < 0.01 && projFullRow.dadoSource === 'default-full',
+      `got ${projFullRow.dadoHeightFt} source=${projFullRow.dadoSource}`)
+
+// (h) Project-level skirting height setter
+s().setTileDefaults({ skirtingHeightIn: 6 })
+check('skirting height 6" persists in tileDefaults',
+      s().projectSettings.tileDefaults.skirtingHeightIn === 6,
+      `got ${s().projectSettings.tileDefaults.skirtingHeightIn}`)
+
 // Done.
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)

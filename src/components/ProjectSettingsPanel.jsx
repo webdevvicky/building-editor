@@ -1,11 +1,13 @@
 import { useStore } from '../store'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
+import { ROOM_TYPES, ROOM_TYPE_LABELS } from '../roomPresets'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 import { Field } from './ui/Field.jsx'
 import FeetInchesInput from './ui/FeetInchesInput.jsx'
-import { DEFAULT_PRECISION } from '../lib/units.js'
+import { DEFAULT_PRECISION, formatFeetInches } from '../lib/units.js'
+import { FULL_SENTINEL, _fullHeightFt } from '../quantities/tiles.js'
 
 const sectionHead = {
   fontSize: 'var(--text-xs)',
@@ -138,6 +140,9 @@ export default function ProjectSettingsPanel() {
   const removeColumnType        = useStore(s => s.removeColumnType)
   const setProjectSettings      = useStore(s => s.setProjectSettings)
   const setFoundationDefaults   = useStore(s => s.setFoundationDefaults)
+  const setTileDefaults         = useStore(s => s.setTileDefaults)
+  // The full-height sentinel resolution needs to read state.projectSettings
+  // (floors + slabSettings) on every render — _fullHeightFt does that.
 
   const open = activeTool === 'settings'
   const onClose = () => setTool('select')
@@ -151,6 +156,7 @@ export default function ProjectSettingsPanel() {
     staircaseDefaults,
     columnTypes,
     rccSpecs,
+    tileDefaults,
   } = projectSettings ?? {}
 
   const steelRatios = rccSpecs?.steelKgPerM3 ?? {}
@@ -221,6 +227,140 @@ export default function ProjectSettingsPanel() {
         </select>
       </div>
       <div style={hintText}>Per-room override available in Room panel.</div>
+
+      <div style={divider} />
+
+      {/* 1d. Tiles — dado heights / skirting / allowances (2026-05-26) */}
+      <div style={sectionHead}>Tiles</div>
+      <div style={hintText}>
+        Dado heights apply to wall tiles per room type. Use "Full" to
+        track current floor height (auto-recomputes if floor height changes).
+      </div>
+
+      {/* Skirting height (currently 4" default; engineers want 3 / 4 / 6 ranges) */}
+      <div style={fieldRow}>
+        <span style={lbl}>Skirting height (in)</span>
+        <input
+          type="number" min={1} step={0.5}
+          style={numInput}
+          value={tileDefaults?.skirtingHeightIn ?? 4}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setTileDefaults({ skirtingHeightIn: parseFloat(e.target.value) })}
+        />
+        <div style={{ display: 'flex', gap: 'var(--space-1)', marginLeft: 'var(--space-2)' }}>
+          {[3, 4, 6].map(n => (
+            <Button key={n} size="sm" variant="ghost"
+              onClick={() => setTileDefaults({ skirtingHeightIn: n })}>
+              {n}"
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* Per-room-type dado heights — 5 fixed buckets matching DEFAULT_PROJECT_SETTINGS */}
+      <div style={{
+        fontSize: 'var(--text-xs)',
+        color: 'var(--color-text-muted)',
+        marginTop: 'var(--space-2)',
+        marginBottom: 'var(--space-1)',
+      }}>
+        Dado height by room type
+      </div>
+      {['TOILET', 'KITCHEN', 'UTILITY', 'BALCONY', 'OTHER'].map(type => {
+        const raw = tileDefaults?.dadoHeightsFt?.[type]
+        const isFull = raw === FULL_SENTINEL
+        const numericValue = isFull
+          ? _fullHeightFt({ projectSettings }, { floorId: null })
+          : (typeof raw === 'number' ? raw : 0)
+        return (
+          <div key={type} style={{ ...fieldRow, alignItems: 'center' }}>
+            <span style={lbl}>{ROOM_TYPE_LABELS[type] ?? type}</span>
+            <div style={{ flex: 1, display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
+              <FeetInchesInput
+                value={numericValue}
+                onCommit={ft => setTileDefaults({ dadoHeightsFt: { [type]: ft } })}
+                min={0}
+                precision={DEFAULT_PRECISION.foundation}
+              />
+              {isFull && (
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--color-primary)',
+                  fontWeight: 'var(--weight-semibold)',
+                }}>
+                  Full
+                </span>
+              )}
+              <Button size="sm" variant={raw === 0 ? 'primary' : 'ghost'}
+                onClick={() => setTileDefaults({ dadoHeightsFt: { [type]: 0 } })}
+                title="No dado">
+                None
+              </Button>
+              <Button size="sm" variant={raw === 4 ? 'primary' : 'ghost'}
+                onClick={() => setTileDefaults({ dadoHeightsFt: { [type]: 4 } })}
+                title="Half height (4')">
+                Half
+              </Button>
+              <Button size="sm" variant={isFull ? 'primary' : 'ghost'}
+                onClick={() => setTileDefaults({ dadoHeightsFt: { [type]: FULL_SENTINEL } })}
+                title="Full height — tracks floor height">
+                Full
+              </Button>
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Skirting apply-to-types — multi-toggle over ROOM_TYPES */}
+      <div style={{
+        fontSize: 'var(--text-xs)',
+        color: 'var(--color-text-muted)',
+        marginTop: 'var(--space-2)',
+        marginBottom: 'var(--space-1)',
+      }}>
+        Apply skirting to room types
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr',
+        gap: 'var(--space-1) var(--space-2)',
+        marginBottom: 'var(--space-2)',
+      }}>
+        {ROOM_TYPES.map(type => {
+          const active = (tileDefaults?.skirtingApplyToTypes ?? []).includes(type)
+          return (
+            <label key={type} style={{
+              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+              fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer',
+            }}>
+              <input type="checkbox" checked={active}
+                onKeyDown={e => e.stopPropagation()}
+                onChange={e => {
+                  const cur = tileDefaults?.skirtingApplyToTypes ?? []
+                  const next = e.target.checked
+                    ? [...new Set([...cur, type])]
+                    : cur.filter(t => t !== type)
+                  setTileDefaults({ skirtingApplyToTypes: next })
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+              {ROOM_TYPE_LABELS[type] ?? type}
+            </label>
+          )
+        })}
+      </div>
+
+      {/* Tile allowances */}
+      <NumField
+        label="Floor tile allowance" step={0.05} min={1.0}
+        value={tileDefaults?.floorTileAllowance ?? 1.05}
+        onChange={v => setTileDefaults({ floorTileAllowance: v })}
+      />
+      <NumField
+        label="Wall tile allowance" step={0.05} min={1.0}
+        value={tileDefaults?.wallTileAllowance ?? 1.10}
+        onChange={v => setTileDefaults({ wallTileAllowance: v })}
+      />
 
       <div style={divider} />
 

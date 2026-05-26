@@ -861,6 +861,18 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // 2026-05-26 — per-room skirting include override. null = derive from
+  // project rule (room.type ∈ skirtingApplyToTypes AND dado===0 AND
+  // finishes.flooring); true = force include; false = force exclude.
+  setRoomIncludeSkirting(roomId, includeSkirting) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, includeSkirting } } }
+    })
+  },
+
   // Rev 2 — per-room kitchen counter override. null = inherit
   // (projectSettings.kitchenCounter; lengthMode derives geometry).
   setRoomKitchenCounter(roomId, kitchenCounter) {

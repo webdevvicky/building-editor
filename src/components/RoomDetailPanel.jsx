@@ -7,6 +7,13 @@ import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import FeetInchesInput from './ui/FeetInchesInput.jsx'
+import { formatFeetInches, DEFAULT_PRECISION } from '../lib/units.js'
+import {
+  FULL_SENTINEL,
+  _resolveDadoFt, _resolveDadoSource,
+  _fullHeightFt, _resolveSkirtingSource,
+} from '../quantities/tiles.js'
 
 function Row({ label, value, sub }) {
   return (
@@ -52,6 +59,8 @@ export default function RoomDetailPanel() {
   const setRoomType             = useStore(s => s.setRoomType)
   const setRoomFinishes         = useStore(s => s.setRoomFinishes)
   const setRoomPlasterSystem    = useStore(s => s.setRoomPlasterSystem)
+  const setRoomDado             = useStore(s => s.setRoomDado)
+  const setRoomIncludeSkirting  = useStore(s => s.setRoomIncludeSkirting)
   const getOverlappingRoomName  = useStore(s => s.getOverlappingRoomName)
 
   const [editingName, setEditingName] = useState(false)
@@ -250,6 +259,153 @@ export default function RoomDetailPanel() {
       })()}
 
       {valid && <>
+        {/* ── Tiles & skirting overrides (2026-05-26) ─────────────── */}
+        {(() => {
+          const state = { rooms, walls, nodes, projectSettings }
+          // Resolve effective dado + source for the badge.
+          const effectiveDadoFt = _resolveDadoFt(room, state)
+          const dadoSource      = _resolveDadoSource(room, state)
+          const fullFt          = _fullHeightFt(state, room)
+
+          // Source label for the badge.
+          let dadoBadge
+          if (dadoSource === 'override')      dadoBadge = 'Custom override'
+          else if (dadoSource === 'override-full') dadoBadge = `Full height (${formatFeetInches(fullFt)})`
+          else if (dadoSource === 'default')  dadoBadge = `Project default for ${ROOM_TYPE_LABELS[room.type] ?? room.type}`
+          else if (dadoSource === 'default-full') dadoBadge = `Project default — Full (${formatFeetInches(fullFt)})`
+          else                                dadoBadge = 'No dado'
+
+          const isOverride = dadoSource === 'override' || dadoSource === 'override-full'
+          const isFullActive = dadoSource === 'override-full'
+
+          // Skirting effective state + source.
+          const skirtingSource = _resolveSkirtingSource(room, state)
+          const skirtingMode = room.includeSkirting === true  ? 'on'
+                             : room.includeSkirting === false ? 'off'
+                             : 'default'
+          const SKIRTING_BADGES = {
+            'override-on':              'Included (override)',
+            'override-off':             'Excluded (override)',
+            'default-on':               `Included (default for ${ROOM_TYPE_LABELS[room.type] ?? room.type})`,
+            'default-off-dado':         'Excluded — dado supersedes',
+            'default-off-type':         `Excluded — ${ROOM_TYPE_LABELS[room.type] ?? room.type} not in default list`,
+            'default-off-no-flooring':  'Excluded — flooring disabled',
+          }
+          const skirtingBadge = SKIRTING_BADGES[skirtingSource] ?? '—'
+
+          // Segmented button helper.
+          const segBtn = (label, active, onClick, title) => (
+            <button
+              key={label}
+              type="button"
+              onClick={onClick}
+              title={title}
+              style={{
+                flex: 1,
+                fontSize: 'var(--text-xs)',
+                padding: '4px var(--space-2)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                background: active ? 'var(--color-primary-bg)' : 'var(--color-surface)',
+                color:      active ? 'var(--color-primary)'   : 'var(--color-text-secondary)',
+                fontWeight: active ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                cursor: 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          )
+
+          return (
+            <Section title="Tiles & skirting">
+              {/* Floor tiles toggle (duplicated from Finishes — co-located here for tile workflow) */}
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)',
+                cursor: 'pointer', marginBottom: 'var(--space-2)',
+              }}>
+                <input type="checkbox" checked={!!room.finishes?.flooring}
+                  onChange={e => setRoomFinishes(room.id, { flooring: e.target.checked })}
+                  style={{ cursor: 'pointer' }}
+                />
+                Include floor tiles
+                <span style={{
+                  marginLeft: 'auto',
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--color-text-muted)',
+                }}>(also in Finishes)</span>
+              </label>
+
+              {/* Dado height row */}
+              <div style={{ marginBottom: 'var(--space-2)' }}>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                  marginBottom: 4,
+                }}>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                    Dado height
+                  </span>
+                  <span style={{
+                    fontSize: 'var(--text-xs)',
+                    color: isOverride ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    fontWeight: isOverride ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                  }}>
+                    {dadoBadge}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ flex: 1 }}>
+                    <FeetInchesInput
+                      value={effectiveDadoFt}
+                      onCommit={ft => setRoomDado(room.id, ft)}
+                      min={0}
+                      precision={DEFAULT_PRECISION.foundation}
+                    />
+                  </div>
+                  {isOverride && (
+                    <Button size="sm" variant="ghost"
+                      onClick={() => setRoomDado(room.id, null)}
+                      title="Revert to project default">
+                      Clear
+                    </Button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                  {segBtn('None (0)',   room.dadoHeightFt === 0,             () => setRoomDado(room.id, 0),             'No wall tiles')}
+                  {segBtn('Half (4\')', room.dadoHeightFt === 4,             () => setRoomDado(room.id, 4),             'Half-height dado')}
+                  {segBtn('Full height', isFullActive,                       () => setRoomDado(room.id, FULL_SENTINEL), `Tracks floor height (${formatFeetInches(fullFt)})`)}
+                </div>
+              </div>
+
+              {/* Skirting include tri-state */}
+              <div>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                  marginBottom: 4,
+                }}>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                    Skirting
+                  </span>
+                  <span style={{
+                    fontSize: 'var(--text-xs)',
+                    color: skirtingMode !== 'default' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    fontWeight: skirtingMode !== 'default' ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                  }}>
+                    {skirtingBadge}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                  {segBtn('Default',   skirtingMode === 'default', () => setRoomIncludeSkirting(room.id, null),  'Use project default rule')}
+                  {segBtn('Force on',  skirtingMode === 'on',      () => setRoomIncludeSkirting(room.id, true),  'Always include skirting')}
+                  {segBtn('Force off', skirtingMode === 'off',     () => setRoomIncludeSkirting(room.id, false), 'Always exclude skirting')}
+                </div>
+              </div>
+            </Section>
+          )
+        })()}
+
+        <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />
+
         {/* Measurements */}
         <Section title="Area">
           <Row label="Floor"   value={fmtArea(floorArea)} />
