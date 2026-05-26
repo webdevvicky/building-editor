@@ -1,5 +1,310 @@
 # Building Editor — Developer Notes
 
+## Enterprise architecture — Phase 1 + Phase 2 (2026-05-26)
+
+Foundational architecture upgrade across 6 commits. The goal: enterprise-
+grade primitives that future features sit on top of without re-inventing
+the same wheels (IDs, schemas, integrity, operations, persistence, slice
+boundaries). Phase 3 (compute DAG + validation formalization) and Phase 4
+(Tier 1 UI gaps) build on top of this.
+
+**20 verify scripts gate every commit.** All must pass green; zero
+exceptions. New verify scripts ship alongside each architecture so the
+contracts are machine-enforced, not just documented.
+
+### Phase 1 — Foundation (commits `558046d`, `31c804e`, `64544f4`)
+
+**Arch 8 — Code quality** (`558046d`)
+- `src/lib/numbers.js`: `safeR2` / `safeRound` / `safeNum` / `safeClamp`
+  — `Number.isFinite` guard returns 0 for NaN/undefined/null. Replaced
+  every local `r2()` definition across 26 files via `import { safeR2
+  as r2 } from '../lib/numbers.js'` — callsites unchanged.
+- **Locked rule:** new files must NOT define a local `r2()`. Enforced
+  by `verify-lints.mjs` Rule 1 (grep guard).
+- BONDING enum frozen + runtime contract assertion in `src/materials.js`.
+  `BONDING_KEYS` exported as the canonical key list.
+- LayersPanel master toggle per discipline (tri-state header).
+- OHT volume readout in StampPanel + Staircase `hasHandrail` tri-state.
+
+**Arch 6 — Stable IFC GUIDs** (`31c804e`)
+- `src/lib/ids.js` is the **single home** for `crypto.randomUUID()`.
+  Exports `uid()` / `uidIfc()` / `newEntityIds()` /
+  `uuidToIfcGuid()` / `ifcGuidToUuid()` / `isValidUuid` /
+  `isValidIfcGuid`.
+- **Every persistent entity now carries TWO ids**:
+  - internal `id` — 36-char UUID, runtime addressing only
+  - `ifcGlobalId` — 22-char IFC base64 GUID (IFC 4 §8.7.3.4), STABLE
+    for entity lifetime, used by exports / persistence / journals /
+    revisions / dismissals
+- **Locked rule (C8 — ID exposure policy):** internal `id` is a
+  runtime-only implementation detail. Exports, revisions, persistence,
+  journals, validation dismissals MUST use `ifcGlobalId`. Enforced by
+  `verify-id-exposure.mjs` grep-guard on `src/export/` (extends to
+  more paths post-Arch-5; STRICT mode kicks in 2026-08-15).
+- **Locked rule:** no `crypto.randomUUID()` outside `src/lib/ids.js`.
+  Enforced by `verify-lints.mjs` Rule 2.
+- `splitWall` creates 3 entities with fresh ifcGlobalIds (midpoint
+  node + 2 new walls). Splits are NEW entities — original wall's
+  ifcGlobalId is destroyed.
+- `addStamp` with `type === 'stairs'` creates a companion staircase
+  that SHARES the stamp.id but has its OWN ifcGlobalId (distinct
+  entity for IFC export).
+- `loadProject` backfills `ifcGlobalId` on every entity lacking one.
+
+**Arch 9 — Entity schemas + integrity verifier** (`64544f4`)
+- `src/schema/entities/` — one schema file per entity type (17 total:
+  node, wall, opening, room, stamp, column, beam, slab, staircase,
+  foundation, 6 MEP disciplines, riser).
+- Each schema declares `entityType`, `storeSlice`, `fields` (type +
+  default + generator + min/max + oneOf), `invariants`, `legacyAliases`.
+- `src/schema/types.js` — `FIELD_TYPES` registry (uuid, ifcGuid, ref,
+  number, string, boolean variants, sentinel union `number|FULL|null`,
+  array, object|null).
+- `src/schema/normalize.js` — `normalizeEntity` / `normalizeCollection`
+  / `normalizeState`. Injects defaults, drops legacy aliases, recurses
+  sub-shapes (e.g. `wall.openings[]`).
+- `src/schema/validate.js` — `validateEntity` / `validateState`. Type
+  checks + oneOf + min/max + invariants. **Distinct from integrity** —
+  validation checks SHAPE; integrity checks REFERENCES.
+- `src/schema/integrity.js` — `verifyIntegrity(state) → { valid,
+  issues, count }`. Walks every FK-style reference (wall.n1/n2 →
+  nodes, room.wallIds → walls, beam.endpoints.columnId → columns, MEP
+  wallId/roomId/floorId, riser fromFloorId/toFloorId, etc.). Issues
+  sorted by `(entityType, entityId, field)` for byte-stable verify
+  output. `assertIntegrity(state, label)` throws on failure.
+- **Locked rule (MANDATORY baseline):** every state-building verify
+  script asserts `verifyIntegrity(state).valid` as its first
+  assertion. The pure-math scripts (`verify-iso-projection.mjs`,
+  `verify-units.mjs`) are exempt — no state to check.
+- **Locked rule:** new normalizations land as entries in entity
+  schemas (default + legacyAliases), NOT as ad-hoc passes in
+  loadProject. The 12+ existing ad-hoc passes will collapse into
+  the schema system over time.
+
+### Phase 2 — Core architecture (commits `58a1499`, `9c91e26`, `90971bd`)
+
+**Arch 2 — Operation journal** (`58a1499`)
+- `src/operations/` — dispatch-based mutation pipeline that SHIPS
+  ALONGSIDE existing `_save()`. Setters migrate incrementally as
+  features need journal / audit / collaboration capabilities.
+- `src/operations/types.js` — `OP_KIND = { USER, SYSTEM, TRANSIENT }`,
+  `OP_AUTHOR`, `buildOp({id, type, kind, payload, author})`,
+  `withInverse(op, inverse)`, `isValidOpKind`.
+- `src/operations/registry.js` — `OPERATIONS` map with 13
+  representative ops covering all three kinds:
+  - USER (full pipeline): `ADD_WALL`, `DELETE_WALL`,
+    `SET_WALL_MATERIAL`, `SET_WALL_HEIGHT`, `ADD_OPENING`,
+    `DELETE_OPENING`, `ADD_COLUMN`, `DELETE_COLUMN`
+  - SYSTEM (journal-only, no undo): `BACKFILL_IFC_GLOBAL_ID`,
+    `MIGRATE_SCHEMA_VERSION`, `REPAIR_BROKEN_REFERENCE`
+  - TRANSIENT (no journal/undo/autosave): `SET_SELECTED_WALL_ID`,
+    `SET_HOVERED_ENTITY`, `SET_LAYER_VISIBILITY`,
+    `SET_CURRENT_FLOOR_ID`
+- `src/operations/dispatch.js` — `dispatch(op, sideEffects)` routes
+  by kind:
+  - USER → apply + integrity-check + history + journal + autosave
+  - SYSTEM → apply + integrity-check + journal + autosave (NO undo)
+  - TRANSIENT → apply only (NO journal/undo/autosave)
+- `transaction(label, fn, sideEffects)` groups USER ops into one
+  composite. Nested transactions throw. **TRANSIENT ops inside
+  transactions throw** (selection/hover can't roll back coherently
+  with model changes).
+- **Locked rule (C1 — operation kinds):** every registered op
+  declares `kind`. Registry kind must match `op.kind` at dispatch
+  (mismatch throws). Enforced by `verify-op-kinds.mjs`.
+- **Locked rule (C2 — ID purity):** `apply()` handlers MUST NOT
+  generate IDs via `crypto.randomUUID()` / `uid()` / `uidIfc()` /
+  `newEntityIds()`. Caller pre-generates and threads through
+  payload. This is mandatory for deterministic journal replay +
+  future collaboration. Enforced by `verify-op-purity.mjs`
+  (parses registry, tracks function depth, flags any forbidden call).
+- **Integration with Arch 9:** every USER/SYSTEM op verifies
+  `verifyIntegrity(nextState)` post-apply. Failure throws
+  `OperationError` and the proposed state is discarded.
+- `sideEffects` injection pattern keeps `dispatch.js` host-agnostic:
+  `{ getState, setState, appendHistory, appendJournal,
+  markAutosaveDirty }`. Store wires real impls; tests inject mocks.
+- **Migration path:** ~80 existing `_save()` callsites continue
+  using legacy snapshot path. Migrate one at a time. `verify-
+  operations` + `verify-op-kinds` gate each migration.
+
+**Arch 5 — IDB persistence + migrations + catalog provenance** (`9c91e26`)
+- `src/operations/_schemaVersion.js` exports `SCHEMA_VERSION = 8` —
+  the **single source** shared by the operation envelope AND the
+  persistence migration chain. Re-exported by
+  `src/projects/schemaVersion.js`.
+- `src/projects/schemaVersion.js` — `MIGRATIONS` chain (ordered
+  `{ from, to, label, migrate }` entries). `runMigrations(data) →
+  { data, applied, warnings }`. Future-version saves preserved +
+  warned (forward-compat best effort). Pure functions; safety-break
+  against malformed chains.
+- **Locked rule:** every schema change (new required field, removed
+  field, renamed field) lands as a MIGRATIONS entry. Mechanical;
+  `verify-migrations.mjs` provides per-version fixtures.
+- `src/specs/catalogManifest.js` — `getAllCatalogVersions()` returns
+  a frozen snapshot of every catalog version (paint, ceiling,
+  hardware items + sets, 24 MEP catalogs, joinery / reinforcement /
+  plaster systems). `diffCatalogManifests(saved, current)` detects
+  nested + top-level drift; `flattenManifest()` produces a
+  path→version map.
+- **Locked rule:** every catalog file exporting `CATALOG_VERSION`
+  must be registered in the manifest. `verify-catalog-
+  provenance.mjs` walks the filesystem and asserts every
+  CATALOG_VERSION export is reachable from the manifest. The
+  verifier caught a real bug during Phase 2 (electricalConstants.js
+  exported a version that wasn't in the MEP manifest).
+- `src/projects/storage/indexedDb.js` — backend-agnostic facade
+  over a `storage` adapter:
+  ```
+  storage = { get, put, delete, getAll, clear }
+  ```
+  - `makeMemoryAdapter()` — Map-backed mock for tests + Node verify scripts
+  - Real IDB adapter (browser) wires identical interface (browser
+    integration deferred — the facade is ready)
+- `createPersistence(storage)` returns the full project API:
+  - Mirrors existing localStorage `manager.js` (listProjects,
+    openProject, saveCurrent, renameProject, deleteProject)
+  - PLUS Arch 5 additions: `appendJournalEntry`,
+    `readJournalSince`, `writeSnapshot`, `getLatestSnapshot`,
+    `stampCatalogProvenance`, `getLastCatalogProvenance`
+- `PROJECT_CHUNKS = ['model', 'projectSettings', 'settings']` —
+  chunked serialization so future autosave can write only the
+  changed slice(s).
+- IDB stores: `projects`, `chunks`, `journal`, `snapshots`,
+  `revisions`, `catalogs`.
+- **Deferred per C4 — LZ compression.** Chunks stored as plain
+  JSON (debuggable, simple). Add LZ only if quota telemetry
+  proves need.
+- **Deferred — multi-tab BroadcastChannel + real IDB adapter
+  wiring.** Infrastructure shape is documented; the actual browser
+  integration commit adds autosave migration from localStorage
+  manager.js to IDB.
+- **Crash recovery foundation:** snapshot + journal stores in
+  place. Load-path reassembly (latest snapshot + replay forward
+  journal entries) lands when autosave migrates.
+
+**Arch 1 — State-slice boundary contract + kill-switch shim** (`90971bd`)
+- **Why split this way:** the full physical refactor (moving every
+  entity from `state.X` to `state.model.X`) touches ~50 component
+  files via selector subscriptions. A big-bang refactor in one
+  commit would risk breaking verify scripts that depend on
+  `s().X` patterns. The contract-first approach delivers real
+  architectural value (slice classification + boundary invariants
+  + kill-switch enforcement) while letting the physical refactor
+  land file-by-file safely.
+- `src/store/legacyAccessors.js` — `LEGACY_ACCESSORS` frozen
+  registry of 45 state fields, each classified into one of five
+  target slices:
+  - **model** (17): nodes, walls, rooms, stamps, columns, beams,
+    slabs, staircases, foundations, 7 MEP collections, risers,
+    projectSettings
+  - **view** (25): activeTool, all selectedX, drawX,
+    layerVisibility, currentFloorId, unit, showDimensions,
+    ratesByKey, pendingWallIds, draftOpening, MEP selection ids
+  - **history** (2): history, future
+  - **validation** (1): validationEvents
+  - **cache** (0): lands fresh in the new shape — no legacy paths
+- `SHIM_KILL_BY = '2026-08-15'` — **single source** for the
+  kill-switch date. Every accessor declares this same `killBy`.
+- **Locked rule (boundary invariants):**
+  - View-slice fields NEVER captured in history snapshots
+    (transient state can't roll back coherently with model edits)
+  - History-slice fields NEVER inside model snapshots (no
+    recursion / unbounded growth)
+  - Every store field MUST be classified somewhere (catches
+    unknown additions)
+  Enforced by `verify-state-boundaries.mjs`. Caught real MEP
+  selection field omissions during Phase 2 build.
+- **Locked rule (kill-switch):** post-2026-08-15,
+  `LEGACY_ACCESSORS` MUST be empty. CI fails otherwise.
+  `verify-legacy-shim.mjs` reports days-remaining banner
+  pre-deadline.
+- **Physical refactor path:** as Phase 4 (Arch 7 — Tier 1 UI)
+  touches component code, each component migrates from
+  `state.X` to `state.model.X`. Each migrated path gets removed
+  from `LEGACY_ACCESSORS`. `verify-state-boundaries` continues
+  passing — boundaries hold regardless of physical layout.
+
+### Verify-script inventory (20 total)
+
+```
+Phase 1 (12):
+  verify-boq                  ← canonical BOQ pipeline
+  verify-multifloor           ← multi-floor scoping
+  verify-topology             ← spatial relationship layer
+  verify-mep                  ← 5 MEP disciplines + clash + sizing
+  verify-iso-projection       ← pure math (no integrity)
+  verify-units                ← pure math (no integrity)
+  verify-numbers              ← safeR2 / safeRound / safeNum / safeClamp + BONDING contract
+  verify-lints                ← Rule 1: no local r2; Rule 2: no raw crypto.randomUUID()
+  verify-ifc-ids              ← uid/uidIfc/newEntityIds + round-trip
+  verify-id-exposure          ← C8 grep guard for export/persistence paths
+  verify-schemas              ← entity schemas well-formed + normalizeEntity / validateEntity
+  verify-integrity            ← referential integrity verifier
+
+Phase 2 (8):
+  verify-operations           ← dispatch + apply/inverse round-trip + transactions
+  verify-op-purity            ← C2: no ID generation inside apply()
+  verify-op-kinds             ← C1: every op declares user/system/transient
+  verify-migrations           ← SCHEMA_VERSION + MIGRATIONS chain + runMigrations
+  verify-persistence          ← IDB layer round-trip via in-memory adapter
+  verify-catalog-provenance   ← manifest drift + filesystem-wide CATALOG_VERSION audit
+  verify-state-boundaries     ← slice boundary invariants
+  verify-legacy-shim          ← C5 kill-switch enforcement
+```
+
+**Cross-cutting baseline rule:** every state-building verify script's
+first assertion is `verifyIntegrity(state).valid`. If a script can't
+construct a state passing integrity, the test fixture is broken before
+any other assertion matters.
+
+### Working with the new infrastructure
+
+**Adding a new entity type:**
+1. Add an entity schema in `src/schema/entities/<name>.js` declaring
+   all fields + defaults + invariants + legacyAliases.
+2. Register it in `src/schema/entities/index.js` (ENTITY_SCHEMAS barrel).
+3. Add it to `src/schema/integrity.js` with FK checks for any `ref`
+   fields.
+4. Add it to `src/store/legacyAccessors.js` with a `slice` classification.
+5. Entity creation sites use `newEntityIds()` to stamp both `id` +
+   `ifcGlobalId`. NEVER call `crypto.randomUUID()` directly outside
+   `src/lib/ids.js`.
+
+**Adding a new schema field:**
+1. Update the entity schema's `fields` map.
+2. Add a MIGRATIONS entry in `src/projects/schemaVersion.js`
+   bumping SCHEMA_VERSION + a `migrate(data)` function that adds
+   the new field with a default.
+3. Re-run `verify-schemas` + `verify-migrations` + `verify-integrity`.
+
+**Adding a new catalog:**
+1. Create the catalog file with `export const CATALOG_VERSION` +
+   `export const CATALOG_SOURCE` + frozen registry + `getX(id)` +
+   `listX()`.
+2. Register the version in `src/specs/catalogManifest.js`
+   (or `src/mep/catalogs/index.js` for MEP).
+3. `verify-catalog-provenance.mjs` walks the filesystem and fails
+   if a catalog isn't registered.
+
+**Adding a new operation:**
+1. Add the entry to `src/operations/registry.js` with `version`,
+   `kind`, `apply(state, payload)` (pure, no IDs generated inside).
+2. The `apply` returns `{ nextState, inverse }`. Inverse payload
+   must be a valid op-type payload that undoes the apply.
+3. Caller pre-generates entity IDs via `newEntityIds()` and threads
+   them through the payload.
+4. `verify-operations` round-trips apply → inverse → original-state.
+
+**Adding a new validation rule (when Arch 4 lands in Phase 3):**
+1. Add the rule to `src/validation/rules/<name>.js`.
+2. Register in the rule barrel.
+3. Declare `version`, `severity`, `scope` (geometry / structural /
+   mep / boq / export / constructability per C7), `affectedBy`,
+   `check(state)`.
+
+---
+
 ## BOQ extension — Gaps 1–8 (2026-05-26)
 
 Procurement-grade extension closing 8 gaps vs Indian residential BOM
