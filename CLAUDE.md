@@ -1,5 +1,103 @@
 # Building Editor — Developer Notes
 
+## 3D Iso Viewer — rotation (2026-05-26)
+
+The iso viewer is no longer fixed at 30°/30°. The camera now rotates
+freely while every other guarantee of the iso pipeline (pure modules,
+painter's-algorithm sort, basis-stable across renders) holds.
+
+**Locked rules:**
+
+1. **`makeViewBasis(view)` is the single trig site.** Returns a frozen
+   `{ right, up, forward }` triple. Every `worldToIso(x,y,z,basis)`
+   call is a per-vertex dot product against a cached basis — NEVER
+   re-evaluate `Math.cos/sin` inside the project loop. The basis is
+   memoised in `IsoView` via `useMemo(() => makeViewBasis(view), [view])`.
+2. **Default-view byte parity.** At `{ azimuthDeg: 45, elevationDeg: 30 }`
+   the parameterised projection MUST reproduce the historical fixed
+   formula `sx = (x - y)·cos30, sy = -(x + y)·sin30 - z` exactly.
+   `scripts/verify-iso-projection.mjs` asserts this on 12 sample points
+   within `1e-9`. Any change to `projection.js` re-runs that script.
+3. **Azimuth is compass-style.** `0° = N`, `90° = E`, `180° = S`,
+   `270° = W`. `45 = NE` (default), `135 = SE`, `225 = SW`, `315 = NW`.
+   This is the convention `viewPresets.js` encodes — don't introduce
+   a mathematical-CCW preset elsewhere.
+4. **`src/iso/viewPresets.js` is the single source of preset angles.**
+   `ISO_PRESETS` (4 corners) + `CARDINAL_PRESETS` (4 cardinals) +
+   `DEFAULT_VIEW` + `ELEVATION_MIN_DEG`/`ELEVATION_MAX_DEG` (10°/70°).
+   `IsoView` imports — never hardcodes degrees. Adding a new preset
+   = one entry in this file.
+5. **Sort comparator takes basis, not raw axes.**
+   `makeBackToFrontComparator(basis)` ranks faces by
+   `dot(centroid, viewForward)` descending. Stable tiebreak chain is
+   MANDATORY: `depth → z asc → entityId → faceKind → originalIndex`.
+   Without the tail keys, nearly-coplanar faces flicker during
+   rotation. `extrude.js::buildFaceList` stamps `originalIndex` on
+   every face BEFORE calling sort so the final fallback is
+   always-distinct.
+6. **React keys for faces are stable, not array indices.**
+   `${elementType}:${entityId ?? '_'}:${faceKind}:${edgeIndex ?? '_'}:${originalIndex}`
+   — the `originalIndex` tail disambiguates multi-solid entities
+   (PILE foundations emit cap + N shaft solids sharing `entityId`)
+   without re-introducing array-index instability across rotations.
+   `prismToFaces` stamps `edgeIndex` on side faces so the key is
+   meaningful per edge.
+7. **View updates during drag/slider go through the rAF throttle.**
+   `pendingViewRef` holds the latest desired view; `rafRef` ensures
+   at most one `setView` per animation frame. Pattern:
+   ```
+   pendingViewRef.current = nextView
+   if (rafRef.current != null) return
+   rafRef.current = requestAnimationFrame(() => {
+     const v = pendingViewRef.current
+     pendingViewRef.current = null
+     rafRef.current = null
+     if (v) setView(v)
+   })
+   ```
+   Apply this to ANY high-frequency view-driving input (orbit drag,
+   elevation slider, future joystick). Preset clicks BYPASS the
+   throttle — they cancel `rafRef` and call `setView` synchronously
+   so the next bounds recompute sees the chosen preset.
+8. **Re-fit only on preset / reset.** `refitOnNextBoundsRef` is set
+   by `applyPreset` and consumed by a `useEffect` keyed on `bounds`
+   that calls `fitToContent` once then clears the flag. Drag-driven
+   view changes NEVER re-fit (would make orbiting unusable). The
+   on-open auto-fit uses its own `fitDoneRef` and stays untouched.
+9. **Pan vs Orbit is a single state toggle, not a modifier key.**
+   `dragMode ∈ 'pan' | 'orbit'`. Pan = existing translate-the-view
+   behaviour, Orbit = drag updates `view.azimuthDeg`
+   (`+0.4°/px` horizontal) and `view.elevationDeg` (`-0.3°/px`
+   vertical, clamped to `[10°, 70°]`). Cursor swaps via
+   `data-drag-mode` attribute on `.iso-svg` (pan → `move`,
+   orbit → `grab`, `:active` → `grabbing`). Do NOT add Shift+drag as
+   an alternative entry — the explicit toggle is the contract.
+10. **Bounds re-derive on basis change.** `bounds` `useMemo` depends
+    on `[faces, basis]` because every face point gets re-projected
+    when the camera rotates. Fit-to-content reads `bounds` from
+    closure (no ref). Don't introduce `boundsRef.current = bounds`
+    in render — it's a `react-hooks/refs` lint error.
+
+**Verification.** `scripts/verify-iso-projection.mjs` — 34 assertions
+covering default-view byte parity, `DEFAULT_BASIS` preconfig,
+omitted-basis fallback, cardinal-preset distinctness, elevation
+monotonicity, `viewForward` shape, and basis freezing. Must pass
+alongside the other five verify scripts.
+
+**What NOT to do:**
+- Don't compute `Math.cos(view.azimuthDeg * Math.PI/180)` anywhere
+  outside `makeViewBasis`. Pass the basis instead.
+- Don't sort faces by `centroid[0] + centroid[1]` — that bakes in the
+  default view. Always use the comparator factory.
+- Don't use array index as a React key for faces. The stable composite
+  key is mandatory at this face count.
+- Don't auto-fit during drag. Engineers expect orbit to keep the
+  current zoom/pan so they can inspect a corner from new angles.
+- Don't add a third drag mode (e.g. "zoom drag"). Scroll-wheel zoom
+  + the Pan/Orbit toggle is the entire contract.
+
+---
+
 ## BOQ export sheet/section bucket registry (2026-05-25)
 
 Single source of truth — `src/export/_buckets.js` — governs how BOQ
