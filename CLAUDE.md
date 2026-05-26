@@ -1,5 +1,64 @@
 # Building Editor — Developer Notes
 
+## BOQ export sheet/section bucket registry (2026-05-25)
+
+Single source of truth — `src/export/_buckets.js` — governs how BOQ
+categories group into Excel sheets and PDF sections. Both
+`src/export/excel.js` and `src/export/pdf.js` import from it so they
+can NEVER drift apart again. (They previously had two independent
+fixed category lists; both silently dropped joinery / tiles / grills
+/ MEP from per-sheet/per-section output.)
+
+**Registry shape.** `SHEET_BUCKETS` is an ordered frozen array of
+`{ name, categories }` entries. `categories` is either:
+- a STRING (single-category bucket — no System sub-column)
+- an OBJECT `{ cat, system }` (multi-category bucket — exporters
+  render a "System" column with the `system` label)
+
+**19 buckets shipped, 36 categories covered.** Single-category:
+Excavation, Plum Concrete, Structural, Concrete, Steel, Shuttering,
+Masonry, Plaster, Finishes, Tiles, Joinery, Grills & Handrails,
+Civil, Staircase. Multi-category MEP: Plumbing (Supply / Drainage /
+Fixtures), Electrical (Lighting / Power / AC / Submain / Solar /
+EV / Points / Fittings / DB), HVAC (Refrigerant / Condensate /
+Units), Fire (Detection / Suppression / Equipment), ELV (CCTV /
+Data / Security / AV).
+
+**Helpers exported alongside the registry:**
+- `bucketCategoryIds(bucket)` → flat array of raw category-id strings
+- `bucketIsMulti(bucket)` → true when 2+ categories merged (exporters
+  use to switch column layout)
+- `bucketSystemLabel(bucket, categoryId)` → System column value for a
+  line, '' if not a multi bucket
+- `bucketLines(bucket, grouped)` → flat lines from
+  `groupBoqLinesByCategory(...)` in bucket order (preserves e.g.
+  plumbing_supply before plumbing_drainage)
+- `ALL_BUCKETED_CATS` (Set) — every category id with a bucket
+- `warnUnmappedCategories(grouped)` — dev-only `console.warn` when an
+  emitted category isn't in `SHEET_BUCKETS`; called by both exports
+  so a future MEP discipline (e.g. Solar, deferred) can't silently
+  vanish from exports
+
+**Column layout in exporters when bucket is multi:**
+- Excel: prepends `System` column at position B. Amount formula
+  refs shift one column right (`D*G` instead of `C*F`).
+- PDF: prepends `System` column with `cellWidth: 70`. Subtotal-row
+  `colSpan` bumps from 4 to 5 to cover the extra column.
+
+**Adding a new BOQ category** (after emitting it in `boq/lines.js`
+or a new MEP emitter): add it to the appropriate bucket in
+`_buckets.js`. If it's a new discipline entirely, append a new
+multi-category bucket at the end of the array (MEP convention).
+Both Excel and PDF pick it up automatically. The dev warning fires
+in any session where the category appears but the bucket entry is
+missing.
+
+**What NOT to do:** never iterate `Object.keys(grouped)` in an
+exporter. The bucket registry exists to give users a stable,
+procurement-friendly ordering. Random iteration breaks that.
+
+---
+
 ## SelectionPanel primitive + click-priority fix (2026-05-25)
 
 **New primitive: `<SelectionPanel>`** (`src/components/ui/SelectionPanel.jsx`).
