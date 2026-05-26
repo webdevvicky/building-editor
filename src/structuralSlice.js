@@ -59,6 +59,7 @@ import {
 } from './topology/foundations.js'
 
 import { safeR2 as r2 } from './lib/numbers.js'
+import { uidIfc } from './lib/ids.js'
 
 // Unit conversion: 1 ft³ = 0.0283168 m³
 const FT3_TO_M3 = 0.0283168
@@ -548,7 +549,9 @@ export const createStructuralSlice = (set, get, uid) => ({
         // Fix 2: baseFloorId + topFloorId (default = current floor — single-floor column).
         // Column height = sum of floor heights from baseFloorId through topFloorId.
         [id]: {
-          id, x, y, columnTypeId, attachedNodeId,
+          id,
+          ifcGlobalId: uidIfc(),
+          x, y, columnTypeId, attachedNodeId,
           baseFloorId: floorId, topFloorId: floorId,
           classification: null,
           reinforcementSpecId: null,
@@ -641,6 +644,7 @@ export const createStructuralSlice = (set, get, uid) => ({
         ...state.foundations,
         [id]: {
           id,
+          ifcGlobalId: uidIfc(),
           type,
           columnIds: [],
           wallIds: [],
@@ -762,6 +766,7 @@ export const createStructuralSlice = (set, get, uid) => ({
         ...s.beams,
         [id]: {
           id,
+          ifcGlobalId: uidIfc(),
           endpoints: {
             from: { type: 'COLUMN', columnId: fromColumnId },
             to:   { type: 'COLUMN', columnId: toColumnId },
@@ -897,7 +902,9 @@ export const createStructuralSlice = (set, get, uid) => ({
       slabs: {
         ...state.slabs,
         [id]: {
-          id, type, roomIds: [...roomIds], thicknessIn, sinkDepthIn, grade: 'M20',
+          id,
+          ifcGlobalId: uidIfc(),
+          type, roomIds: [...roomIds], thicknessIn, sinkDepthIn, grade: 'M20',
           floorId,
           classification: role,
           role,
@@ -964,7 +971,9 @@ export const createStructuralSlice = (set, get, uid) => ({
     if (mainRoomIds.length > 0) {
       const mainId = uid()
       newSlabs[mainId] = {
-        id: mainId, type: 'MAIN', roomIds: mainRoomIds,
+        id: mainId,
+        ifcGlobalId: uidIfc(),
+        type: 'MAIN', roomIds: mainRoomIds,
         thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20',
         floorId, classification: mainRole, role: mainRole,
         reinforcementSpecId: null, meta: null,
@@ -974,7 +983,9 @@ export const createStructuralSlice = (set, get, uid) => ({
     for (const roomId of sunkenRoomIds) {
       const sunkenId = uid()
       newSlabs[sunkenId] = {
-        id: sunkenId, type: 'SUNKEN', roomIds: [roomId],
+        id: sunkenId,
+        ifcGlobalId: uidIfc(),
+        type: 'SUNKEN', roomIds: [roomId],
         thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20',
         floorId, classification: 'SUNKEN', role: 'SUNKEN',
         reinforcementSpecId: null, meta: null,

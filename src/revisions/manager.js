@@ -9,6 +9,8 @@
 // Public API matches the projects/manager.js style — pub/sub via subscribe(),
 // snapshots cached so useSyncExternalStore can read stable references.
 
+import { uid } from '../lib/ids.js'
+
 const REVISION_KEY_PREFIX = 'boq_revisions:'
 const MAX_REVISIONS_PER_PROJECT = 30
 export const REVISION_SCHEMA_VERSION = 1
@@ -62,9 +64,11 @@ function writeAll(projectId, list) {
   }
 }
 
+// Route through the canonical id factory (Arch 6 Rule 2). No local fallback
+// — crypto.randomUUID is universally available in modern browsers + Node 16+,
+// which is the supported target.
 function uuid() {
-  try { return crypto.randomUUID() }
-  catch { return 'r_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8) }
+  return uid()
 }
 
 // ── retention policy ─────────────────────────────────────────────────────────

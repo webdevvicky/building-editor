@@ -16,6 +16,8 @@
 // _save / undo / redo destructure must include these 7 keys for full
 // coverage — handled in store.js, not here.
 
+import { uidIfc } from './lib/ids.js'
+
 const DEFAULT_FLOOR_ID = 'F1'
 
 // Discipline tags per collection, used to stamp entities at creation.
@@ -31,6 +33,7 @@ const COLLECTION_DISCIPLINE = {
 function baseEntity({ uid, discipline, type, x, y, wallId, wallT, floorId }) {
   return {
     id: uid(),
+    ifcGlobalId: uidIfc(),
     floorId: floorId ?? DEFAULT_FLOOR_ID,
     discipline,
     type,
@@ -266,6 +269,7 @@ export const createMepSlice = (set, get, uid) => ({
   addRiser({ kind, fromFloorId, toFloorId, x, y, routingZone }) {
     const r = {
       id: uid(),
+      ifcGlobalId: uidIfc(),
       kind,
       discipline: (kind || '').split('_')[0],   // crude — refined by suggestions module
       fromFloorId: fromFloorId ?? DEFAULT_FLOOR_ID,
@@ -371,6 +375,7 @@ export const createMepSlice = (set, get, uid) => ({
         meta: null,
         ...e,
       }
+      if (!out[id].ifcGlobalId) out[id].ifcGlobalId = uidIfc()
     }
     return out
   },
@@ -390,6 +395,7 @@ export const createMepSlice = (set, get, uid) => ({
         meta: null,
         ...r,
       }
+      if (!out[id].ifcGlobalId) out[id].ifcGlobalId = uidIfc()
     }
     return out
   },

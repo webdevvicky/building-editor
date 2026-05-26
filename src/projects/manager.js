@@ -14,6 +14,8 @@
 //   getCurrentProjectId()                → string | null
 //   subscribe(fn)                        → unsubscribe()
 
+import { uid } from '../lib/ids.js'
+
 const STORAGE_KEY = 'boq_projects'
 const CURRENT_KEY = 'boq_current_project_id'
 
@@ -58,9 +60,11 @@ function writeAll(map) {
   }
 }
 
+// Route through the canonical id factory (Arch 6 Rule 2). No local fallback
+// — crypto.randomUUID is universally available in modern browsers + Node 16+,
+// which is the supported target.
 function uuid() {
-  try { return crypto.randomUUID() }
-  catch { return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8) }
+  return uid()
 }
 
 // Empty project shape — matches Toolbar.handleSave / store.loadProject.

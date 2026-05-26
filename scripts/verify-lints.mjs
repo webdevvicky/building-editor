@@ -73,17 +73,10 @@ if (R2_OFFENDERS.length === 0) {
 }
 
 // ── Rule 2: no raw crypto.randomUUID() outside src/lib/ids.js ─────────────
-// Allowlist: known sites that Arch 6 (Step 2) replaces with uid() from
-// src/lib/ids.js. REMOVE these entries after Arch 6 ships.
-//
-// KILL-SWITCH: after 2026-06-15, this allowlist must be empty.
-//
-// Each entry is a substring-match against the absolute file path.
+// Arch 6 (Step 2 of Phase 1) migrated every call site. The only file
+// allowed to call crypto.randomUUID() now is src/lib/ids.js.
 const RULE_2_ALLOWLIST = [
-  join('lib', 'ids.js'),                  // canonical home (post-Arch-6)
-  join('projects', 'manager.js'),          // → uid() after Arch 6
-  join('revisions', 'manager.js'),         // → uid() after Arch 6
-  join('store.js'),                        // const uid = () => ... — replaced by import from lib/ids.js after Arch 6
+  join('lib', 'ids.js'),                  // canonical home — the single source
 ]
 const RANDOM_UUID = /\bcrypto\.randomUUID\s*\(/
 const UUID_OFFENDERS = []
@@ -101,12 +94,8 @@ if (UUID_OFFENDERS.length === 0) {
   for (const o of UUID_OFFENDERS) failed.push(`   ${o}`)
 }
 
-// Kill-switch check on Rule 2 allowlist.
-const today = new Date()
-const killDate = new Date('2026-06-15')
-if (today > killDate && RULE_2_ALLOWLIST.length > 1) {
-  failed.push(`Rule 2 KILL-SWITCH: allowlist must be empty after 2026-06-15 (today ${today.toISOString().slice(0, 10)}). Arch 6 missed deadline. Remove the manager.js / store.js entries from RULE_2_ALLOWLIST.`)
-}
+// Arch 6 shipped — allowlist now contains only the canonical home.
+// No kill-switch needed.
 
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)

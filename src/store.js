@@ -29,8 +29,7 @@ import {
   OPENING_SUBTYPE, SUBTYPE_SOURCE,
   VENTILATOR_MAX_HEIGHT_IN, VENTILATOR_MAX_WIDTH_IN,
 } from './constants/joinery.js'
-
-const uid = () => crypto.randomUUID()
+import { uid, uidIfc, newEntityIds } from './lib/ids.js'
 
 // Default opening subtype — pure heuristic by size + type. Used at creation
 // time (addOpening) and as loadProject fallback when subtype is absent.
@@ -256,15 +255,17 @@ export const useStore = create((set, get) => ({
       if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) continue
       if (Math.hypot(x - a.x, y - a.y) < SNAP_IN || Math.hypot(x - b.x, y - b.y) < SNAP_IN) continue
       const newNodeId = uid()
+      const newNodeIfc = uidIfc()
       const w1Id = uid(), w2Id = uid()
+      const w1Ifc = uidIfc(), w2Ifc = uidIfc()
       // Midpoint node inherits topology from the wall being split. Wall is
       // single-floor today (wall.floorId), so the node's floorIds wraps it.
       const newNodeFloorIds = [wall.floorId ?? cur]
       set(s => {
         const newWalls = { ...s.walls }
         delete newWalls[wall.id]
-        newWalls[w1Id] = { ...wall, id: w1Id, n1: wall.n1, n2: newNodeId, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
-        newWalls[w2Id] = { ...wall, id: w2Id, n1: newNodeId, n2: wall.n2, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
+        newWalls[w1Id] = { ...wall, id: w1Id, ifcGlobalId: w1Ifc, n1: wall.n1, n2: newNodeId, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
+        newWalls[w2Id] = { ...wall, id: w2Id, ifcGlobalId: w2Ifc, n1: newNodeId, n2: wall.n2, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
         const rooms = {}
         Object.values(s.rooms).forEach(r => {
           const idx = r.wallIds.indexOf(wall.id)
@@ -274,15 +275,15 @@ export const useStore = create((set, get) => ({
           rooms[r.id] = { ...r, wallIds }
         })
         return {
-          nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, x, y, floorIds: newNodeFloorIds } },
+          nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, ifcGlobalId: newNodeIfc, x, y, floorIds: newNodeFloorIds } },
           walls: newWalls, rooms,
         }
       })
       return newNodeId
     }
 
-    const id = uid()
-    set(s => ({ nodes: { ...s.nodes, [id]: { id, x, y, floorIds: [cur] } } }))
+    const { id, ifcGlobalId } = newEntityIds()
+    set(s => ({ nodes: { ...s.nodes, [id]: { id, ifcGlobalId, x, y, floorIds: [cur] } } }))
     return id
   },
 
@@ -322,11 +323,11 @@ export const useStore = create((set, get) => ({
       if (!pointInPolygon(nodeA.x, nodeA.y, plotPoly) || !pointInPolygon(nodeB.x, nodeB.y, plotPoly)) return
     }
     get()._save()
-    const id = uid()
+    const { id, ifcGlobalId } = newEntityIds()
     const isVirtual = get().drawVirtual
     const floorId = cur
     set(s => ({
-      walls: { ...s.walls, [id]: { id, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null } },
+      walls: { ...s.walls, [id]: { id, ifcGlobalId, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null } },
       drawStartId: null,
     }))
   },
@@ -442,15 +443,17 @@ export const useStore = create((set, get) => ({
 
     get()._save()
     const newNodeId = uid()
+    const newNodeIfc = uidIfc()
     const w1Id = uid(), w2Id = uid()
+    const w1Ifc = uidIfc(), w2Ifc = uidIfc()
     // Midpoint node inherits topology from the wall it splits. Wall is
     // single-floor today; floorIds wraps that one floor.
     const newNodeFloorIds = [wallFloorId]
     set(s => {
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
-      newWalls[w1Id] = { id: w1Id, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
-      newWalls[w2Id] = { id: w2Id, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
+      newWalls[w1Id] = { id: w1Id, ifcGlobalId: w1Ifc, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
+      newWalls[w2Id] = { id: w2Id, ifcGlobalId: w2Ifc, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
       const rooms = {}
       Object.values(s.rooms).forEach(r => {
         const idx = r.wallIds.indexOf(wallId)
@@ -460,7 +463,7 @@ export const useStore = create((set, get) => ({
         rooms[r.id] = { ...r, wallIds }
       })
       return {
-        nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, x, y, floorIds: newNodeFloorIds } },
+        nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, ifcGlobalId: newNodeIfc, x, y, floorIds: newNodeFloorIds } },
         walls: newWalls, rooms,
       }
     })
@@ -478,7 +481,7 @@ export const useStore = create((set, get) => ({
 
   addOpening(wallId, { offset, width, height, type = 'door', orient = 0 }) {
     get()._save()
-    const id = uid()
+    const { id, ifcGlobalId } = newEntityIds()
     set(s => {
       const wall = s.walls[wallId]
       if (!wall) return {}
@@ -488,7 +491,7 @@ export const useStore = create((set, get) => ({
       // MAIN_DOOR when the wall is external AND this floor has no MAIN_DOOR
       // yet (lazy check against the current state). subtypeSource records
       // whether the value came from the heuristic vs an explicit user pick.
-      const seed = { id, offset, width, height, type, orient, hasSunshade }
+      const seed = { id, ifcGlobalId, offset, width, height, type, orient, hasSunshade }
       let subtype = _deriveSubtypeBySize(seed)
       if (type === 'door') {
         const adjCount = s.getWallAdjacencyCount?.() ?? {}
@@ -673,7 +676,10 @@ export const useStore = create((set, get) => ({
 
   addStamp(type, x, y) {
     get()._save()
-    const id = uid()
+    const { id, ifcGlobalId } = newEntityIds()
+    // Staircase companion is a distinct entity that happens to share the
+    // stamp.id (Arch 6 — separate IFC GUID even though id is reused).
+    const staircaseIfc = type === 'stairs' ? uidIfc() : null
     const floorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
     // w, h = footprint dimensions (plan view, inches)
     // depth = vertical depth (civil stamps only — undefined for stairs/lift)
@@ -686,7 +692,7 @@ export const useStore = create((set, get) => ({
     }[type] || { w: 48, h: 48 }
     set(s => {
       const nextState = {
-        stamps: { ...s.stamps, [id]: { id, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults, floorId, meta: null } },
+        stamps: { ...s.stamps, [id]: { id, ifcGlobalId, type, x: x - defaults.w / 2, y: y - defaults.h / 2, ...defaults, floorId, meta: null } },
       }
       if (type === 'stairs') {
         const sd = s.projectSettings?.staircaseDefaults ?? DEFAULT_PROJECT_SETTINGS.staircaseDefaults
@@ -694,6 +700,7 @@ export const useStore = create((set, get) => ({
           ...s.staircases,
           [id]: {
             id,
+            ifcGlobalId: staircaseIfc,
             type: sd.type,
             flightCount: 2, stepsPerFlight: 7,
             treadIn: sd.treadIn, riserIn: sd.riserIn, waistSlabIn: sd.waistSlabIn,
@@ -788,7 +795,7 @@ export const useStore = create((set, get) => ({
     }
 
     get()._save()
-    const id       = uid()
+    const { id, ifcGlobalId } = newEntityIds()
     const safeType = ROOM_PRESETS[type] ? type : 'OTHER'
     const floorId  = get().currentFloorId ?? DEFAULT_FLOOR_ID
     set(s => ({
@@ -796,6 +803,7 @@ export const useStore = create((set, get) => ({
         ...s.rooms,
         [id]: {
           id,
+          ifcGlobalId,
           name,
           wallIds:          [...s.pendingWallIds],
           type:             safeType,
@@ -930,7 +938,7 @@ export const useStore = create((set, get) => ({
       const floorIds = Array.isArray(node.floorIds) && node.floorIds.length > 0
         ? node.floorIds
         : [DEFAULT_FLOOR_ID]
-      migratedNodes[id] = { ...node, floorIds }
+      migratedNodes[id] = { ...node, floorIds, ifcGlobalId: node.ifcGlobalId ?? uidIfc() }
     }
 
     // Migrate rooms: add type/finishes if missing, validate type against known presets
@@ -945,6 +953,7 @@ export const useStore = create((set, get) => ({
         finishes:         room.finishes
           ? { ...ALL_FINISHES, ...room.finishes }   // fill any missing flag keys
           : getPresetFinishes(safeType),             // v1/v2 rooms: use type preset (OTHER=ALL_FINISHES)
+        ifcGlobalId:      room.ifcGlobalId ?? uidIfc(),
       }
     }
     if (import.meta.env?.DEV) {
@@ -991,13 +1000,17 @@ export const useStore = create((set, get) => ({
     const migratedWalls = {}
     for (const [id, wall] of Object.entries(data.walls || {})) {
       const openings = (wall.openings ?? []).map(o => {
-        if (o.subtype && o.subtypeSource) return o
+        const ifcGlobalId = o.ifcGlobalId ?? uidIfc()
+        if (o.subtype && o.subtypeSource) {
+          return o.ifcGlobalId ? o : { ...o, ifcGlobalId }
+        }
         const subtype = o.subtype ?? _deriveSubtypeBySize(o)
         return {
           ...o,
           subtype,
           subtypeSource: o.subtypeSource ?? SUBTYPE_SOURCE.HEURISTIC,
           hasGrill:      o.hasGrill ?? null,
+          ifcGlobalId,
         }
       })
       migratedWalls[id] = {
@@ -1008,6 +1021,7 @@ export const useStore = create((set, get) => ({
         hasBalconyRailingEdge:  null,
         ...wall,
         openings,
+        ifcGlobalId: wall.ifcGlobalId ?? uidIfc(),
       }
     }
 
@@ -1034,9 +1048,11 @@ export const useStore = create((set, get) => ({
     for (const [id, stamp] of Object.entries(data.stamps || {})) {
       const civilDefaults = CIVIL_STAMP_DEFAULTS[stamp.type]
       const base = { floorId: DEFAULT_FLOOR_ID, meta: null }
-      migratedStamps[id] = civilDefaults
+      const merged = civilDefaults
         ? { ...base, ...civilDefaults, ...stamp }
         : { ...base, ...stamp }
+      merged.ifcGlobalId = merged.ifcGlobalId ?? uidIfc()
+      migratedStamps[id] = merged
     }
 
     // ── Migrate columns ──
@@ -1091,6 +1107,7 @@ export const useStore = create((set, get) => ({
         meta:         null,
         hasHandrail:  null,
         ...sc,
+        ifcGlobalId:  sc.ifcGlobalId ?? uidIfc(),
       }])
     )
 
