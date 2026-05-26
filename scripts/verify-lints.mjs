@@ -36,7 +36,12 @@ function lineNumbersMatching(content, regex) {
   const lines = content.split(/\r?\n/)
   const hits = []
   for (let i = 0; i < lines.length; i++) {
-    if (regex.test(lines[i])) hits.push({ line: i + 1, text: lines[i].trim() })
+    const line = lines[i]
+    // Skip comment-only lines (// or block-comment continuations starting with *).
+    if (/^\s*(\/\/|\*)/.test(line)) continue
+    // Strip trailing line-comments (// ... at end of line) before matching.
+    const stripped = line.replace(/\/\/.*$/, '')
+    if (regex.test(stripped)) hits.push({ line: i + 1, text: stripped.trim() })
   }
   return hits
 }
