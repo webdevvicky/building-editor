@@ -20,6 +20,7 @@ import { CATALOG_VERSION as elvDefV } from './elvDefaults.js'
 import { CATALOG_VERSION as fuV } from './loads/fixtureUnits.js'
 import { CATALOG_VERSION as plV } from './loads/pointLoads.js'
 import { CATALOG_VERSION as dfV } from './loads/diversityFactors.js'
+import { CATALOG_VERSION as ecV } from './loads/electricalConstants.js'
 import { CATALOG_VERSION as ifcV } from './ifcClasses.js'
 import { CATALOG_VERSION as classV } from './classificationCodes.js'
 
@@ -119,6 +120,7 @@ export const CATALOG_VERSIONS = Object.freeze({
   fixtureUnits: fuV,
   pointLoads: plV,
   diversityFactors: dfV,
+  electricalConstants: ecV,
   ifcClasses: ifcV,
   classificationCodes: classV,
 })
