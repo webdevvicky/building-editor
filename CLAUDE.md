@@ -1,5 +1,328 @@
 # Building Editor — Developer Notes
 
+## BOQ extension — Gaps 1–8 (2026-05-26)
+
+Procurement-grade extension closing 8 gaps vs Indian residential BOM
+templates: project header / cover, contingency, rebar by bar diameter,
+door + window hardware, paint materials, ceiling finish, project costs
+(labor / supervision / GST), Excel cover rewrite.
+
+### Canonical presentation model (LOAD-BEARING)
+
+**`src/boq/presentationModel.js::computeBoqPresentationModel(lines,
+rates, state)`** is the single object both Excel and PDF exporters
+consume. **Neither exporter does independent math** — no per-line cost
+calc, no subtotaling, no contingency math, no project-cost rollup. Every
+number on every sheet / page reads from the model. This locks
+`Excel.grandTotal === PDF.grandTotal === model.grandTotal` and prevents
+drift forever.
+
+Model shape:
+```
+{
+  projectMeta,           // GAP 1 header (title / owner / location / preparedBy / signatures)
+  scopeOfWork,           // auto-stats from src/boq/_scopeOfWork.js
+  buckets: [             // grouped per SHEET_BUCKETS registry
+    { name, isMulti, systemColumnLabel,
+      lines: [{ ...line, contingencyPct, qtyTotal, rate, amount, systemColumn }],
+      subtotal },
+  ],
+  contingencySummary,    // per-category effective %, displayMode
+  projectCosts,          // labor + supervision + GST block from src/boq/projectCosts.js
+  materialSubtotal,
+  grandTotal,
+  presentationVersion: '2026-05-26-V1',
+  generatedAt,
+}
+```
+
+**Helper modules consumed internally:**
+- `src/boq/_scopeOfWork.js::computeScopeOfWork(state)` — auto-stats
+- `src/boq/_contingencyResolver.js::resolveContingencyPctForLine` —
+  single-source % lookup
+- `src/boq/projectCosts.js::computeProjectCosts` — labor / supervision /
+  GST roll-up
+- `src/export/_buckets.js::bucketLines + bucketIsMulti +
+  bucketSystemLabel` — bucket grouping (existing — extended with 4 new
+  buckets)
+
+**Rule**: when adding a new BOQ feature that affects totals (new rate,
+new contingency tier, new fee), wire it through the presentation model
+— never directly into Excel or PDF. The grep guard is that neither
+`excel.js` nor `pdf.js` should `import { totalBoqCost }` or recompute
+amounts/subtotals from lines.
+
+### GAP 2 — Contingency
+
+**Schema** `projectSettings.contingency`:
+```
+{
+  defaultPercent:     10,
+  overrides:          { steel: 5, joinery: 5, joinery_hardware: 5,
+                        plumbing_*: 5, electrical_*: 5 },
+  excludedCategories: ['staircase'],
+  displayMode:        'clean' | 'detailed',  // default 'clean'
+}
+```
+
+**Rules** (`src/boq/_contingencyResolver.js`):
+- Per-line lookup: `overrides[category] ?? defaultPercent ?? 0`.
+- Excluded categories → 0.
+- **NOS / set / lumpsum units → 0 always.** Fixed counts can't be
+  contingencied (a hinge or door closer is whole or not at all).
+- Per-line `line.contingencyPct = 0` is an explicit opt-out signal.
+
+**Display mode** (`projectSettings.contingency.displayMode`):
+- `'clean'` (default, contractor-friendly): single `Qty` column; the
+  exporter renders `qtyTotal` (contingency baked in).
+- `'detailed'` (procurement): three columns `Qty (Base) | +% | Qty (Total)`.
+
+Setter: `setContingency(partial)` (deep-merges `overrides`).
+
+### GAP 3 — Steel by bar diameter
+
+**`src/specs/reinforcementSpecs.js`** — every `compute*BBS` now returns
+`kgByDia: { [diaMm]: kg }` alongside the existing `kg.*` breakdowns.
+Plus exports:
+- `STANDARD_BAR_LENGTH_M = 6` (allowed `[6, 9, 12]`)
+- `piecesForDia(totalKg, diaMm, length)` → ceil(totalKg / (length × weight))
+- `weightPerPieceKg(diaMm, length)`
+
+`projectSettings.bbsDefaults.standardBarLengthM` overrides the global
+constant per project.
+
+**`src/quantities/bbs.js`** rolls per-entity `kgByDia` into
+`byDiameter: { [diaMm]: { totalKg, pieces, weightPerPieceKg,
+standardBarLengthM, byCategory: { column, beam, footing, slab } } }`.
+
+**BOQ emission** in `lines.js`: one line per non-zero diameter, label
+`"Ø${dia}mm TMT Deformed Bar × ${len}m"`, `unit: NOS`,
+`rateKey: BOQ_LINE_ID.steelByDia(dia)`. Independent rate column from
+existing per-element steel lines (engineers may price Ø12mm vs Ø16mm
+differently regardless of element).
+
+**Bucket**: `'Steel — by Bar Diameter'` after `'Steel'` in `_buckets.js`.
+Both views ship — per-spec rollup (existing) AND per-Ø rollup (new) so
+users have BOQ visibility in both axes.
+
+### GAPs 4 + 5 — Door + window hardware
+
+**Catalogs** (versioned, IFC-ready):
+- `src/specs/hardware/hardwareItems.js` — `HARDWARE_ITEM_REGISTRY`
+  (hinges / locks / latches / bolts / closers / stoppers / handles /
+  tracks / window stays / mosquito mesh). Every entry frozen, carries
+  `ifcType` + `classificationCode` + `version`. `HW_CATEGORY` taxonomy.
+- `src/specs/hardware/hardwareSets.js` — `HARDWARE_SET_REGISTRY`
+  (Main door standard / Main door security / Internal door /
+  Toilet door / Sliding door) AND `WINDOW_HARDWARE_SET_REGISTRY`
+  (Casement / Sliding / Ventilator). One `getAnyHardwareSet(id)`
+  walks both.
+
+**Schema** (Hybrid + fine-grained adjustments, per user choice):
+- `projectSettings.doorHardwareDefaults = { MAIN_DOOR: setId,
+  INTERNAL_DOOR: setId }`
+- `projectSettings.windowHardwareDefaults = { WINDOW: setId,
+  VENTILATOR: setId }`
+- `opening.hardwareSetId: string | null` — null = inherit per-subtype
+  default
+- `opening.hardwareOverrides: { add: [{itemId, qty}], remove: [itemId] }
+  | null` — fine-grained: add a closer to one bedroom door / remove a
+  cylindrical lock from one internal door
+
+**Resolution** (`src/specs/hardware/resolution.js`):
+`resolveOpeningHardware(state, opening)` → `{ setId, setLabel, source:
+'EXPLICIT'|'PROJECT_DEFAULT'|'NONE', items: [{ itemId, qty,
+source: 'SET'|'OVERRIDE_ADD' }], parent }`. Single-source fallback
+chain — UI panels and the aggregator both call this.
+
+**Aggregator** `src/quantities/doorHardware.js::computeDoorHardwareQuantities`.
+**Mosquito mesh special-case**: items with `qtyMode: 'AREA'` (or
+`category: HW_CATEGORY.MESH`) compute qty as `w × h / 144` Sft per
+opening, not fixed nos.
+
+**BOQ**: category `joinery_hardware`. The Joinery bucket is now
+multi-category with System column (`Frame & Shutter` | `Hardware`).
+One line per item; `rateKey: BOQ_LINE_ID.hardwareItem(itemId)` =
+`hw_<lowercase>`.
+
+**Setters**: `setDoorHardwareDefaults`, `setWindowHardwareDefaults`
+(shallow merge).
+
+### GAP 6 — Paint materials
+
+**Catalog** `src/specs/paintSystems.js` — `PAINT_SYSTEM_REGISTRY`:
+`STD_ACRYLIC_INTERIOR`, `PREMIUM_INTERIOR_LUXURY`, `EXTERIOR_WEATHERSHIELD`.
+
+Every layer carries `coats`, `coverageSftPerGallon` (or `unitsPerSft`
+for sandpaper), and **`efficiencyFactor: 1.0` (RESERVED — Addition 3)**.
+v1 aggregator multiplies by it (no effect at 1.0). v2 will lower it
+for rough plaster / texture paint. Don't remove the field or fork
+schema when adding new systems.
+
+**Schema**:
+- `projectSettings.defaultInteriorPaintSystemId`
+- `projectSettings.defaultExteriorPaintSystemId`
+- `room.paintSystemId: string | null` — null = project default for interior
+- External walls always use the project exterior system
+
+**Aggregator** `src/quantities/paint.js::computePaintQuantities` —
+per-room override + external area from `plasterQ.totals.externalWallsFt2`
+(single source). Per-layer
+`qty = ceil(totalSft × coats / (coverage × efficiencyFactor))`
+(rounded up — paint is purchased per-can).
+
+**BOQ**: category `paint_materials`, unit `gallons`/`nos` per layer
+type. Bucket `'Paint Materials'`. Existing `finishes_paint_walls` /
+`finishes_paint_ceiling` Sft lines kept unchanged — they're the labor
+estimation surface.
+
+Setter: `setDefaultPaintSystems({ interior?, exterior? })`.
+
+### GAP 7 — Ceiling finish
+
+**Catalog** `src/specs/ceilingFinishSystems.js` — `CEILING_FINISH_REGISTRY`:
+`NONE` (default), `GYPSUM_BOARD_12MM`, `CEMENT_BOARD_3_5MM`, `PVC_PANEL`,
+`GRID_T_BAR`.
+
+Every entry has `materials: [{ id, label, qtyPerM2, unit }]` and
+**`perimeterBased: false` (RESERVED — Addition 4)** for future cove /
+cornice / trim calc.
+
+**Schema**:
+- `projectSettings.defaultCeilingFinishSystemId` (default `'NONE'`)
+- `room.ceilingFinishId: string | null` — null = inherit project default
+- Only rooms with `finishes.ceilingPlaster === true` accept a finish
+  (false ceiling sits BELOW structural plaster). Setting
+  `ceilingFinishId` without plaster surfaces a warning in `_meta.warnings`.
+
+**Aggregator** `src/quantities/ceilingFinish.js`. Per-system materials
+× room area (m² conversion via `SFT_TO_SQM = 0.0929`). NOS-unit
+materials (screws) rounded up.
+
+**BOQ**: category `ceiling_finish`, bucket `'Ceiling Finish'`.
+
+Setter: `setDefaultCeilingFinishSystem(id)`.
+
+### GAP 1 — Project metadata + GAP 9 — Cover rewrite
+
+**Schema** `projectSettings.projectMeta`:
+```
+{ projectTitle, ownerName, location, preparedBy, checkedBy,
+  approvedBy, preparedDate }
+```
+Setter: `setProjectMeta(partial)`.
+
+**Cover rewrites**:
+- Excel `Summary` sheet — project header → scope of work → category
+  subtotals → contingency summary → project cost summary → signature
+  block.
+- PDF cover page — project header → scope of work → cost summary →
+  signature block.
+
+Both consume the presentation model. Per-bucket sheets/sections follow.
+
+### GAP 8 — Project costs (labor + supervision + GST)
+
+**Schema** `projectSettings.projectCosts` (`DEFAULT_PROJECT_COSTS` in
+`src/boq/projectCosts.js`):
+```
+{
+  laborMode:        'percent' | 'lumpsum',   // default 'percent'
+  laborPercent:     15,
+  laborLumpsum:     0,
+  supervisionMode:  'percent' | 'lumpsum',
+  supervisionPercent: 5,
+  supervisionLumpsum: 0,
+  overheadPercent:  0,
+  profitPercent:    0,
+  gstPercent:       18,
+  gstAppliesToLabor: false,
+}
+```
+
+**Decision**: NOT emitted as BOQ lines. `computeProjectCosts(materialSubtotal,
+config)` rolls up labor / supervision / overhead / profit / GST and
+returns `{ ...components, breakdown: [{label, amount, basisLabel}],
+grandTotal }`. The presentation model exposes it as `model.projectCosts`;
+exporters render it on the Excel Summary block + PDF cover.
+
+Setter: `setProjectCosts(partial)`.
+
+### New buckets in `src/export/_buckets.js`
+
+Order (after existing entries):
+- `'Steel — by Bar Diameter'` (single-category `steel_by_diameter`),
+  placed right after `'Steel'`.
+- `'Paint Materials'` (multi-category with `Layer` system column).
+- `'Ceiling Finish'` (multi-category with `Material` system column).
+- `'Joinery & Hardware'` (multi-category: Frame & Shutter | Hardware) —
+  REPLACES the old single-category `Joinery` bucket.
+
+### Verification
+
+`scripts/verify-boq.mjs` ships 250+ assertions including:
+- Phase A: presentation model versioned + deterministic + grandTotal
+  parity (`model.grandTotal === projectCosts.grandTotal === sum of
+  bucket subtotals + project costs`)
+- Gap 1: setProjectMeta round-trip
+- Gap 2: contingencyPct = 10 default, displayMode propagates, NOS
+  lines never contingencied
+- Gap 3: byDiameter populated, pieces at 6m derived correctly, BOQ
+  lines emitted with Ø + length suffix
+- Gap 4: door hardware items resolved from per-subtype set (3 hinges +
+  1 lock + 1 closer + 1 stopper + 1 handle for main door)
+- Gap 6: paint layer qty in gallons per system
+- Gap 7: ceiling finish materials scaled by room area
+- Gap 8: labor 15% + GST 18% + grand total = sum of components
+
+All other verify scripts (multifloor / topology / mep / iso-projection
+/ units — 393 assertions total) remain green.
+
+### Rules locked
+
+1. **Both exporters consume the presentation model only.** No
+   `totalBoqCost` import, no per-line amount recompute, no subtotal
+   resummation in `excel.js` / `pdf.js`. If you find yourself doing
+   math in an exporter, move it to `presentationModel.js`.
+2. **Contingency NOS exclusion is unconditional.** `nos` / `set` /
+   `lumpsum` units never carry contingency, regardless of category or
+   overrides. Reasoning: a hinge or door closer is whole or not at all
+   — there's no fractional procurement.
+3. **`projectCosts` is Summary-block only, never BOQ lines.** Don't
+   emit `category: 'project_costs'` lines from `boq/lines.js`. The
+   Summary block + PDF cover are the single render targets.
+4. **`efficiencyFactor` + `perimeterBased` are RESERVED schema slots.**
+   Don't remove them when adding new paint / ceiling systems. v1
+   aggregators ignore them; v2 will activate them for texture paint /
+   cornice calc respectively.
+5. **Hardware mosquito-mesh special-case.** Items with
+   `qtyMode: 'AREA'` (or `category: HW_CATEGORY.MESH`) compute qty as
+   opening area, never fixed count. Set entries declare `qty: 1` as a
+   placeholder; aggregator overrides to `w × h / 144` Sft.
+6. **Per-room override pattern stays consistent.** `room.paintSystemId`
+   / `room.ceilingFinishId` / `opening.hardwareSetId` mirror the
+   existing pattern (`room.plasterSystemId` / `room.dadoHeightFt` /
+   `wall.hasBalconyRailingEdge`): null = inherit project default,
+   non-null = explicit override. Don't introduce per-room-type maps
+   without re-asking the user.
+7. **Greenfield rule honored.** No migration shims, no loadProject
+   normalization for the new subtrees. Consumer-side `?? defaultX`
+   fallbacks let legacy saves load cleanly.
+
+### Open follow-ups (not blocking)
+
+- UI panels: `ProjectSettingsPanel` field groups for `projectMeta` /
+  `contingency` / `projectCosts` / hardware defaults; `OpeningDetailPanel`
+  hardware picker (set dropdown + add/remove rows); `RoomDetailPanel`
+  paint + ceiling system pickers.
+- Engineer-eye review of new bucket order against procurement workflow.
+- Per-line GST tiers (current GST flat 18% on materials; some line types
+  have different slabs — deferred to v2).
+- Window hardware fine-grained override UI parity with door (same
+  schema; just needs the picker).
+
+---
+
 ## 3D Iso Viewer — rotation (2026-05-26)
 
 The iso viewer is no longer fixed at 30°/30°. The camera now rotates
