@@ -23,6 +23,13 @@ export const ISO_PRESETS = Object.freeze([
   Object.freeze({ id: 'NW', label: 'NW', azimuthDeg: 315, elevationDeg: DEFAULT_ELEVATION_DEG }),
 ])
 
+// Top-down plan preset. Azimuth=0 means north points up on screen, which
+// is the standard architectural plan orientation. Elevation=90 triggers
+// projection.js's plan-projection special case.
+export const TOP_PRESET = Object.freeze({
+  id: 'TOP', label: 'Top', azimuthDeg: 0, elevationDeg: 90,
+})
+
 // Four cardinal presets — useful for inspecting a single building face.
 // At cardinal azimuths, two side walls fold flat onto each other in the
 // projection; engineers use these to read elevations of a single facade.

@@ -24,9 +24,21 @@ painter's-algorithm sort, basis-stable across renders) holds.
    a mathematical-CCW preset elsewhere.
 4. **`src/iso/viewPresets.js` is the single source of preset angles.**
    `ISO_PRESETS` (4 corners) + `CARDINAL_PRESETS` (4 cardinals) +
-   `DEFAULT_VIEW` + `ELEVATION_MIN_DEG`/`ELEVATION_MAX_DEG` (10°/70°).
-   `IsoView` imports — never hardcodes degrees. Adding a new preset
-   = one entry in this file.
+   `TOP_PRESET` (plan view) + `DEFAULT_VIEW` +
+   `ELEVATION_MIN_DEG`/`ELEVATION_MAX_DEG` (10°/70°). `IsoView` imports
+   — never hardcodes degrees. Adding a new preset = one entry in this
+   file.
+4a. **Top view uses a separate projection path.** The engineering-iso
+   formula degenerates at el=90° (the `right` basis collapses to zero
+   because of `cos(el)`). `makeViewBasis` checks
+   `elDeg >= TOP_VIEW_THRESHOLD_DEG` (89.5°) and returns a true
+   orthographic plan basis: `right = (cos(az), sin(az), 0)`,
+   `up = (-sin(az), cos(az), 0)`, `forward = (0, 0, -1)`. Z is ignored
+   on screen; floors are distinguished only by the painter's-algorithm
+   depth sort (low z first, high z last). `TOP_PRESET` uses
+   `azimuthDeg: 0` so north points up — standard architectural plan
+   orientation. The elevation slider stays clamped at [10°, 70°];
+   `TOP_PRESET` is the only entry point to plan view.
 5. **Sort comparator takes basis, not raw axes.**
    `makeBackToFrontComparator(basis)` ranks faces by
    `dot(centroid, viewForward)` descending. Stable tiebreak chain is

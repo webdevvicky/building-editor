@@ -26,6 +26,14 @@ export const SIN30 = 0.5
 
 export const DEFAULT_VIEW = Object.freeze({ azimuthDeg: 45, elevationDeg: 30 })
 
+// Elevation threshold above which makeViewBasis switches to a true
+// orthographic plan projection. The engineering-iso formula degenerates
+// at el=90° (the `right` basis collapses to zero because of cos(el)),
+// so above this threshold we project plan-view directly: x/y onto screen,
+// z onto the depth axis. Anything in [10°, 70°] (the orbit-drag range)
+// uses the engineering-iso path and is unaffected.
+export const TOP_VIEW_THRESHOLD_DEG = 89.5
+
 // Build the camera basis vectors for a given view. Cached by the caller —
 // every per-vertex projection re-uses the same basis without re-evaluating
 // trig.
@@ -40,6 +48,22 @@ export const DEFAULT_VIEW = Object.freeze({ azimuthDeg: 45, elevationDeg: 30 })
 export function makeViewBasis(view) {
   const azDeg = view?.azimuthDeg ?? DEFAULT_VIEW.azimuthDeg
   const elDeg = view?.elevationDeg ?? DEFAULT_VIEW.elevationDeg
+
+  // Top-down plan projection. The azimuth still rotates the floor plan
+  // so users can orient north however they prefer; elevation has no
+  // further effect once we're looking straight down. Depth axis is -z
+  // (camera looks down, so lower-z faces are farther from the camera
+  // and get drawn first).
+  if (elDeg >= TOP_VIEW_THRESHOLD_DEG) {
+    const azRad = azDeg * Math.PI / 180
+    const ca = Math.cos(azRad), sa = Math.sin(azRad)
+    return Object.freeze({
+      right:   Object.freeze([  ca,  sa, 0 ]),
+      up:      Object.freeze([ -sa,  ca, 0 ]),
+      forward: Object.freeze([   0,   0, -1 ]),
+    })
+  }
+
   const delta = (azDeg - 45) * Math.PI / 180
   const elRad = elDeg * Math.PI / 180
   const ca = Math.cos(delta), sa = Math.sin(delta)

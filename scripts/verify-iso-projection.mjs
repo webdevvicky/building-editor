@@ -12,7 +12,7 @@
 // Usage: node scripts/verify-iso-projection.mjs
 
 import {
-  COS30, SIN30, DEFAULT_VIEW, DEFAULT_BASIS,
+  COS30, SIN30, DEFAULT_VIEW, DEFAULT_BASIS, TOP_VIEW_THRESHOLD_DEG,
   makeViewBasis, worldToIso, viewForward,
 } from '../src/iso/projection.js'
 
@@ -107,6 +107,39 @@ const fwd = viewForward(DEFAULT_BASIS)
 ok('forward.x ≈ 1', approxEq(fwd[0], 1))
 ok('forward.y ≈ 1', approxEq(fwd[1], 1))
 ok('forward.z ≈ 0', approxEq(fwd[2], 0))
+
+// ── 6b. Top-view (el=90) uses true plan projection ──────────────────────
+console.log('\n6b. Top-down preset (az=0, el=90) projects as plan view')
+const topBasis = makeViewBasis({ azimuthDeg: 0, elevationDeg: 90 })
+ok('right basis is non-zero (engineering-iso degeneracy avoided)',
+   topBasis.right[0] !== 0 || topBasis.right[1] !== 0)
+ok('right basis has zero z component',  topBasis.right[2]   === 0)
+ok('up basis has zero z component',     topBasis.up[2]      === 0)
+ok('forward axis points down (-z)',     topBasis.forward[2] === -1)
+ok('forward axis has zero x',           topBasis.forward[0] === 0)
+ok('forward axis has zero y',           topBasis.forward[1] === 0)
+
+// At az=0, east (+x) should be screen-right, north (+y) should be screen-up.
+const eastTop = worldToIso(12, 0, 0, topBasis)
+ok('east (+x) projects to screen-right (positive sx)', eastTop.sx > 0)
+ok('east (+x) projects on horizontal axis (sy ≈ 0)',   approxEq(eastTop.sy, 0))
+const northTop = worldToIso(0, 12, 0, topBasis)
+ok('north (+y) projects to screen-up (negative sy in SVG)', northTop.sy < 0)
+ok('north (+y) projects on vertical axis (sx ≈ 0)',         approxEq(northTop.sx, 0))
+
+// Z (elevation) should NOT shift the screen position in plan view —
+// floors stack on top of each other geometrically, only the depth-sort
+// distinguishes them.
+const grndTop = worldToIso(36, 24, 0, topBasis)
+const roofTop = worldToIso(36, 24, 240, topBasis)   // 20 ft up
+ok('elevation does not displace plan-view (sx)', approxEq(grndTop.sx, roofTop.sx))
+ok('elevation does not displace plan-view (sy)', approxEq(grndTop.sy, roofTop.sy))
+
+// Threshold gate — anything just below TOP_VIEW_THRESHOLD_DEG should use
+// the engineering-iso path (right basis depends on cos(el) and is non-zero).
+const belowTop = makeViewBasis({ azimuthDeg: 45, elevationDeg: TOP_VIEW_THRESHOLD_DEG - 1 })
+ok('just below threshold still uses engineering-iso path',
+   belowTop.forward[2] === 0)   // engineering-iso forward has z=0
 
 // ── 7. Basis is frozen ──────────────────────────────────────────────────
 console.log('\n7. Returned basis is frozen')

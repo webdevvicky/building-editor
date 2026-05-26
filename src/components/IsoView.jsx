@@ -7,7 +7,7 @@ import {
   floorBaseZIn, floorTopZIn,
 } from '../iso/projection'
 import {
-  ISO_PRESETS, DEFAULT_VIEW,
+  ISO_PRESETS, TOP_PRESET, DEFAULT_VIEW,
   ELEVATION_MIN_DEG, ELEVATION_MAX_DEG,
 } from '../iso/viewPresets'
 import {
@@ -496,7 +496,7 @@ export default function IsoView() {
           <div className="iso-sidebar__section">
             <div className="iso-sidebar__title">Camera</div>
             <div className="iso-preset-grid">
-              {ISO_PRESETS.map(p => (
+              {[...ISO_PRESETS, TOP_PRESET].map(p => (
                 <Button
                   key={p.id}
                   size="sm"
