@@ -1,36 +1,24 @@
 // Phase 2.0 — Client-side PDF export of the BOQ.
 //
-// exportBoqPdf(state, rates, { projectName, preparedBy, unitSystem })
+// exportBoqPdf(state, rates, { projectName, preparedBy, unit | unitSystem })
 //   → triggers browser download of `boq-${projectName}-${date}.pdf`.
 //
 // Built on jsPDF + jspdf-autotable. No network access. The default jsPDF font
 // ships without the U+20B9 INR glyph, so we render the currency as the ASCII
 // prefix "Rs. " throughout.
+//
+// Section layout mirrors Excel sheet layout via src/export/_buckets.js so the
+// two exports never drift. Multi-category MEP buckets render a "System"
+// column so procurement reads which sub-system each line belongs to.
 
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { getBoqLines, groupBoqLinesByCategory, totalBoqCost } from '../boq/lines'
 import { formatQuantity, normalizeUnitMode } from '../lib/units.js'
-
-const CATEGORY_LABELS = {
-  finishes:     'Finishes',
-  masonry:      'Masonry',
-  rcc:          'RCC — Structural',
-  civil:        'Civil Works',
-  shuttering:   'Shuttering',
-  excavation:   'Excavation',
-  concreteMix:  'Concrete Mix',
-  steel:        'Steel',
-  plaster:      'Plaster Materials',
-  plumConcrete: 'Plum Concrete',
-  staircase:    'Staircase',
-}
-
-// Display order for category tables.
-const CATEGORY_ORDER = [
-  'excavation', 'plumConcrete', 'rcc', 'concreteMix', 'steel',
-  'shuttering', 'masonry', 'plaster', 'finishes', 'civil', 'staircase',
-]
+import {
+  SHEET_BUCKETS, bucketLines, bucketIsMulti, bucketSystemLabel,
+  warnUnmappedCategories,
+} from './_buckets.js'
 
 function todayStamp() {
   const d = new Date()
@@ -86,6 +74,10 @@ export function exportBoqPdf(state, rates, opts = {}) {
   const grouped  = groupBoqLinesByCategory(lines)
   const grandTot = totalBoqCost(lines)
 
+  // Dev warning if a category isn't in SHEET_BUCKETS — would otherwise
+  // silently disappear from per-section pages.
+  warnUnmappedCategories(grouped)
+
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
 
   // ── Cover page ──────────────────────────────────────────────────────────
@@ -113,49 +105,81 @@ export function exportBoqPdf(state, rates, opts = {}) {
   )
   doc.setTextColor(0)
 
-  // ── Per-category tables ─────────────────────────────────────────────────
+  // ── Per-bucket tables ───────────────────────────────────────────────────
   const subtotals = []
 
-  for (const cat of CATEGORY_ORDER) {
-    const catLines = grouped[cat]
-    if (!catLines || catLines.length === 0) continue
+  for (const bucket of SHEET_BUCKETS) {
+    const bucketLs = bucketLines(bucket, grouped)
+    if (bucketLs.length === 0) continue
+    const multi = bucketIsMulti(bucket)
 
     doc.addPage()
     doc.setFontSize(14)
     doc.setFont('helvetica', 'bold')
-    doc.text(CATEGORY_LABELS[cat] || cat, 40, 50)
+    doc.text(bucket.name, 40, 50)
     doc.setFont('helvetica', 'normal')
 
-    const body = catLines.map(l => [
-      l.label,
-      fmtPdfQty(l, displayMode),
-      l.unit || '',
-      fmtRate(rates ? rates[l.rateKey] : '', l.isPer1000),
-      fmtRs(l.cost),
-    ])
+    // Build table body. Multi-bucket adds a System column at index 1.
+    const body = bucketLs.map(l => multi
+      ? [
+          bucketSystemLabel(bucket, l.category),
+          l.label,
+          fmtPdfQty(l, displayMode),
+          l.unit || '',
+          fmtRate(rates ? rates[l.rateKey] : '', l.isPer1000),
+          fmtRs(l.cost),
+        ]
+      : [
+          l.label,
+          fmtPdfQty(l, displayMode),
+          l.unit || '',
+          fmtRate(rates ? rates[l.rateKey] : '', l.isPer1000),
+          fmtRs(l.cost),
+        ]
+    )
 
-    const catSub = catLines.reduce((s, l) => s + (l.cost ?? 0), 0)
-    const hasCost = catLines.some(l => l.cost !== null)
-    subtotals.push({ cat, label: CATEGORY_LABELS[cat] || cat, sub: hasCost ? catSub : null, count: catLines.length })
+    const catSub  = bucketLs.reduce((s, l) => s + (l.cost ?? 0), 0)
+    const hasCost = bucketLs.some(l => l.cost !== null)
+    subtotals.push({ label: bucket.name, sub: hasCost ? catSub : null, count: bucketLs.length })
+
+    const head = multi
+      ? [['System', 'Item', 'Qty', 'Unit', 'Rate (Rs.)', 'Amount (Rs.)']]
+      : [['Item', 'Qty', 'Unit', 'Rate (Rs.)', 'Amount (Rs.)']]
+
+    // Subtotal foot — colSpan covers all columns except the Amount column.
+    const footColSpan = multi ? 5 : 4
+    const foot = hasCost ? [[
+      { content: 'Subtotal', colSpan: footColSpan, styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: fmtRs(catSub), styles: { fontStyle: 'bold' } },
+    ]] : undefined
+
+    // Column styles — shifted +1 in multi mode for the leading System column.
+    const columnStyles = multi
+      ? {
+          0: { halign: 'left',  cellWidth: 70 },   // System
+          1: { cellWidth: 200 },                   // Item
+          2: { halign: 'right', cellWidth: 60 },   // Qty
+          3: { halign: 'left',  cellWidth: 40 },   // Unit
+          4: { halign: 'right', cellWidth: 80 },   // Rate
+          5: { halign: 'right', cellWidth: 80 },   // Amount
+        }
+      : {
+          0: { cellWidth: 240 },
+          1: { halign: 'right', cellWidth: 60 },
+          2: { halign: 'left',  cellWidth: 40 },
+          3: { halign: 'right', cellWidth: 90 },
+          4: { halign: 'right', cellWidth: 90 },
+        }
 
     autoTable(doc, {
       startY: 70,
-      head:   [['Item', 'Qty', 'Unit', 'Rate (Rs.)', 'Amount (Rs.)']],
+      head,
       body,
-      foot:   hasCost ? [[
-        { content: 'Subtotal', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } },
-        { content: fmtRs(catSub), styles: { fontStyle: 'bold' } },
-      ]] : undefined,
+      foot,
       margin: { left: 40, right: 40, bottom: 40 },
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: [50, 50, 50], textColor: 255 },
-      columnStyles: {
-        0: { cellWidth: 240 },
-        1: { halign: 'right', cellWidth: 60 },
-        2: { halign: 'left',  cellWidth: 40 },
-        3: { halign: 'right', cellWidth: 90 },
-        4: { halign: 'right', cellWidth: 90 },
-      },
+      columnStyles,
     })
   }
 
