@@ -10,25 +10,17 @@
 // is computed by getSteelQuantities() with their id passed in excludeIds=...
 // so the kg/m³ pool only covers what BBS did NOT compute. See boq/lines.js.
 //
-// Output shape:
-//   {
-//     byColumn:  [{ columnId, columnTypeId, resolvedSpecId, specLabel, source, kg:{longitudinal,stirrup,total} }],
-//     byBeam:    [{ beamId, beamClass, resolvedSpecId, specLabel, source, kg:{top,bottom,stirrup,total} }],
-//     byFooting: [{ foundationId|null, columnTypeId|null, count, resolvedSpecId, specLabel, source, kg:{x,y,total} }],
-//     bySlab:    [{ slabId, type, resolvedSpecId, specLabel, source, kg:{main,dist,total} }],
+// Gap 3 (2026-05-26): byDiameter rollup added — buckets total kg per
+// bar diameter (8/10/12/16/20/25/32 mm) across every BBS'd entity, with
+// piece count at projectSettings.bbsDefaults.standardBarLengthM (default 6m).
+// Drives the "Steel — by Bar Diameter" procurement section.
 //
-//     groupedBySpec: {
-//       column:  [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds }],
-//       beam:    [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds, beamClass }],
-//       footing: [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds }],
-//       slab:    [{ specId, specLabel, source, totalKg, instanceCount, sourceEntityIds }],
+// Output shape additions:
+//   byDiameter: {
+//     [diaMm]: {
+//       totalKg, pieces, weightPerPieceKg, standardBarLengthM,
+//       byCategory: { column, beam, footing, slab },
 //     },
-//
-//     // Per-category bookkeeping for boq/lines.js partial-coverage handling.
-//     bbsCoveredKg:  { column, beam, footing, slab },     // BBS-computed kg total
-//     excludeIds:    { columns, beams, slabs, foundations, columnTypeFootings },
-//
-//     totalKg,
 //   }
 //
 // All lengths are in feet (matches reinforcementSpecs.js); kg via STEEL_UNIT_WEIGHT_KG_PER_M.
@@ -38,6 +30,9 @@ import {
   computeBeamBBS,
   computeFootingBBS,
   computeSlabBBS,
+  piecesForDia,
+  weightPerPieceKg,
+  STANDARD_BAR_LENGTH_M,
 } from '../specs/reinforcementSpecs'
 import {
   resolveColumnReinforcementSpecForColumn,
@@ -71,21 +66,40 @@ function groupByResolvedSpec(rows, extraFields = () => ({})) {
     if (r.entityId) acc.sourceEntityIds.push(r.entityId)
     else if (r.entityIds) acc.sourceEntityIds.push(...r.entityIds)
   }
-  // Round and sort by descending kg for stable BOQ ordering.
   const out = [...byKey.values()].map(g => ({ ...g, totalKg: r2(g.totalKg) }))
   out.sort((a, b) => b.totalKg - a.totalKg)
   return out
 }
 
+// Roll a single entity's kgByDia map into the per-diameter accumulator.
+// Multiplier is `count` for inline-footing buckets (one spec covers N footings).
+function _accumulateByDia(accumulator, kgByDia, category, multiplier = 1) {
+  if (!kgByDia) return
+  for (const [diaStr, kg] of Object.entries(kgByDia)) {
+    if (!kg) continue
+    const dia = Number(diaStr)
+    if (!Number.isFinite(dia)) continue
+    const scaled = kg * multiplier
+    if (!accumulator[dia]) accumulator[dia] = { totalKg: 0, byCategory: {} }
+    accumulator[dia].totalKg += scaled
+    accumulator[dia].byCategory[category] = (accumulator[dia].byCategory[category] ?? 0) + scaled
+  }
+}
+
 export function computeBBSQuantities(state) {
   const { columns, beams, slabs, foundations, projectSettings } = state
   const columnTypes = projectSettings?.columnTypes ?? []
+  const standardBarLengthM = projectSettings?.bbsDefaults?.standardBarLengthM ?? STANDARD_BAR_LENGTH_M
 
   const byColumn  = []
   const byBeam    = []
   const byFooting = []
   const bySlab    = []
   let totalKg = 0
+
+  // Per-diameter accumulator built up as we walk entities.
+  // Shape: { [diaMm]: { totalKg, byCategory: { column, beam, footing, slab } } }
+  const diaAccum = {}
 
   const excludeColumns      = new Set()
   const excludeBeams        = new Set()
@@ -98,7 +112,7 @@ export function computeBBSQuantities(state) {
     const ct = columnTypes.find(t => t.id === col.columnTypeId)
     if (!ct) continue
     const resolved = resolveColumnReinforcementSpecForColumn(state, col, ct)
-    if (!resolved.spec) continue   // ESTIMATE — kg/m³ handles it
+    if (!resolved.spec) continue
     const heightFt = state.getColumnHeightFt(col)
     const r = computeColumnBBS(resolved.spec, heightFt, ct)
     byColumn.push({
@@ -110,19 +124,17 @@ export function computeBBSQuantities(state) {
       specLabel:      resolved.specLabel,
       source:         resolved.source,
       kg: { longitudinal: r2(r.longitudinalKg), stirrup: r2(r.stirrupKg), total: r2(r.totalKg) },
+      kgByDia:        r.kgByDia,
     })
     excludeColumns.add(col.id)
     totalKg += r.totalKg
+    _accumulateByDia(diaAccum, r.kgByDia, 'column', 1)
   }
 
-  // ── Beams (explicit + wall-derived) ────────────────────────────────────────
-  // Both kinds resolve through the same resolver. Wall-derived beams have
-  // no entity-level spec but inherit from class default → bbsDefaults.BEAM[class].
+  // ── Beams ──────────────────────────────────────────────────────────────────
   const beamDims = projectSettings?.beamDimensions ?? {}
   const allBeams = state.getAllBeams?.() ?? Object.values(beams ?? {})
   const beamLengthsById = (() => {
-    // Endpoint resolution flows through the canonical topology resolver —
-    // single home for the COLUMN/POINT discriminated-union math.
     const lengths = new Map()
     for (const b of allBeams) {
       const from = resolveBeamEndpoint(state, b.endpoints.from)
@@ -134,7 +146,7 @@ export function computeBBSQuantities(state) {
   })()
   for (const beam of allBeams) {
     const resolved = resolveBeamReinforcementSpec(state, beam)
-    if (!resolved.spec) continue   // ESTIMATE
+    if (!resolved.spec) continue
     const lenFt = beamLengthsById.get(beam.id) ?? 0
     const dims = beamDims[beam.level]
     if (!dims || lenFt <= 0) continue
@@ -149,9 +161,11 @@ export function computeBBSQuantities(state) {
       specLabel:      resolved.specLabel,
       source:         resolved.source,
       kg: { top: r2(r.topKg), bottom: r2(r.bottomKg), stirrup: r2(r.stirrupKg), total: r2(r.totalKg) },
+      kgByDia:        r.kgByDia,
     })
     excludeBeams.add(beam.id)
     totalKg += r.totalKg
+    _accumulateByDia(diaAccum, r.kgByDia, 'beam', 1)
   }
 
   // ── Footings: inline auto-isolated buckets (keyed by columnTypeId) ─────────
@@ -165,7 +179,7 @@ export function computeBBSQuantities(state) {
       foundationId:   null,
       columnTypeId:   ctId,
       entityId:       null,
-      entityIds:      [],   // inline footings don't reference foundation entity ids
+      entityIds:      [],
       label:          `${inline.label} footings (×${inline.count})`,
       count:          inline.count,
       resolvedSpecId: resolved.specId,
@@ -173,9 +187,11 @@ export function computeBBSQuantities(state) {
       source:         resolved.source,
       instanceCount:  inline.count,
       kg: { x: r2(per.xKg * inline.count), y: r2(per.yKg * inline.count), total: r2(totalKgForBucket) },
+      kgByDia:        per.kgByDia,   // per single footing — count is applied in _accumulateByDia
     })
     excludeColumnTypeFootings.add(ctId)
     totalKg += totalKgForBucket
+    _accumulateByDia(diaAccum, per.kgByDia, 'footing', inline.count)
   }
   // ── Footings: foundation entities ──────────────────────────────────────────
   for (const f of Object.values(foundations ?? {})) {
@@ -196,13 +212,14 @@ export function computeBBSQuantities(state) {
       source:         resolved.source,
       instanceCount:  1,
       kg: { x: r2(r.xKg), y: r2(r.yKg), total: r2(r.totalKg) },
+      kgByDia:        r.kgByDia,
     })
     excludeFoundations.add(f.id)
     totalKg += r.totalKg
+    _accumulateByDia(diaAccum, r.kgByDia, 'footing', 1)
   }
 
   // ── Slabs ──────────────────────────────────────────────────────────────────
-  // Span/width approximation = sqrt(area). Phase 2.x will refine via slab.geometry.
   const validSet = new Set(state.getValidRoomIds?.() ?? [])
   for (const slab of Object.values(slabs ?? {})) {
     const resolved = resolveSlabReinforcementSpecForSlab(state, slab)
@@ -224,12 +241,14 @@ export function computeBBSQuantities(state) {
       specLabel:      resolved.specLabel,
       source:         resolved.source,
       kg: { main: r2(r.mainKg), dist: r2(r.distKg), total: r2(r.totalKg) },
+      kgByDia:        r.kgByDia,
     })
     excludeSlabs.add(slab.id)
     totalKg += r.totalKg
+    _accumulateByDia(diaAccum, r.kgByDia, 'slab', 1)
   }
 
-  // ── Grouped-by-resolved-spec (one BOQ line per group) ──────────────────────
+  // ── Grouped-by-resolved-spec ───────────────────────────────────────────────
   const groupedBySpec = {
     column:  groupByResolvedSpec(byColumn),
     beam:    groupByResolvedSpec(byBeam, (r) => ({ beamClass: r.beamClass })),
@@ -246,6 +265,29 @@ export function computeBBSQuantities(state) {
     slab:    groupedBySpec.slab.reduce((s, g) => s + g.totalKg, 0),
   }
 
+  // ── byDiameter rollup (Gap 3) ──────────────────────────────────────────────
+  const byDiameter = {}
+  // Sort diameter keys numerically for stable iteration.
+  const diaKeys = Object.keys(diaAccum).map(Number).sort((a, b) => a - b)
+  for (const dia of diaKeys) {
+    const bucket = diaAccum[dia]
+    const rounded = r2(bucket.totalKg)
+    if (rounded <= 0) continue
+    byDiameter[dia] = {
+      diaMm:             dia,
+      totalKg:           rounded,
+      pieces:            piecesForDia(rounded, dia, standardBarLengthM),
+      weightPerPieceKg:  r2(weightPerPieceKg(dia, standardBarLengthM)),
+      standardBarLengthM,
+      byCategory: {
+        column:  r2(bucket.byCategory.column  ?? 0),
+        beam:    r2(bucket.byCategory.beam    ?? 0),
+        footing: r2(bucket.byCategory.footing ?? 0),
+        slab:    r2(bucket.byCategory.slab    ?? 0),
+      },
+    }
+  }
+
   return {
     byColumn,
     byBeam,
@@ -253,6 +295,8 @@ export function computeBBSQuantities(state) {
     bySlab,
     groupedBySpec,
     bbsCoveredKg,
+    byDiameter,
+    standardBarLengthM,
     excludeIds: {
       columns:             excludeColumns,
       beams:               excludeBeams,

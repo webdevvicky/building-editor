@@ -38,6 +38,9 @@ import { computeBBSQuantities }        from '../quantities/bbs'
 import { computeJoineryQuantities }    from '../quantities/joinery.js'
 import { computeTileQuantities }       from '../quantities/tiles.js'
 import { computeGrillQuantities }      from '../quantities/grills.js'
+import { computePaintQuantities }      from '../quantities/paint.js'
+import { computeCeilingFinishQuantities } from '../quantities/ceilingFinish.js'
+import { computeDoorHardwareQuantities }  from '../quantities/doorHardware.js'
 import { humanizeAssignmentSource as humanizeSource } from '../specs/resolution'
 import { PLASTER_KIND }                from '../specs/plasterSystems'
 import { OPENING_SUBTYPE }             from '../constants/joinery.js'
@@ -446,7 +449,99 @@ export function getBoqLines(state, rates, opts = {}) {
     })
   }
 
-  // ── 14. MEP discipline emitters ───────────────────────────────────────
+  // ── 14. Steel by bar diameter (Gap 3) ─────────────────────────────────
+  // Procurement-friendly per-Ø rollup across every BBS'd entity. One BOQ
+  // line per non-zero diameter; qty = standard-length pieces; cost = pieces × rate.
+  // Same rateKey naming `steel_dia_<N>mm` makes per-Ø prices independent
+  // from existing per-element rates.
+  for (const [diaStr, info] of Object.entries(bbs.byDiameter ?? {})) {
+    const dia = Number(diaStr)
+    if (!info || info.totalKg <= 0) continue
+    push({
+      id:        BOQ_LINE_ID.steelByDia(dia),
+      category:  BOQ_CATEGORIES.STEEL_BY_DIAMETER,
+      label:     `Ø${dia}mm TMT Deformed Bar × ${info.standardBarLengthM}m`,
+      qty:       info.pieces,
+      unit:      UNITS.NOS,
+      rateKey:   BOQ_LINE_ID.steelByDia(dia),
+      formulaId: `steel_dia_${dia}`,
+      meta: {
+        diaMm:             dia,
+        totalKg:           info.totalKg,
+        weightPerPieceKg:  info.weightPerPieceKg,
+        standardBarLengthM: info.standardBarLengthM,
+        byCategory:        info.byCategory,
+      },
+    })
+  }
+
+  // ── 15. Paint materials (Gap 6) ───────────────────────────────────────
+  const paintQ = computePaintQuantities(state)
+  for (const layer of (paintQ.perLayer ?? [])) {
+    if (!layer.qty || layer.qty <= 0) continue
+    push({
+      id:        BOQ_LINE_ID.paintLayer(layer.systemId, layer.layerId),
+      category:  BOQ_CATEGORIES.PAINT_MATERIALS,
+      label:     `${layer.systemLabel} — ${layer.label}`,
+      qty:       layer.qty,
+      unit:      layer.unit === 'nos' ? UNITS.NOS : (layer.unit === 'L' ? UNITS.LITRE : UNITS.GALLON),
+      rateKey:   BOQ_LINE_ID.paintLayer(layer.systemId, layer.layerId),
+      formulaId: `paint_${layer.systemId}_${layer.layerId}`,
+      meta: {
+        systemId:  layer.systemId,
+        layerId:   layer.layerId,
+        coats:     layer.coats,
+        totalSft:  layer.totalSft,
+      },
+    })
+  }
+
+  // ── 16. Ceiling finish materials (Gap 7) ──────────────────────────────
+  const ceilingQ = computeCeilingFinishQuantities(state)
+  for (const mat of (ceilingQ.perMaterial ?? [])) {
+    if (!mat.qtyTotal || mat.qtyTotal <= 0) continue
+    push({
+      id:        BOQ_LINE_ID.ceilingMaterial(mat.systemId, mat.id),
+      category:  BOQ_CATEGORIES.CEILING_FINISH,
+      label:     `${mat.systemLabel} — ${mat.label}`,
+      qty:       mat.qtyTotal,
+      unit:      mat.unit === 'sqm' ? UNITS.SQM : (mat.unit === 'nos' ? UNITS.NOS : (mat.unit === 'Rft' ? UNITS.RFT : mat.unit)),
+      rateKey:   BOQ_LINE_ID.ceilingMaterial(mat.systemId, mat.id),
+      formulaId: `ceiling_${mat.systemId}_${mat.id}`,
+      meta: {
+        systemId:    mat.systemId,
+        materialId:  mat.id,
+      },
+      sourceEntityIds: mat.sourceEntityIds ?? [],
+    })
+  }
+
+  // ── 17. Door + window hardware (Gap 4/5) ──────────────────────────────
+  const hwQ = computeDoorHardwareQuantities(state)
+  for (const item of (hwQ.perItem ?? [])) {
+    if (!item.totalQty || item.totalQty <= 0) continue
+    const unitConst = item.unit === 'nos' ? UNITS.NOS
+                    : item.unit === 'set' ? UNITS.NOS
+                    : item.unit === 'Sft' ? UNITS.SFT
+                    : item.unit
+    push({
+      id:        BOQ_LINE_ID.hardwareItem(item.itemId),
+      category:  BOQ_CATEGORIES.JOINERY_HARDWARE,
+      label:     item.label,
+      qty:       item.totalQty,
+      unit:      unitConst,
+      rateKey:   BOQ_LINE_ID.hardwareItem(item.itemId),
+      formulaId: `hw_${item.itemId.toLowerCase()}`,
+      meta: {
+        itemId:    item.itemId,
+        category:  item.category,
+        nativeUnit: item.unit,
+      },
+      sourceEntityIds: item.fromOpenings ?? [],
+    })
+  }
+
+  // ── 18. MEP discipline emitters ───────────────────────────────────────
   emitPlumbingLines(state, push, { rates, scopedFloorId })
   emitElectricalLines(state, push, { rates, scopedFloorId })
   emitHvacLines(state, push, { rates, scopedFloorId })

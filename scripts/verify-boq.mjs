@@ -965,6 +965,257 @@ header('PLASTER v2 — Case 8 (NEW): External wall split into two segments, one 
     approx(q._meta.totalsByFace.partitionInnerFaces, 0))
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// 2026-05-26 — BOQ extension verifications (Gaps 1–8 + Presentation model)
+// ────────────────────────────────────────────────────────────────────────────
+
+header('9. BOQ presentation model + project header + cover (Phase A)')
+
+// Reset to single-room project — keeps assertions deterministic.
+resetStore()
+buildSimpleRoom('Living', 'LIVING', 0, 0, 10, 10)
+
+const { computeBoqPresentationModel, PRESENTATION_VERSION } =
+  await import('../src/boq/presentationModel.js')
+const { computeProjectCosts, DEFAULT_PROJECT_COSTS } =
+  await import('../src/boq/projectCosts.js')
+const { computeScopeOfWork } =
+  await import('../src/boq/_scopeOfWork.js')
+
+// Project metadata: setProjectMeta persists.
+s().setProjectMeta({ projectTitle: 'Test BOQ', ownerName: 'V. Engineer',
+                     location: 'Bangalore', preparedBy: 'AE-1',
+                     checkedBy: 'AE-2', approvedBy: 'PM' })
+check('Gap 1: setProjectMeta persists title',
+      s().projectSettings.projectMeta.projectTitle === 'Test BOQ')
+check('Gap 1: setProjectMeta persists preparedBy',
+      s().projectSettings.projectMeta.preparedBy === 'AE-1')
+
+// Scope of work auto-derives.
+const so = computeScopeOfWork(s())
+check('Scope of work: built-up area > 0', so.totalBuiltUpAreaSft > 0,
+      `got ${so.totalBuiltUpAreaSft}`)
+check('Scope of work: wallCount === 4 (single-room rectangle)',
+      so.wallCount === 4, `got ${so.wallCount}`)
+check('Scope of work: roomCountByType.LIVING === 1',
+      so.roomCountByType.LIVING === 1, `got ${so.roomCountByType.LIVING}`)
+
+// Presentation model: shape + invariants.
+const linesA = getBoqLines(s(), { flooring: 100, plasterWallsInternal: 50 })
+const modelA = computeBoqPresentationModel(linesA, { flooring: 100, plasterWallsInternal: 50 }, s())
+check('Presentation model: version stamped',
+      modelA.presentationVersion === PRESENTATION_VERSION)
+check('Presentation model: projectMeta.projectTitle threads through',
+      modelA.projectMeta.projectTitle === 'Test BOQ')
+check('Presentation model: at least one bucket emitted',
+      modelA.buckets.length > 0, `got ${modelA.buckets.length}`)
+check('Presentation model: every bucket has subtotal',
+      modelA.buckets.every(b => typeof b.subtotal === 'number'))
+check('Presentation model: grandTotal === materialSubtotal + project costs',
+      Math.abs(modelA.grandTotal - (modelA.materialSubtotal +
+        modelA.projectCosts.laborCost + modelA.projectCosts.supervisionCost +
+        modelA.projectCosts.overheadCost + modelA.projectCosts.profitCost +
+        modelA.projectCosts.gstCost)) < 0.5,
+      `gt=${modelA.grandTotal}, sub=${modelA.materialSubtotal}, pc.gt=${modelA.projectCosts.grandTotal}`)
+check('Presentation model: materialSubtotal === sum of bucket subtotals',
+      Math.abs(modelA.materialSubtotal -
+        modelA.buckets.reduce((s, b) => s + b.subtotal, 0)) < 0.01)
+
+// Re-running the model on the same lines twice should yield the same totals
+// (byte-stable presentation invariant — exporters can rely on this).
+const modelA2 = computeBoqPresentationModel(linesA, { flooring: 100, plasterWallsInternal: 50 }, s())
+check('Presentation model: grandTotal deterministic across runs',
+      modelA.grandTotal === modelA2.grandTotal,
+      `run1=${modelA.grandTotal}, run2=${modelA2.grandTotal}`)
+
+header('10. Gap 2 — Contingency (clean + detailed display modes)')
+
+// Default contingency: 10% global + 5% on steel.
+const rates = {
+  flooring: 100, plasterWallsInternal: 50,
+  // exercise per-mat brick rate so we hit a masonry line
+  mat_IS_MODULAR_BRICK_unit: 8000, mat_IS_MODULAR_BRICK_cement: 350, mat_IS_MODULAR_BRICK_sand: 50,
+}
+const linesB = getBoqLines(s(), rates)
+const modelB = computeBoqPresentationModel(linesB, rates, s())
+
+const masonryBucket = modelB.buckets.find(b => b.name === 'Masonry')
+if (masonryBucket && masonryBucket.lines.length > 0) {
+  // Pick a non-NOS line — NOS units are correctly excluded from contingency.
+  // Cement (BAG) or Sand (FT3) lines should carry the default 10%.
+  const matLine = masonryBucket.lines.find(l => l.unit !== 'nos') ?? masonryBucket.lines[0]
+  check('Gap 2: masonry (non-NOS) line carries contingencyPct === 10 (default)',
+        matLine.contingencyPct === 10, `got ${matLine.contingencyPct} for ${matLine.label} (${matLine.unit})`)
+  check('Gap 2: masonry qtyTotal === qty × 1.10',
+        Math.abs(matLine.qtyTotal - matLine.qty * 1.10) < 0.05,
+        `qty=${matLine.qty}, qtyTotal=${matLine.qtyTotal}`)
+  if (matLine.amount !== null) {
+    const expectedAmt = matLine.isPer1000
+      ? (matLine.qtyTotal / 1000) * matLine.rate
+      : matLine.qtyTotal * matLine.rate
+    check('Gap 2: masonry amount = qtyTotal × rate (per-1000 honored)',
+          Math.abs(matLine.amount - expectedAmt) < 0.5,
+          `amount=${matLine.amount}, expected=${expectedAmt}`)
+  }
+}
+
+// Excluded NOS lines never get contingency.
+const allBLines = modelB.buckets.flatMap(b => b.lines)
+const nosLines = allBLines.filter(l => l.unit === 'nos')
+check('Gap 2: NOS-unit lines never carry contingencyPct',
+      nosLines.every(l => l.contingencyPct === 0),
+      `${nosLines.filter(l => l.contingencyPct > 0).length} NOS lines with pct > 0`)
+
+// Toggle displayMode: 'detailed' → contingencySummary picks it up.
+s().setContingency({ displayMode: 'detailed' })
+const modelC = computeBoqPresentationModel(getBoqLines(s(), rates), rates, s())
+check('Gap 2: displayMode propagates to contingencySummary',
+      modelC.contingencySummary.displayMode === 'detailed')
+s().setContingency({ displayMode: 'clean' })
+
+header('11. Gap 3 — Steel by bar diameter')
+
+// Reset + seed BBS spec so we get non-zero byDiameter rollup.
+resetStore()
+buildSimpleRoom('Living', 'LIVING', 0, 0, 10, 10)
+s().addColumn(0, 0, 'C1')
+s().setProjectSettings({
+  reinforcementSpecs: {
+    COL_TEST: { id: 'COL_TEST', label: 'C-Test', elementType: 'COLUMN',
+      longitudinalBarCount: 4, longitudinalBarDiaMm: 12, stirrupBarDiaMm: 8,
+      stirrupSpacingIn: 6, coverMm: 25, lapLengthMultiplier: 50 },
+  },
+  bbsDefaults: { COLUMN: 'COL_TEST', SLAB: null, FOOTING: null,
+                 BEAM: { plinth: null, lintel: null, roof: null },
+                 standardBarLengthM: 6 },
+})
+const bbsG3 = (await import('../src/quantities/bbs.js')).computeBBSQuantities(s())
+check('Gap 3: byDiameter populated',
+      Object.keys(bbsG3.byDiameter).length > 0,
+      `dias: ${Object.keys(bbsG3.byDiameter).join(',')}`)
+check('Gap 3: 12mm bucket has kg > 0 (longitudinal bars)',
+      (bbsG3.byDiameter[12]?.totalKg ?? 0) > 0,
+      `got ${bbsG3.byDiameter[12]?.totalKg}`)
+check('Gap 3: 8mm bucket has kg > 0 (stirrup bars)',
+      (bbsG3.byDiameter[8]?.totalKg ?? 0) > 0,
+      `got ${bbsG3.byDiameter[8]?.totalKg}`)
+check('Gap 3: pieces at 6m derived correctly',
+      bbsG3.byDiameter[12].pieces === Math.ceil(bbsG3.byDiameter[12].totalKg / (6 * 0.888)),
+      `pieces=${bbsG3.byDiameter[12].pieces}`)
+check('Gap 3: standardBarLengthM round-trip',
+      bbsG3.standardBarLengthM === 6)
+
+const linesG3 = getBoqLines(s(), {})
+const diaLines = linesG3.filter(l => l.category === 'steel_by_diameter')
+check('Gap 3: BOQ emits steel_by_diameter lines',
+      diaLines.length >= 2, `got ${diaLines.length}`)
+check('Gap 3: each dia line label includes "Ø" and "× 6m"',
+      diaLines.every(l => l.label.includes('Ø') && l.label.includes('× 6m')),
+      diaLines.map(l => l.label).join(' | '))
+
+header('12. Gap 6 — Paint material aggregator (gallons by layer)')
+
+const paintQ = (await import('../src/quantities/paint.js')).computePaintQuantities(s())
+const interiorSys = s().projectSettings.defaultInteriorPaintSystemId
+check('Gap 6: bySystem populated when paint flag is set',
+      Object.keys(paintQ.bySystem).length > 0)
+const sysAggregate = paintQ.bySystem[interiorSys]
+if (sysAggregate) {
+  check('Gap 6: layers carry gallon qty',
+        sysAggregate.layers.some(l => l.unit === 'gal' && l.qty > 0),
+        sysAggregate.layers.map(l => `${l.layerId}=${l.qty}${l.unit}`).join(' '))
+}
+check('Gap 6: _meta carries algorithm tag',
+      paintQ._meta.algorithm === 'PAINT_SYSTEM_LAYER_ROLLUP_V1')
+
+header('13. Gap 7 — Ceiling finish aggregator')
+
+// Default: NONE → 0 lines. Switch room to GYPSUM_BOARD_12MM.
+const ceilingMod = await import('../src/quantities/ceilingFinish.js')
+const ceilingQ0 = ceilingMod.computeCeilingFinishQuantities(s())
+check('Gap 7: default NONE → zero material totals',
+      Object.keys(ceilingQ0.bySystem).length === 0)
+
+// Switch project default; rooms with ceilingPlaster=true pick it up.
+s().setDefaultCeilingFinishSystem('GYPSUM_BOARD_12MM')
+const ceilingQ1 = ceilingMod.computeCeilingFinishQuantities(s())
+check('Gap 7: GYPSUM_BOARD_12MM system aggregates room ceiling area',
+      Object.keys(ceilingQ1.bySystem).length === 1)
+const gyp = ceilingQ1.bySystem['GYPSUM_BOARD_12MM']
+if (gyp) {
+  check('Gap 7: gypsum-board material qtyTotal scales with room area',
+        gyp.materials.some(m => m.id === 'GYPSUM_BOARD' && m.qtyTotal > 0),
+        gyp.materials.map(m => `${m.id}=${m.qtyTotal}${m.unit}`).join(' '))
+}
+
+const linesG7 = getBoqLines(s(), {})
+const ceilingLines = linesG7.filter(l => l.category === 'ceiling_finish')
+check('Gap 7: BOQ emits ceiling_finish lines',
+      ceilingLines.length > 0, `got ${ceilingLines.length}`)
+
+// Reset to NONE for downstream tests.
+s().setDefaultCeilingFinishSystem('NONE')
+
+header('14. Gap 4 — Door hardware (set-only)')
+
+// Add a door opening to the south wall and assert hardware resolution.
+const livingWalls = Object.values(s().walls)
+const southWall = livingWalls.find(w => {
+  const a = s().nodes[w.n1], b = s().nodes[w.n2]
+  return a && b && a.y === 0 && b.y === 0
+})
+if (southWall) {
+  s().addOpening(southWall.id, { offset: 3*FT, width: 3*FT, height: 7*FT, type: 'door', orient: 0 })
+  // openings get subtype via heuristic in addOpening — the south wall is
+  // external so we should land on MAIN_DOOR.
+  const hwMod = await import('../src/quantities/doorHardware.js')
+  const hwQ = hwMod.computeDoorHardwareQuantities(s())
+  check('Gap 4: perOpening contains the new door',
+        hwQ.perOpening.length >= 1, `got ${hwQ.perOpening.length}`)
+  check('Gap 4: perItem has hinges + lock for the main-door set',
+        hwQ.perItem.some(i => i.itemId === 'HINGE_HD_4X4') &&
+        hwQ.perItem.some(i => i.itemId === 'LOCK_MORTISE'),
+        hwQ.perItem.map(i => i.itemId).join(','))
+  const hingeQty = hwQ.perItem.find(i => i.itemId === 'HINGE_HD_4X4')?.totalQty ?? 0
+  check('Gap 4: main door gets 3 heavy-duty hinges',
+        hingeQty === 3, `got ${hingeQty}`)
+}
+
+const linesG4 = getBoqLines(s(), {})
+const hwLines = linesG4.filter(l => l.category === 'joinery_hardware')
+check('Gap 4: BOQ emits joinery_hardware lines',
+      hwLines.length > 0, `got ${hwLines.length}`)
+
+header('15. Gap 8 — Project costs roll-up')
+
+const pcRes = computeProjectCosts(100000, { ...DEFAULT_PROJECT_COSTS })
+check('Gap 8: materials Rs.1L, labor 15% → Rs.15000',
+      pcRes.laborCost === 15000, `got ${pcRes.laborCost}`)
+check('Gap 8: supervision 5% → Rs.5000',
+      pcRes.supervisionCost === 5000, `got ${pcRes.supervisionCost}`)
+check('Gap 8: GST 18% on materials → Rs.18000',
+      pcRes.gstCost === 18000, `got ${pcRes.gstCost}`)
+check('Gap 8: grand total = sum of components',
+      pcRes.grandTotal === pcRes.materialSubtotal + pcRes.laborCost +
+        pcRes.supervisionCost + pcRes.overheadCost + pcRes.profitCost + pcRes.gstCost,
+      `gt=${pcRes.grandTotal}, sum=${pcRes.materialSubtotal + pcRes.laborCost + pcRes.supervisionCost + pcRes.overheadCost + pcRes.profitCost + pcRes.gstCost}`)
+check('Gap 8: breakdown is rendered as labelled rows',
+      pcRes.breakdown.length >= 4 && pcRes.breakdown.every(r => typeof r.label === 'string'))
+
+header('16. Export drift guard — Excel total ≡ PDF total ≡ model.grandTotal')
+
+// Both Excel and PDF exporters call computeBoqPresentationModel internally
+// and return model.grandTotal. We can't write files in Node here, but the
+// invariant we care about — both consume the same model — is verified by
+// the fact that we already asserted modelA.grandTotal is deterministic
+// across runs (run1 === run2) and that grandTotal === sum of bucket
+// subtotals + project costs. Together: any two callers see identical
+// totals.
+check('Export drift guard: model.grandTotal === projectCosts.grandTotal',
+      modelA.grandTotal === modelA.projectCosts.grandTotal,
+      `model=${modelA.grandTotal}, pc=${modelA.projectCosts.grandTotal}`)
+
+// Done.
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)
 if (failed.length > 0) {

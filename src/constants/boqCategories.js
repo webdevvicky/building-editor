@@ -31,22 +31,26 @@ export const PROJECT_AND_FLOOR_ONLY = Object.freeze([
 
 export const BOQ_CATEGORIES = Object.freeze({
   // Room-attributable (per-room breakdown supported)
-  FINISHES:     'finishes',
-  MASONRY:      'masonry',
-  PLASTER:      'plaster',
-  TILES:        'tiles',       // new (Rev 2)
-  JOINERY:      'joinery',     // new (Rev 2)
-  GRILLS:       'grills',      // new (Rev 2)
+  FINISHES:        'finishes',
+  MASONRY:         'masonry',
+  PLASTER:         'plaster',
+  TILES:           'tiles',
+  JOINERY:         'joinery',
+  JOINERY_HARDWARE:'joinery_hardware',   // door + window hardware (Gap 4/5)
+  GRILLS:          'grills',
+  PAINT_MATERIALS: 'paint_materials',    // gallons by layer (Gap 6)
+  CEILING_FINISH:  'ceiling_finish',     // false ceiling materials (Gap 7)
 
   // Project / floor-only (don't decompose per room)
-  RCC:          'rcc',
-  STEEL:        'steel',
-  SHUTTERING:   'shuttering',
-  EXCAVATION:   'excavation',
-  CONCRETE_MIX: 'concreteMix',
-  PLUM_CONCRETE:'plumConcrete',
-  CIVIL:        'civil',
-  STAIRCASE:    'staircase',
+  RCC:               'rcc',
+  STEEL:             'steel',
+  STEEL_BY_DIAMETER: 'steel_by_diameter',  // rebar by bar dia (Gap 3)
+  SHUTTERING:        'shuttering',
+  EXCAVATION:        'excavation',
+  CONCRETE_MIX:      'concreteMix',
+  PLUM_CONCRETE:     'plumConcrete',
+  CIVIL:             'civil',
+  STAIRCASE:         'staircase',
 })
 
 // Default scope-support per category. Push helper looks up category here
@@ -57,21 +61,25 @@ export const BOQ_CATEGORIES = Object.freeze({
 // MEP categories (plumbing_supply, electrical_*, hvac_*, fire_*, elv_*)
 // fall into that default — they don't decompose per room today.
 export const DEFAULT_SCOPE_SUPPORT_BY_CATEGORY = Object.freeze({
-  [BOQ_CATEGORIES.FINISHES]:      ALL_SCOPES,
-  [BOQ_CATEGORIES.MASONRY]:       ALL_SCOPES,
-  [BOQ_CATEGORIES.PLASTER]:       ALL_SCOPES,
-  [BOQ_CATEGORIES.TILES]:         ALL_SCOPES,
-  [BOQ_CATEGORIES.JOINERY]:       ALL_SCOPES,
-  [BOQ_CATEGORIES.GRILLS]:        ALL_SCOPES,
+  [BOQ_CATEGORIES.FINISHES]:         ALL_SCOPES,
+  [BOQ_CATEGORIES.MASONRY]:          ALL_SCOPES,
+  [BOQ_CATEGORIES.PLASTER]:          ALL_SCOPES,
+  [BOQ_CATEGORIES.TILES]:            ALL_SCOPES,
+  [BOQ_CATEGORIES.JOINERY]:          ALL_SCOPES,
+  [BOQ_CATEGORIES.JOINERY_HARDWARE]: ALL_SCOPES,
+  [BOQ_CATEGORIES.GRILLS]:           ALL_SCOPES,
+  [BOQ_CATEGORIES.PAINT_MATERIALS]:  ALL_SCOPES,
+  [BOQ_CATEGORIES.CEILING_FINISH]:   ALL_SCOPES,
 
-  [BOQ_CATEGORIES.RCC]:           PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.STEEL]:         PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.SHUTTERING]:    PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.EXCAVATION]:    PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.CONCRETE_MIX]:  PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.PLUM_CONCRETE]: PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.CIVIL]:         PROJECT_AND_FLOOR_ONLY,
-  [BOQ_CATEGORIES.STAIRCASE]:     PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.RCC]:               PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.STEEL]:             PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.STEEL_BY_DIAMETER]: PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.SHUTTERING]:        PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.EXCAVATION]:        PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.CONCRETE_MIX]:      PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.PLUM_CONCRETE]:     PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.CIVIL]:             PROJECT_AND_FLOOR_ONLY,
+  [BOQ_CATEGORIES.STAIRCASE]:         PROJECT_AND_FLOOR_ONLY,
 })
 
 export function getDefaultScopeSupport(category) {
@@ -195,10 +203,22 @@ export const BOQ_LINE_ID = Object.freeze({
   // Steel grouped-by-spec (per category × spec)
   steelSpec:       (rateKey, specId) => `${rateKey}_spec_${specId}`,
 
+  // Steel by bar diameter (Gap 3) — one line per diameter (8/10/12/16/20/25/32)
+  steelByDia:      (diaMm)  => `steel_dia_${diaMm}mm`,
+
   // Plaster materials (per plaster system)
   plasterCement:    (sysId) => `plaster_${sysId}_cement`,
   plasterSand:      (sysId) => `plaster_${sysId}_sand`,
   plasterMaterial:  (sysId) => `plaster_${sysId}_material`,
+
+  // Hardware (per item, Gap 4/5)
+  hardwareItem:    (itemId) => `hw_${itemId.toLowerCase()}`,
+
+  // Paint materials (per system × layer, Gap 6)
+  paintLayer:      (sysId, layerId) => `paint_${sysId}_${layerId}`,
+
+  // Ceiling finish (per system × material, Gap 7)
+  ceilingMaterial: (sysId, matId)   => `ceiling_${sysId}_${matId}`,
 })
 
 // Civil prefix tokens for sump / septic stamp emission.

@@ -13,6 +13,17 @@ import {
   BEAM_LEVEL_REGISTRY,
 } from './constants/structural'
 import { DEFAULT_PLASTER_SYSTEM_ID } from './specs/plasterSystems'
+import {
+  DEFAULT_INTERIOR_PAINT_SYSTEM_ID,
+  DEFAULT_EXTERIOR_PAINT_SYSTEM_ID,
+} from './specs/paintSystems'
+import { DEFAULT_CEILING_FINISH_SYSTEM_ID } from './specs/ceilingFinishSystems'
+import {
+  DEFAULT_DOOR_HARDWARE_DEFAULTS,
+  DEFAULT_WINDOW_HARDWARE_DEFAULTS,
+} from './specs/hardware/hardwareSets'
+import { DEFAULT_PROJECT_COSTS } from './boq/projectCosts'
+import { STANDARD_BAR_LENGTH_M } from './specs/reinforcementSpecs'
 import { getColumnAreaFt2 } from './lib/columnShapes'
 import { createMemo } from './topology/cache.js'
 import {
@@ -196,7 +207,53 @@ export const DEFAULT_PROJECT_SETTINGS = {
       lintel: null,
       roof:   null,
     },
+    // Gap 3 — standard bar length (m) for the per-Ø procurement rollup.
+    // 6m matches user spec; 12m allowed for crane-handled work.
+    standardBarLengthM: STANDARD_BAR_LENGTH_M,
   },
+
+  // ── Gap 1 — Project metadata (Excel cover + PDF cover) ───────────────────
+  projectMeta: {
+    projectTitle: '',
+    ownerName:    '',
+    location:     '',
+    preparedBy:   '',
+    checkedBy:    '',
+    approvedBy:   '',
+    preparedDate: null,  // ISO yyyy-mm-dd; null → exporter stamps today
+  },
+
+  // ── Gap 2 — Contingency (global default + per-category override) ─────────
+  contingency: {
+    defaultPercent:     10,
+    overrides: {
+      steel:             5,
+      joinery:           5,
+      joinery_hardware:  5,
+      plumbing_supply:   5,
+      plumbing_drainage: 5,
+      plumbing_fixtures: 5,
+      electrical_lighting: 5,
+      electrical_power:    5,
+      electrical_hvac:     5,
+    },
+    excludedCategories: ['staircase'],
+    displayMode:        'clean',  // 'detailed' | 'clean' — Addition 2
+  },
+
+  // ── Gap 6 — Paint system defaults ────────────────────────────────────────
+  defaultInteriorPaintSystemId: DEFAULT_INTERIOR_PAINT_SYSTEM_ID,
+  defaultExteriorPaintSystemId: DEFAULT_EXTERIOR_PAINT_SYSTEM_ID,
+
+  // ── Gap 7 — Ceiling finish default ───────────────────────────────────────
+  defaultCeilingFinishSystemId: DEFAULT_CEILING_FINISH_SYSTEM_ID,
+
+  // ── Gap 4 + 5 — Door / window hardware defaults per subtype ──────────────
+  doorHardwareDefaults:   { ...DEFAULT_DOOR_HARDWARE_DEFAULTS   },
+  windowHardwareDefaults: { ...DEFAULT_WINDOW_HARDWARE_DEFAULTS },
+
+  // ── Gap 8 — Project costs (labor / supervision / GST) ────────────────────
+  projectCosts: { ...DEFAULT_PROJECT_COSTS },
 }
 
 // Beam endpoint — discriminated union:
@@ -415,6 +472,67 @@ export const createStructuralSlice = (set, get, uid) => ({
     projectSettings: {
       ...state.projectSettings,
       grills: { ...state.projectSettings.grills, ...partial },
+    },
+  })),
+
+  // ── 2026-05-26 — BOQ extension setters (Gaps 1, 2, 4, 5, 6, 7, 8) ────────
+
+  // Gap 1 — Project metadata (header + signatures)
+  setProjectMeta: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      projectMeta: { ...(state.projectSettings.projectMeta ?? {}), ...partial },
+    },
+  })),
+
+  // Gap 2 — Contingency (default % + per-category overrides + displayMode)
+  setContingency: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      contingency: {
+        ...(state.projectSettings.contingency ?? {}),
+        ...partial,
+        ...(partial?.overrides ? {
+          overrides: { ...(state.projectSettings.contingency?.overrides ?? {}), ...partial.overrides },
+        } : {}),
+      },
+    },
+  })),
+
+  // Gap 6 — Paint system defaults (interior + exterior)
+  setDefaultPaintSystems: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      ...(partial?.interior !== undefined ? { defaultInteriorPaintSystemId: partial.interior } : {}),
+      ...(partial?.exterior !== undefined ? { defaultExteriorPaintSystemId: partial.exterior } : {}),
+    },
+  })),
+
+  // Gap 7 — Ceiling finish default
+  setDefaultCeilingFinishSystem: (id) => set(state => ({
+    projectSettings: { ...state.projectSettings, defaultCeilingFinishSystemId: id },
+  })),
+
+  // Gap 4 + 5 — Hardware defaults per subtype
+  setDoorHardwareDefaults: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      doorHardwareDefaults: { ...(state.projectSettings.doorHardwareDefaults ?? {}), ...partial },
+    },
+  })),
+
+  setWindowHardwareDefaults: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      windowHardwareDefaults: { ...(state.projectSettings.windowHardwareDefaults ?? {}), ...partial },
+    },
+  })),
+
+  // Gap 8 — Project costs (labor / supervision / GST / etc.)
+  setProjectCosts: (partial) => set(state => ({
+    projectSettings: {
+      ...state.projectSettings,
+      projectCosts: { ...(state.projectSettings.projectCosts ?? {}), ...partial },
     },
   })),
 

@@ -12,14 +12,17 @@
 // Grep guard: `grep -rn "unit: '" src/boq/` must return zero matches.
 
 export const UNITS = Object.freeze({
-  NOS:  'nos',     // count
-  RFT:  'Rft',     // running feet (linear)
-  SFT:  'Sft',     // square feet (Indian residential header)
-  CFT:  'Cft',     // cubic feet (Indian residential header)
-  KG:   'kg',      // kilograms
-  BAG:  'bags',    // cement / adhesive bags
-  M3:   'm³',      // cubic metres
-  FT:   'ft',      // raw length
-  FT2:  'ft²',     // square feet (legacy structural display)
-  FT3:  'ft³',     // cubic feet (legacy structural display)
+  NOS:    'nos',     // count
+  RFT:    'Rft',     // running feet (linear)
+  SFT:    'Sft',     // square feet (Indian residential header)
+  CFT:    'Cft',     // cubic feet (Indian residential header)
+  KG:     'kg',      // kilograms
+  BAG:    'bags',    // cement / adhesive bags
+  M3:     'm³',      // cubic metres
+  SQM:    'sqm',     // square metres (ceiling finish materials)
+  FT:     'ft',      // raw length
+  FT2:    'ft²',     // square feet (legacy structural display)
+  FT3:    'ft³',     // cubic feet (legacy structural display)
+  GALLON: 'gal',     // paint coverage (Indian residential convention)
+  LITRE:  'L',       // alt paint coverage
 })

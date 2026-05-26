@@ -20,6 +20,12 @@
 // → concrete mix → steel → shuttering → masonry → plaster → finishes →
 // tiles → joinery → grills → civil → staircase), MEP grouped at the
 // end so procurement reads structural / civil / interiors before MEP.
+//
+// 2026-05-26 — added 4 new buckets:
+//   - Steel — by Bar Diameter (Gap 3): one BOQ line per Ø8/10/12/16/20mm bar
+//   - Paint Materials (Gap 6): per-layer gallons (neutralizer/putty/primer/finish)
+//   - Ceiling Finish (Gap 7): false-ceiling materials per system
+//   - Joinery promoted to multi-category to add Hardware sub-column (Gap 4/5)
 
 export const SHEET_BUCKETS = Object.freeze([
   // ── Civil / structural / finishes (single-category buckets) ──────────
@@ -28,12 +34,27 @@ export const SHEET_BUCKETS = Object.freeze([
   Object.freeze({ name: 'Structural',         categories: ['rcc'] }),
   Object.freeze({ name: 'Concrete',           categories: ['concreteMix'] }),
   Object.freeze({ name: 'Steel',              categories: ['steel'] }),
+  // Steel grouped by bar diameter — procurement orders bars by length+dia,
+  // not by element. One line per non-zero dia (Ø8/10/12/16/20/25/32 mm).
+  Object.freeze({ name: 'Steel — by Bar Diameter', categories: ['steel_by_diameter'] }),
   Object.freeze({ name: 'Shuttering',         categories: ['shuttering'] }),
   Object.freeze({ name: 'Masonry',            categories: ['masonry'] }),
   Object.freeze({ name: 'Plaster',            categories: ['plaster'] }),
   Object.freeze({ name: 'Finishes',           categories: ['finishes'] }),
+  // Paint materials (gallons / litres by layer) — kept separate from Finishes
+  // so labor (paint area) and materials (paint gallons) procure independently.
+  Object.freeze({ name: 'Paint Materials', categories: Object.freeze([
+    Object.freeze({ cat: 'paint_materials', system: 'Layer' }),
+  ]) }),
+  Object.freeze({ name: 'Ceiling Finish',     categories: Object.freeze([
+    Object.freeze({ cat: 'ceiling_finish', system: 'Material' }),
+  ]) }),
   Object.freeze({ name: 'Tiles',              categories: ['tiles'] }),
-  Object.freeze({ name: 'Joinery',            categories: ['joinery'] }),
+  // Joinery + hardware in one bucket with System column (Frame & Shutter | Hardware).
+  Object.freeze({ name: 'Joinery & Hardware', categories: Object.freeze([
+    Object.freeze({ cat: 'joinery',          system: 'Frame & Shutter' }),
+    Object.freeze({ cat: 'joinery_hardware', system: 'Hardware'        }),
+  ]) }),
   Object.freeze({ name: 'Grills & Handrails', categories: ['grills'] }),
   Object.freeze({ name: 'Civil',              categories: ['civil'] }),
   Object.freeze({ name: 'Staircase',          categories: ['staircase'] }),

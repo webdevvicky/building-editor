@@ -1,24 +1,26 @@
-// Phase 2.0 — Client-side PDF export of the BOQ.
+// Client-side PDF export of the BOQ.
 //
 // exportBoqPdf(state, rates, { projectName, preparedBy, unit | unitSystem })
 //   → triggers browser download of `boq-${projectName}-${date}.pdf`.
 //
-// Built on jsPDF + jspdf-autotable. No network access. The default jsPDF font
-// ships without the U+20B9 INR glyph, so we render the currency as the ASCII
-// prefix "Rs. " throughout.
+// 2026-05-26 — rewritten to consume src/boq/presentationModel.js. The
+// exporter does NO independent math; every number reads from the model
+// so PDF ≡ Excel totals.
 //
-// Section layout mirrors Excel sheet layout via src/export/_buckets.js so the
-// two exports never drift. Multi-category MEP buckets render a "System"
-// column so procurement reads which sub-system each line belongs to.
+// Cover page = project metadata + scope of work + cost summary +
+// signatures. One section per non-empty bucket. Summary page lists
+// subtotals + grand total. Contingency displayMode toggles per-section
+// table column shape (clean = Qty | Unit | Rate | Amount; detailed
+// adds Qty (Base) | +% | Qty (Total) columns).
+//
+// jsPDF default font lacks U+20B9 — we use the ASCII prefix "Rs. ".
 
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { getBoqLines, groupBoqLinesByCategory, totalBoqCost } from '../boq/lines'
+import { getBoqLines } from '../boq/lines'
+import { computeBoqPresentationModel } from '../boq/presentationModel.js'
 import { formatQuantity, normalizeUnitMode } from '../lib/units.js'
-import {
-  SHEET_BUCKETS, bucketLines, bucketIsMulti, bucketSystemLabel,
-  warnUnmappedCategories,
-} from './_buckets.js'
+import { warnUnmappedCategories } from './_buckets.js'
 
 function todayStamp() {
   const d = new Date()
@@ -35,15 +37,13 @@ function fmtRs(n) {
   return 'Rs. ' + Math.round(n).toLocaleString('en-IN')
 }
 
-function fmtPdfQty(line, displayMode) {
-  if (!line) return ''
-  const v = line.qty
-  if (v === null || v === undefined || Number.isNaN(v)) return ''
-  return formatQuantity(v, line.unit, displayMode)
+function fmtPct(p) {
+  if (!p) return ''
+  return `+${p}%`
 }
 
 function fmtRate(rate, isPer1000) {
-  if (rate === '' || rate === null || rate === undefined) return ''
+  if (rate === null || rate === undefined || rate === '') return ''
   const r = parseFloat(rate)
   if (Number.isNaN(r) || r <= 0) return ''
   return 'Rs. ' + r.toLocaleString('en-IN') + (isPer1000 ? ' /1000' : '')
@@ -59,148 +59,185 @@ function drawFooter(doc, page, pageCount) {
   doc.setTextColor(0)
 }
 
+function drawCoverPage(doc, model, displayUnitSystem) {
+  const m  = model.projectMeta
+  const so = model.scopeOfWork
+  const pc = model.projectCosts
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+
+  doc.setFontSize(10); doc.setTextColor(120)
+  doc.text('BILL OF QUANTITIES', pageW / 2, 80, { align: 'center' })
+  doc.setTextColor(0)
+  doc.setFontSize(26); doc.setFont('helvetica', 'bold')
+  doc.text(m.projectTitle || 'Untitled Project', pageW / 2, 120, { align: 'center', maxWidth: pageW - 80 })
+  doc.setFont('helvetica', 'normal')
+
+  // Project metadata block — left-aligned key/value list.
+  let y = 170
+  const colX = 80
+  const valX = pageW / 2
+  doc.setFontSize(10)
+  const rows = [
+    ['Owner',         m.ownerName || '-'],
+    ['Location',      m.location  || '-'],
+    ['Date prepared', m.preparedDate || todayStamp()],
+    ['Unit system',   displayUnitSystem],
+    ['Prepared by',   m.preparedBy || '-'],
+    ['Checked by',    m.checkedBy  || '-'],
+    ['Approved by',   m.approvedBy || '-'],
+  ]
+  for (const [k, v] of rows) {
+    doc.setTextColor(100); doc.text(k, colX, y)
+    doc.setTextColor(0);   doc.text(String(v), valX, y)
+    y += 16
+  }
+  y += 12
+
+  // Scope of work block.
+  doc.setFont('helvetica', 'bold'); doc.text('Scope of work', colX, y); doc.setFont('helvetica', 'normal')
+  y += 14
+  const scope = [
+    ['Floors',                  so.floorCount],
+    ['Total built-up area',     `${so.totalBuiltUpAreaSft} Sft`],
+    ...(so.plotAreaSft > 0 ? [['Plot area', `${so.plotAreaSft} Sft`]] : []),
+    ['Doors',                   so.openingCounts.doors],
+    ['Windows',                 so.openingCounts.windows],
+    ['Ventilators',             so.openingCounts.ventilators],
+    ['Walls (count)',           so.wallCount],
+    ['Columns (count)',         so.columnCount],
+  ]
+  for (const [k, v] of scope) {
+    doc.setTextColor(100); doc.text(k, colX, y)
+    doc.setTextColor(0);   doc.text(String(v), valX, y)
+    y += 14
+  }
+  y += 12
+
+  // Project cost summary block.
+  doc.setFont('helvetica', 'bold'); doc.text('Project cost summary', colX, y); doc.setFont('helvetica', 'normal')
+  y += 14
+  for (const row of pc.breakdown) {
+    doc.setTextColor(100); doc.text(row.label, colX, y)
+    doc.setTextColor(0);   doc.text(fmtRs(row.amount), valX, y)
+    y += 14
+  }
+  y += 8
+  doc.setFont('helvetica', 'bold')
+  doc.text('GRAND TOTAL', colX, y)
+  doc.text(fmtRs(pc.grandTotal), valX, y)
+  doc.setFont('helvetica', 'normal')
+
+  // Signature block — bottom of cover.
+  doc.setFontSize(9); doc.setTextColor(100)
+  const sigY = pageH - 130
+  const colW = (pageW - 160) / 3
+  ;['Prepared by', 'Checked by', 'Approved by'].forEach((lbl, i) => {
+    const x = 80 + colW * i + colW / 2
+    doc.text(lbl, x, sigY, { align: 'center' })
+    doc.text(['preparedBy', 'checkedBy', 'approvedBy'][i] === 'preparedBy' ? (m.preparedBy || '-')
+      : i === 1 ? (m.checkedBy || '-') : (m.approvedBy || '-'),
+      x, sigY + 14, { align: 'center' })
+    doc.text('_______________', x, sigY + 44, { align: 'center' })
+    doc.text('Signature',       x, sigY + 56, { align: 'center' })
+  })
+
+  doc.setFontSize(8); doc.setTextColor(140)
+  doc.text(
+    'Generated client-side. Final rates and quantities must be verified before procurement.',
+    pageW / 2, pageH - 70,
+    { align: 'center', maxWidth: pageW - 120 },
+  )
+  doc.setTextColor(0)
+}
+
 export function exportBoqPdf(state, rates, opts = {}) {
-  const projectName = opts.projectName || 'Untitled'
-  const preparedBy  = opts.preparedBy  || '-'
-  // Prefer explicit display unit ('ft' | 'ft-in' | 'm'); fall back to
-  // legacy unitSystem string ('metric' | 'ft (Indian)'). Indian engineers
-  // get feet-inches as the default friendly format.
+  const projectName = opts.projectName || state?.projectSettings?.projectMeta?.projectTitle || 'Untitled'
   const displayMode = normalizeUnitMode(
     opts.unit ?? (opts.unitSystem === 'metric' ? 'm' : 'ft-in')
   )
-  const unitSystem  = opts.unitSystem  || (displayMode === 'm' ? 'metric' : 'ft (Indian)')
+  const unitSystem = opts.unitSystem || (displayMode === 'm' ? 'metric' : 'ft (Indian)')
 
-  const lines    = getBoqLines(state, rates || {})
-  const grouped  = groupBoqLinesByCategory(lines)
-  const grandTot = totalBoqCost(lines)
+  const lines = getBoqLines(state, rates || {})
+  warnUnmappedCategories(lines.reduce((m, l) => {
+    if (!m[l.category]) m[l.category] = []
+    m[l.category].push(l)
+    return m
+  }, {}))
 
-  // Dev warning if a category isn't in SHEET_BUCKETS — would otherwise
-  // silently disappear from per-section pages.
-  warnUnmappedCategories(grouped)
+  const model = computeBoqPresentationModel(lines, rates || {}, state, { projectNameOverride: projectName })
+  const detailed = model.contingencySummary.displayMode === 'detailed'
 
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
 
   // ── Cover page ──────────────────────────────────────────────────────────
-  const pageW = doc.internal.pageSize.getWidth()
-  const pageH = doc.internal.pageSize.getHeight()
-  doc.setFontSize(10)
-  doc.setTextColor(120)
-  doc.text('BILL OF QUANTITIES', pageW / 2, 140, { align: 'center' })
-  doc.setTextColor(0)
-  doc.setFontSize(34)
-  doc.setFont('helvetica', 'bold')
-  doc.text(projectName, pageW / 2, 200, { align: 'center', maxWidth: pageW - 80 })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(12)
-  doc.text(`Date: ${todayStamp()}`, pageW / 2, 260, { align: 'center' })
-  doc.text(`Unit system: ${unitSystem}`, pageW / 2, 282, { align: 'center' })
-  doc.text(`Prepared by: ${preparedBy}`, pageW / 2, 304, { align: 'center' })
-
-  doc.setFontSize(9)
-  doc.setTextColor(140)
-  doc.text(
-    'Generated client-side. Final rates and quantities must be verified before procurement.',
-    pageW / 2, pageH - 80,
-    { align: 'center', maxWidth: pageW - 120 },
-  )
-  doc.setTextColor(0)
+  drawCoverPage(doc, model, unitSystem)
 
   // ── Per-bucket tables ───────────────────────────────────────────────────
-  const subtotals = []
-
-  for (const bucket of SHEET_BUCKETS) {
-    const bucketLs = bucketLines(bucket, grouped)
-    if (bucketLs.length === 0) continue
-    const multi = bucketIsMulti(bucket)
-
+  for (const bucket of model.buckets) {
+    const multi = bucket.isMulti
     doc.addPage()
-    doc.setFontSize(14)
-    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
     doc.text(bucket.name, 40, 50)
     doc.setFont('helvetica', 'normal')
 
-    // Build table body. Multi-bucket adds a System column at index 1.
-    const body = bucketLs.map(l => multi
-      ? [
-          bucketSystemLabel(bucket, l.category),
-          l.label,
-          fmtPdfQty(l, displayMode),
-          l.unit || '',
-          fmtRate(rates ? rates[l.rateKey] : '', l.isPer1000),
-          fmtRs(l.cost),
-        ]
-      : [
-          l.label,
-          fmtPdfQty(l, displayMode),
-          l.unit || '',
-          fmtRate(rates ? rates[l.rateKey] : '', l.isPer1000),
-          fmtRs(l.cost),
-        ]
-    )
+    const head = []
+    if (multi) head.push('System')
+    head.push('Item')
+    if (detailed) { head.push('Qty (Base)'); head.push('+%'); head.push('Qty (Total)') }
+    else          { head.push('Qty') }
+    head.push('Unit'); head.push('Rate (Rs.)'); head.push('Amount (Rs.)')
 
-    const catSub  = bucketLs.reduce((s, l) => s + (l.cost ?? 0), 0)
-    const hasCost = bucketLs.some(l => l.cost !== null)
-    subtotals.push({ label: bucket.name, sub: hasCost ? catSub : null, count: bucketLs.length })
+    const body = bucket.lines.map(l => {
+      const row = []
+      if (multi) row.push(l.systemColumn ?? '')
+      row.push(l.label)
+      if (detailed) {
+        row.push(String(l.qty))
+        row.push(fmtPct(l.contingencyPct))
+        row.push(formatQuantity(l.qtyTotal, l.unit, displayMode))
+      } else {
+        row.push(formatQuantity(l.qtyTotal, l.unit, displayMode))
+      }
+      row.push(l.unit || '')
+      row.push(fmtRate(l.rate, l.isPer1000))
+      row.push(fmtRs(l.amount))
+      return row
+    })
 
-    const head = multi
-      ? [['System', 'Item', 'Qty', 'Unit', 'Rate (Rs.)', 'Amount (Rs.)']]
-      : [['Item', 'Qty', 'Unit', 'Rate (Rs.)', 'Amount (Rs.)']]
-
-    // Subtotal foot — colSpan covers all columns except the Amount column.
-    const footColSpan = multi ? 5 : 4
-    const foot = hasCost ? [[
-      { content: 'Subtotal', colSpan: footColSpan, styles: { halign: 'right', fontStyle: 'bold' } },
-      { content: fmtRs(catSub), styles: { fontStyle: 'bold' } },
-    ]] : undefined
-
-    // Column styles — shifted +1 in multi mode for the leading System column.
-    const columnStyles = multi
-      ? {
-          0: { halign: 'left',  cellWidth: 70 },   // System
-          1: { cellWidth: 200 },                   // Item
-          2: { halign: 'right', cellWidth: 60 },   // Qty
-          3: { halign: 'left',  cellWidth: 40 },   // Unit
-          4: { halign: 'right', cellWidth: 80 },   // Rate
-          5: { halign: 'right', cellWidth: 80 },   // Amount
-        }
-      : {
-          0: { cellWidth: 240 },
-          1: { halign: 'right', cellWidth: 60 },
-          2: { halign: 'left',  cellWidth: 40 },
-          3: { halign: 'right', cellWidth: 90 },
-          4: { halign: 'right', cellWidth: 90 },
-        }
+    const footColSpan = head.length - 1
+    const foot = [[
+      { content: 'Subtotal',           colSpan: footColSpan, styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: fmtRs(bucket.subtotal), styles: { fontStyle: 'bold' } },
+    ]]
 
     autoTable(doc, {
       startY: 70,
-      head,
+      head:   [head],
       body,
       foot,
       margin: { left: 40, right: 40, bottom: 40 },
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: [50, 50, 50], textColor: 255 },
-      columnStyles,
     })
   }
 
-  // ── Summary page ─────────────────────────────────────────────────────────
+  // ── Summary page (mirrors Excel Summary) ────────────────────────────────
   doc.addPage()
-  doc.setFontSize(16)
-  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(16); doc.setFont('helvetica', 'bold')
   doc.text('Summary', 40, 50)
   doc.setFont('helvetica', 'normal')
 
-  const sumBody = subtotals.map(s => [s.label, String(s.count), fmtRs(s.sub)])
-  const hasAnyCost = grandTot !== null
+  const sumBody = model.buckets.map(b => [b.name, String(b.lines.length), fmtRs(b.subtotal)])
 
   autoTable(doc, {
     startY: 70,
     head:   [['Category', 'Lines', 'Subtotal (Rs.)']],
     body:   sumBody,
-    foot:   hasAnyCost ? [[
+    foot:   [[
       { content: 'GRAND TOTAL', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold', fillColor: [230, 230, 230] } },
-      { content: fmtRs(grandTot), styles: { fontStyle: 'bold', fillColor: [230, 230, 230] } },
-    ]] : undefined,
+      { content: fmtRs(model.grandTotal), styles: { fontStyle: 'bold', fillColor: [230, 230, 230] } },
+    ]],
     margin: { left: 40, right: 40, bottom: 40 },
     styles: { fontSize: 10, cellPadding: 5 },
     headStyles: { fillColor: [50, 50, 50], textColor: 255 },
@@ -219,4 +256,6 @@ export function exportBoqPdf(state, rates, opts = {}) {
   }
 
   doc.save(`boq-${safeFile(projectName)}-${todayStamp()}.pdf`)
+
+  return model.grandTotal   // returned for verify-script parity assertions
 }
