@@ -25,9 +25,24 @@ import {
   getRoomWallPerimeterGraph,
   getCeilingPaths,
 } from '../src/topology/index.js'
+import { verifyIntegrity } from '../src/schema/integrity.js'
 
 const s = useStore.getState
 const FT = 12
+
+// Arch 9 baseline — call after a meaningful state construction to assert
+// referential integrity. MEP scenarios mutate state frequently; the helper
+// is invoked at the start of major sections.
+function _arch9Baseline(label, okFn) {
+  const ir = verifyIntegrity(s())
+  if (typeof okFn === 'function') {
+    okFn(`Arch 9 baseline (${label}): integrity holds`, ir.valid,
+         ir.valid ? '' : `${ir.count} issues — first: ${ir.issues[0]?.message}`)
+  } else if (!ir.valid) {
+    throw new Error(`Arch 9 baseline (${label}) failed: ${ir.count} issues — first: ${ir.issues[0]?.message}`)
+  }
+}
+_arch9Baseline('initial')
 
 let pass = 0, fail = 0
 const failures = []

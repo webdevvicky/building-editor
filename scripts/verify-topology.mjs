@@ -16,6 +16,7 @@ import {
   getWetWalls, getWetWallIds, buildPlotPolygon,
 } from '../src/topology/index.js'
 import { scopeStateToFloor } from '../src/boq/scope.js'
+import { verifyIntegrity } from '../src/schema/integrity.js'
 
 const s = useStore.getState
 const FT = 12
@@ -24,6 +25,13 @@ let pass = 0, fail = 0
 function ok(label, cond, info) {
   if (cond) { pass++; console.log(`  ✓ ${label}${info ? '  ' + info : ''}`) }
   else { fail++; console.log(`  ✗ ${label}${info ? '  ' + info : ''}`) }
+}
+
+// Arch 9 baseline — re-asserted between major sections via this helper.
+function _arch9Baseline(label) {
+  const ir = verifyIntegrity(s())
+  ok(`Arch 9 baseline (${label}): referential integrity holds`, ir.valid,
+     ir.valid ? '' : `${ir.count} issues — first: ${ir.issues[0]?.message}`)
 }
 function header(t) {
   console.log('\n' + '─'.repeat(70))
@@ -81,6 +89,9 @@ const roomB = Object.values(s().rooms).find(r => r.name === 'Toilet')
 
 console.log(`  rooms: ${roomA.name} (${roomA.id.slice(0, 8)}), ${roomB.name} (${roomB.id.slice(0, 8)})`)
 console.log(`  shared wall id: ${sharedWallId.slice(0, 8)}`)
+
+// Arch 9 baseline — first assertion after setup; integrity must hold.
+_arch9Baseline('post-setup')
 
 // ── Assertion 1: adjacency graph shows the two rooms share a wall ───────────
 header('1. getRoomAdjacencyGraph')

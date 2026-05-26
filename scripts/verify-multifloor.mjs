@@ -11,6 +11,7 @@
 
 import { useStore } from '../src/store.js'
 import { getBoqLines } from '../src/boq/lines.js'
+import { verifyIntegrity } from '../src/schema/integrity.js'
 
 const s = useStore.getState
 const FT = 12
@@ -93,6 +94,19 @@ console.log(`Columns: All=${colCountAll}, F1 lines=${f1Lines.filter(l => l.categ
 // ── Assertions ──────────────────────────────────────────────────────────────
 header('3. Assertions')
 const passed = [], failed = []
+
+// Arch 9 baseline — referential integrity must hold before any per-floor
+// claims. Run once after the multi-floor sample state finishes building.
+function _checkIntegrityBaseline() {
+  const ir = verifyIntegrity(s())
+  if (!ir.valid) {
+    passed.length = 0
+    failed.push(`Arch 9 baseline: integrity violated — ${ir.count} issue(s); first: ${ir.issues[0]?.message}`)
+  } else {
+    passed.push('Arch 9 baseline: state passes referential integrity')
+  }
+}
+_checkIntegrityBaseline()
 const check = (name, cond, info) => (cond ? passed : failed).push(`${name}${info ? '  (' + info + ')' : ''}`)
 
 check('F1 flooring = 300 ft² (20×15)', Math.abs(flooringF1 - 300) < 1, `got ${flooringF1}`)

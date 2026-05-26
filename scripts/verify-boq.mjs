@@ -8,6 +8,7 @@
 
 import { useStore } from '../src/store.js'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../src/boq/lines.js'
+import { verifyIntegrity } from '../src/schema/integrity.js'
 
 const s = useStore.getState
 
@@ -188,6 +189,15 @@ const passed = []
 const failed = []
 function check(name, cond, info) {
   (cond ? passed : failed).push(`${name}${info ? '  (' + info + ')' : ''}`)
+}
+
+// Arch 9 baseline (MANDATORY first assertion per Phase 1 contract).
+// Every state-building verify script asserts referential integrity holds
+// before any other claim. If state is broken, downstream BOQ math is meaningless.
+{
+  const ir = verifyIntegrity(s())
+  check('Arch 9 baseline: state passes referential integrity',
+        ir.valid, `${ir.count} issues${ir.issues[0] ? ' — first: ' + ir.issues[0].message : ''}`)
 }
 
 // Two rooms — total floor area should be 20×15 + 10×12 = 420 ft² (assuming clean polygons).
