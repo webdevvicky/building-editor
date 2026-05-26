@@ -1,13 +1,22 @@
-// Iso projection — fixed 30°/30° standard isometric, pure math.
+// Iso projection — parameterised orthographic, pure math.
 //
 // World axes (matching the store):
 //   x  →  east   (plan-X, inches, store's wall.x)
 //   y  →  north  (plan-Y, inches, store's wall.y)
 //   z  →  up     (elevation, inches; positive above ground, negative below)
 //
-// Iso projection (camera looking at world origin from a corner up-and-back):
-//   sx = (x - y) * cos(30°)
-//   sy = -(x + y) * sin(30°) - z      (SVG y-down, so larger z → smaller sy = higher on screen)
+// View = { azimuthDeg, elevationDeg }
+//   azimuthDeg   — compass azimuth of the camera position. 45 = NE corner
+//                  (default, matches the historical fixed view). 135 = SE,
+//                  225 = SW, 315 = NW.
+//   elevationDeg — screen-tilt angle for the X/Y axes (engineering iso
+//                  convention). 30 = standard isometric drawing. Lower
+//                  approaches a side elevation, higher approaches plan.
+//
+// At { azimuthDeg: 45, elevationDeg: 30 } the projection reproduces the
+// historical fixed 30° iso byte-for-byte:
+//   sx =  (x - y) * cos30
+//   sy = -(x + y) * sin30 - z
 //
 // All inputs/outputs are in inches. The IsoScene component multiplies by a
 // pixels-per-inch factor at render time, so this module stays unit-agnostic.
@@ -15,11 +24,53 @@
 export const COS30 = Math.cos(Math.PI / 6)   // ≈ 0.8660254
 export const SIN30 = 0.5
 
-export function worldToIso(x, y, z) {
+export const DEFAULT_VIEW = Object.freeze({ azimuthDeg: 45, elevationDeg: 30 })
+
+// Build the camera basis vectors for a given view. Cached by the caller —
+// every per-vertex projection re-uses the same basis without re-evaluating
+// trig.
+//
+// Returns { right, up, forward }, each a 3-tuple in world coordinates:
+//   right   — world direction that maps to screen +sx (right on screen)
+//   up      — world direction that maps to screen -sy (up on screen, since
+//             SVG y-down means screen-sy = -dot(world, up))
+//   forward — world direction along camera→scene depth axis. Larger
+//             dot(centroid, forward) = farther back. Used by the
+//             painter's-algorithm sort.
+export function makeViewBasis(view) {
+  const azDeg = view?.azimuthDeg ?? DEFAULT_VIEW.azimuthDeg
+  const elDeg = view?.elevationDeg ?? DEFAULT_VIEW.elevationDeg
+  const delta = (azDeg - 45) * Math.PI / 180
+  const elRad = elDeg * Math.PI / 180
+  const ca = Math.cos(delta), sa = Math.sin(delta)
+  const ce = Math.cos(elRad), se = Math.sin(elRad)
+
+  // Effective transform: pre-rotate world by -delta around Z, then apply
+  // the engineering-iso formula sx = (x' - y') * cos(el),
+  // sy = -(x' + y') * sin(el) - z. Expanding with
+  //   x' = x*ca + y*sa,  y' = -x*sa + y*ca
+  // gives the basis below.
+  return Object.freeze({
+    right:   Object.freeze([ (ca + sa) * ce, (sa - ca) * ce, 0 ]),
+    up:      Object.freeze([ (ca - sa) * se, (sa + ca) * se, 1 ]),
+    forward: Object.freeze([ (ca - sa),       (ca + sa),     0 ]),
+  })
+}
+
+// Convenience basis cached at module load — covers callers that just want
+// the historical default view.
+export const DEFAULT_BASIS = makeViewBasis(DEFAULT_VIEW)
+
+export function worldToIso(x, y, z, basis = DEFAULT_BASIS) {
+  const r = basis.right, u = basis.up
   return {
-    sx:  (x - y) * COS30,
-    sy: -(x + y) * SIN30 - z,
+    sx:   x * r[0] + y * r[1] + z * r[2],
+    sy: -(x * u[0] + y * u[1] + z * u[2]),
   }
+}
+
+export function viewForward(basis = DEFAULT_BASIS) {
+  return basis.forward
 }
 
 // Sort floors by `sequence` ascending — every iso computation should use this

@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 import {
-  worldToIso, sortedFloors as sortFloors,
+  worldToIso, makeViewBasis, sortedFloors as sortFloors,
   floorBaseZIn, floorTopZIn,
 } from '../iso/projection'
+import {
+  ISO_PRESETS, DEFAULT_VIEW,
+  ELEVATION_MIN_DEG, ELEVATION_MAX_DEG,
+} from '../iso/viewPresets'
 import {
   resolveWallSolid, resolveColumnSolid, resolveBeamSolid,
   resolveSlabSolid, resolveFoundationSolids, resolveInlineFootingSolid,
@@ -19,6 +23,9 @@ const FT = 12
 const DEFAULT_EXPLODED_GAP_IN = 24   // 2 ft visual gap between stacked floors
 const PX_PER_INCH = 0.6
 const DEFAULT_FLOOR_ID = 'F1'
+
+const ORBIT_AZ_DEG_PER_PX = 0.4
+const ORBIT_EL_DEG_PER_PX = 0.3
 
 // Vertical center of a beam by level. Plinth beams sit at the bottom of
 // the floor's walls; lintels at ~7 ft above; roof beams at the floor top.
@@ -51,6 +58,17 @@ function columnXY(col, nodes) {
     return { x: n.x, y: n.y }
   }
   return { x: col.x, y: col.y }
+}
+
+// Normalise an azimuth degree value to [0, 360).
+function wrapAz(deg) {
+  return ((deg % 360) + 360) % 360
+}
+
+// True when two views point the same way (used to highlight the active preset).
+function isSameView(a, b) {
+  return Math.round(wrapAz(a.azimuthDeg)) === Math.round(wrapAz(b.azimuthDeg))
+      && Math.round(a.elevationDeg)        === Math.round(b.elevationDeg)
 }
 
 export default function IsoView() {
@@ -98,12 +116,35 @@ export default function IsoView() {
   // Exploded view ON by default per scope decision (24 in gap between floors).
   const [exploded, setExploded] = useState(true)
 
+  // Camera view + drag mode.
+  const [view, setView]         = useState(DEFAULT_VIEW)
+  const [dragMode, setDragMode] = useState('pan')   // 'pan' | 'orbit'
+  const basis = useMemo(() => makeViewBasis(view), [view])
+
   // Pan / zoom local state.
   const [pan, setPan]    = useState({ x: 0, y: 0 })
   const [zoom, setZoom]  = useState(1)
   const panStartRef      = useRef(null)
+  const orbitStartRef    = useRef(null)
   const svgRef           = useRef(null)
   const containerRef     = useRef(null)
+
+  // ── rAF throttle for view changes during drag/slider ─────────────────
+  const pendingViewRef = useRef(null)
+  const rafRef         = useRef(null)
+  const scheduleView = useCallback((next) => {
+    pendingViewRef.current = next
+    if (rafRef.current != null) return
+    rafRef.current = requestAnimationFrame(() => {
+      const v = pendingViewRef.current
+      pendingViewRef.current = null
+      rafRef.current = null
+      if (v) setView(v)
+    })
+  }, [])
+  useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+  }, [])
 
   // ── Build the solid list ───────────────────────────────────────────────
   const solids = useMemo(() => {
@@ -273,16 +314,16 @@ export default function IsoView() {
     columnTypes, beamDimensions, slabThicknessIn,
   ])
 
-  // Sort faces back-to-front via painter's algorithm.
-  const faces = useMemo(() => buildFaceList(solids), [solids])
+  // Sort faces back-to-front via painter's algorithm — basis-aware now.
+  const faces = useMemo(() => buildFaceList(solids, basis), [solids, basis])
 
-  // Iso-space bounds for fit-to-content.
+  // Iso-space bounds for fit-to-content (basis-aware).
   const bounds = useMemo(() => {
     if (faces.length === 0) return null
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
     for (const f of faces) {
       for (const p of f.points) {
-        const { sx, sy } = worldToIso(p[0], p[1], p[2])
+        const { sx, sy } = worldToIso(p[0], p[1], p[2], basis)
         if (sx < minX) minX = sx
         if (sx > maxX) maxX = sx
         if (sy < minY) minY = sy
@@ -290,22 +331,10 @@ export default function IsoView() {
       }
     }
     return { minX, maxX, minY, maxY }
-  }, [faces])
+  }, [faces, basis])
 
-  // Fit-to-content when the modal opens (or after a layer toggle re-empties).
-  const fitDoneRef = useRef(false)
-  useEffect(() => {
-    if (!open) { fitDoneRef.current = false; return }
-    if (!bounds || !svgRef.current) return
-    if (fitDoneRef.current) return
-    fitDoneRef.current = true
-    // Defer one frame so the SVG has its real dimensions.
-    const id = requestAnimationFrame(fitToContent)
-    return () => cancelAnimationFrame(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, bounds])
-
-  function fitToContent() {
+  // ── Fit-to-content ──────────────────────────────────────────────────────
+  const fitToContent = useCallback(() => {
     if (!bounds || !svgRef.current) return
     const rect = svgRef.current.getBoundingClientRect()
     const sceneW = (bounds.maxX - bounds.minX) * PX_PER_INCH
@@ -321,22 +350,75 @@ export default function IsoView() {
       x: rect.width  / 2 - cx * PX_PER_INCH * z,
       y: rect.height / 2 - cy * PX_PER_INCH * z,
     })
-  }
+  }, [bounds])
 
-  // ── Pan / zoom handlers ──
+  // Fit-to-content when the modal opens.
+  const fitDoneRef = useRef(false)
+  useEffect(() => {
+    if (!open) { fitDoneRef.current = false; return }
+    if (!bounds || !svgRef.current) return
+    if (fitDoneRef.current) return
+    fitDoneRef.current = true
+    const id = requestAnimationFrame(fitToContent)
+    return () => cancelAnimationFrame(id)
+  }, [open, bounds, fitToContent])
+
+  // Re-fit on preset / reset only (NOT on every view tick during drag).
+  // applyPreset sets this flag; the effect below fires once after bounds
+  // update to the new view, then clears the flag.
+  const refitOnNextBoundsRef = useRef(false)
+  useEffect(() => {
+    if (!refitOnNextBoundsRef.current) return
+    if (!bounds) return
+    refitOnNextBoundsRef.current = false
+    fitToContent()
+  }, [bounds, fitToContent])
+
+  const applyPreset = useCallback((preset) => {
+    // Drop any pending throttled update so the preset wins immediately.
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    pendingViewRef.current = null
+    refitOnNextBoundsRef.current = true
+    setView({ azimuthDeg: preset.azimuthDeg, elevationDeg: preset.elevationDeg })
+  }, [])
+
+  const resetView = useCallback(() => {
+    applyPreset(DEFAULT_VIEW)
+  }, [applyPreset])
+
+  // ── Pan / orbit handlers ──
   function handleMouseDown(e) {
     if (e.button !== 0 && e.button !== 1) return
     e.preventDefault()
-    panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
+    if (dragMode === 'orbit') {
+      orbitStartRef.current = { x: e.clientX, y: e.clientY, view: { ...view } }
+    } else {
+      panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
+    }
     if (containerRef.current) containerRef.current.style.cursor = 'grabbing'
   }
   useEffect(() => {
     function onMove(e) {
-      if (!panStartRef.current) return
-      setPan({ x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y })
+      if (panStartRef.current) {
+        setPan({ x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y })
+      } else if (orbitStartRef.current) {
+        const start = orbitStartRef.current
+        const dx = e.clientX - start.x
+        const dy = e.clientY - start.y
+        const nextAz = wrapAz(start.view.azimuthDeg + dx * ORBIT_AZ_DEG_PER_PX)
+        const nextEl = Math.max(
+          ELEVATION_MIN_DEG,
+          Math.min(ELEVATION_MAX_DEG, start.view.elevationDeg - dy * ORBIT_EL_DEG_PER_PX),
+        )
+        scheduleView({ azimuthDeg: nextAz, elevationDeg: nextEl })
+      }
     }
     function onUp() {
       panStartRef.current = null
+      orbitStartRef.current = null
       if (containerRef.current) containerRef.current.style.cursor = ''
     }
     window.addEventListener('mousemove', onMove)
@@ -345,7 +427,7 @@ export default function IsoView() {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup',   onUp)
     }
-  }, [])
+  }, [scheduleView])
 
   useEffect(() => {
     const el = svgRef.current
@@ -365,24 +447,30 @@ export default function IsoView() {
 
   return (
     <Modal open={open} onClose={() => setTool('select')} title="3D View" width={1100}>
-      <div className="iso-view" ref={containerRef}>
+      <div className="iso-view">
         <div className="iso-canvas-wrap">
           <svg
             ref={svgRef}
             className="iso-svg"
+            data-drag-mode={dragMode}
             onMouseDown={handleMouseDown}
             xmlns="http://www.w3.org/2000/svg"
           >
             <g transform={`translate(${pan.x}, ${pan.y}) scale(${PX_PER_INCH * zoom})`}>
-              {faces.map((face, i) => {
+              {faces.map((face) => {
                 const pts = face.points.map(p => {
-                  const iso = worldToIso(p[0], p[1], p[2])
+                  const iso = worldToIso(p[0], p[1], p[2], basis)
                   return `${iso.sx},${iso.sy}`
                 }).join(' ')
                 const { fill, stroke } = faceColors(face.elementType, face.faceKind)
+                // Stable React key: element + entity + face role + edge slot.
+                // originalIndex tail disambiguates multi-solid entities like
+                // PILE foundations (cap + N shafts share entityId) without
+                // re-introducing array-index instability.
+                const key = `${face.elementType}:${face.entityId ?? '_'}:${face.faceKind}:${face.edgeIndex ?? '_'}:${face.originalIndex}`
                 return (
                   <polygon
-                    key={i}
+                    key={key}
                     points={pts}
                     fill={fill}
                     stroke={stroke}
@@ -400,11 +488,54 @@ export default function IsoView() {
             </div>
           )}
           <div className="iso-footer-note">
-            Read-only preview · Fixed isometric (30°) · Drag to pan · Scroll to zoom
+            {Math.round(view.azimuthDeg)}° az · {Math.round(view.elevationDeg)}° el · Drag to {dragMode} · Scroll to zoom
           </div>
         </div>
 
         <div className="iso-sidebar">
+          <div className="iso-sidebar__section">
+            <div className="iso-sidebar__title">Camera</div>
+            <div className="iso-preset-grid">
+              {ISO_PRESETS.map(p => (
+                <Button
+                  key={p.id}
+                  size="sm"
+                  variant={isSameView(view, p) ? 'primary' : 'ghost'}
+                  onClick={() => applyPreset(p)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+            <label className="iso-slider-row">
+              <span className="iso-slider-row__label">Elevation</span>
+              <input
+                type="range"
+                min={ELEVATION_MIN_DEG}
+                max={ELEVATION_MAX_DEG}
+                step={1}
+                value={Math.round(view.elevationDeg)}
+                onChange={e => scheduleView({ ...view, elevationDeg: Number(e.target.value) })}
+              />
+              <span className="iso-slider-row__value">{Math.round(view.elevationDeg)}°</span>
+            </label>
+            <div className="iso-mode-toggle">
+              <Button
+                size="sm"
+                variant={dragMode === 'pan' ? 'primary' : 'ghost'}
+                onClick={() => setDragMode('pan')}
+              >Pan</Button>
+              <Button
+                size="sm"
+                variant={dragMode === 'orbit' ? 'primary' : 'ghost'}
+                onClick={() => setDragMode('orbit')}
+              >Orbit</Button>
+            </div>
+            <Button variant="secondary" size="sm" onClick={resetView}>
+              Reset view
+            </Button>
+          </div>
+
           <div className="iso-sidebar__section">
             <div className="iso-sidebar__title">Floors</div>
             {floors.length === 0 ? (

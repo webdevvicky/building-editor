@@ -3,20 +3,23 @@
 //
 // Output face shape:
 //   {
-//     points:      [[wx, wy, wz], ...],  // world inches, polygon corners
-//     centroid:    [cx, cy, cz],         // centroid in world inches
-//     elementType: string,               // 'wall' | 'column' | etc — from solid
-//     entityId:    string | null,
-//     floorId:     string | null,
-//     faceKind:    'top' | 'side' | 'bottom',
-//     meta:        object | null,
+//     points:        [[wx, wy, wz], ...],  // world inches, polygon corners
+//     centroid:      [cx, cy, cz],         // centroid in world inches
+//     elementType:   string,               // 'wall' | 'column' | etc — from solid
+//     entityId:      string | null,
+//     floorId:       string | null,
+//     faceKind:      'top' | 'side' | 'bottom',
+//     edgeIndex:     number | null,        // side faces: index into base polygon
+//     originalIndex: number,               // pre-sort insertion order (stable tiebreak)
+//     meta:          object | null,
 //   }
 //
 // Each face is later projected by the renderer using projection.worldToIso()
 // on its `points`, then drawn as an SVG polygon. Depth sorting uses the
 // centroid for painter's-algorithm ordering.
 
-import { compareFacesBackToFront } from './sort'
+import { DEFAULT_BASIS } from './projection'
+import { makeBackToFrontComparator } from './sort'
 
 // Extract faces from a single prism solid.
 // - 1 top face   (polygon at zHi)
@@ -31,19 +34,20 @@ export function prismToFaces(solid) {
   const faces = []
   const n = basePolygon.length
 
-  // Top face
+  // Top face — edgeIndex null since there's only one.
   faces.push(makeFace(
     basePolygon.map(([x, y]) => [x, y, zHi]),
-    { elementType, entityId, floorId, meta, faceKind: 'top' },
+    { elementType, entityId, floorId, meta, faceKind: 'top', edgeIndex: null },
   ))
 
-  // Side faces — one per edge of the base polygon.
+  // Side faces — one per edge of the base polygon. edgeIndex disambiguates
+  // them for stable React keys.
   for (let i = 0; i < n; i++) {
     const [ax, ay] = basePolygon[i]
     const [bx, by] = basePolygon[(i + 1) % n]
     faces.push(makeFace(
       [[ax, ay, zLo], [bx, by, zLo], [bx, by, zHi], [ax, ay, zHi]],
-      { elementType, entityId, floorId, meta, faceKind: 'side' },
+      { elementType, entityId, floorId, meta, faceKind: 'side', edgeIndex: i },
     ))
   }
 
@@ -54,15 +58,17 @@ export function prismToFaces(solid) {
     // backface culling; today purely cosmetic).
     faces.push(makeFace(
       [...basePolygon].reverse().map(([x, y]) => [x, y, zLo]),
-      { elementType, entityId, floorId, meta, faceKind: 'bottom' },
+      { elementType, entityId, floorId, meta, faceKind: 'bottom', edgeIndex: null },
     ))
   }
 
   return faces
 }
 
-// Flatten an array of solids into a sorted-back-to-front face list.
-export function buildFaceList(solids) {
+// Flatten an array of solids into a sorted-back-to-front face list for the
+// given view basis. `basis` defaults to the historical 45°/30° iso so any
+// caller that hasn't migrated still gets the same output as before.
+export function buildFaceList(solids, basis = DEFAULT_BASIS) {
   const faces = []
   for (const s of solids) {
     if (!s) continue
@@ -74,7 +80,10 @@ export function buildFaceList(solids) {
       faces.push(...prismToFaces(s))
     }
   }
-  faces.sort(compareFacesBackToFront)
+  // Stamp insertion order BEFORE sorting so the comparator can use it as
+  // the always-distinct final tiebreak.
+  for (let i = 0; i < faces.length; i++) faces[i].originalIndex = i
+  faces.sort(makeBackToFrontComparator(basis))
   return faces
 }
 
@@ -85,6 +94,7 @@ function makeFace(points, extra) {
   return {
     points,
     centroid: [cx / n, cy / n, cz / n],
+    originalIndex: 0,   // assigned by buildFaceList before sort
     ...extra,
   }
 }
