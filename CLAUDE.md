@@ -108,6 +108,19 @@ alongside the other five verify scripts.
 - Don't add a third drag mode (e.g. "zoom drag"). Scroll-wheel zoom
   + the Pan/Orbit toggle is the entire contract.
 
+**Known limitation — openings (doors / windows) are NOT rendered.**
+`resolveWallSolid` extrudes each wall as one continuous prism; it
+ignores `wall.openings[]` entirely. A wall with a 7×3 ft door looks
+identical to a solid wall. When this gets prioritised, the agreed
+approach is **decals, not cutouts**: add `resolveOpeningDecalSolid` to
+`solids.js` emitting a thin polygon on the wall's outer face per
+opening (doors dark grey, windows light blue), tag faces with
+`faceKind: 'opening'`, surface as a new `openings` entry in
+`layerVisibility` (default on). Cutouts (header / sill / jamb
+sub-prisms) were considered and rejected — too much new co-planar
+surface area for the painter's-algorithm sort, and they add no
+information beyond what decals communicate for BOQ review.
+
 ---
 
 ## BOQ export sheet/section bucket registry (2026-05-25)
