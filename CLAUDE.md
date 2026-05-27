@@ -1,5 +1,160 @@
 # Building Editor — Developer Notes
 
+## Enterprise architecture upgrade — COMPLETE (2026-05-26)
+
+A 4-phase architectural upgrade landed in 14 commits. Every BOQ Gap
+1-8 schema slot has its data layer, contracts, infrastructure, AND
+user-facing UI in place and machine-enforced.
+
+**23 verify scripts gate every commit.** Zero exceptions. Phase 4
+ships zero new verify scripts — the data-layer contracts from
+Phases 1-3 catch every regression that matters; Phase 4 is pure UI
+surface.
+
+### Phase summary
+
+| Phase | Architectures | What landed | Commits |
+|---|---|---|---|
+| **1 — Foundation** | Arch 8 + 6 + 9 | safeR2 + IFC GUIDs + entity schemas / integrity verifier | `558046d` `31c804e` `64544f4` |
+| **2 — Core** | Arch 2 + 5 + 1 | Operation journal + IDB persistence + state slice boundaries | `58a1499` `9c91e26` `90971bd` |
+| **3 — Compute + Validation** | Arch 3 + 4 | ComputationEngine DAG + validation formalization | `bc648d8` `762cba4` |
+| **4 — Surface** | Arch 7 | Tier 1 UI gaps (ProjectSettings + Room + Opening + BOQPanel) | `f1440f1` `8e373dc` `2cbc80b` |
+
+Per-phase detail sections (Phase 4 → Phase 3 → Phase 1+2) live
+immediately below this summary.
+
+### Verify-script inventory (23 total)
+
+```
+Phase 1 (12):
+  verify-boq                  ← canonical BOQ pipeline
+  verify-multifloor           ← multi-floor scoping
+  verify-topology             ← spatial relationship layer
+  verify-mep                  ← 5 MEP disciplines + clash + sizing
+  verify-iso-projection       ← pure math (no integrity)
+  verify-units                ← pure math (no integrity)
+  verify-numbers              ← safeR2 / safeRound / safeNum / safeClamp + BONDING
+  verify-lints                ← Rule 1: no local r2 / Rule 2: no raw crypto.randomUUID
+  verify-ifc-ids              ← uid / uidIfc / newEntityIds + round-trip
+  verify-id-exposure          ← C8 grep guard for export/persistence paths
+  verify-schemas              ← entity schemas well-formed + normalizeEntity + validateEntity
+  verify-integrity            ← referential integrity verifier
+
+Phase 2 (8):
+  verify-operations           ← dispatch + apply/inverse round-trip + transactions
+  verify-op-purity            ← C2: no ID generation inside apply()
+  verify-op-kinds             ← C1: every op declares user/system/transient
+  verify-migrations           ← SCHEMA_VERSION + MIGRATIONS chain + runMigrations
+  verify-persistence          ← IDB layer round-trip via in-memory adapter
+  verify-catalog-provenance   ← manifest drift + filesystem-wide CATALOG_VERSION audit
+  verify-state-boundaries     ← slice boundary invariants
+  verify-legacy-shim          ← C5 kill-switch enforcement
+
+Phase 3 (3):
+  verify-compute-graph        ← DAG + class taxonomy + memoization correctness
+  verify-compute-correctness  ← property tests for dep-list correctness
+  verify-validation           ← scopes + dismissals + version tracking + ordering
+```
+
+### Locked rules (cross-cutting — load-bearing)
+
+These rules survive every future change. New code MUST honor them;
+verify scripts fail CI on violation.
+
+1. **C2 (ID purity)** — operation `apply()` handlers MUST NOT generate
+   IDs. Caller pre-generates via `uid()` / `uidIfc()` / `newEntityIds()`
+   from `src/lib/ids.js`. Enforced by `verify-op-purity.mjs`.
+2. **C1 (operation kinds)** — every registered op declares `kind ∈
+   { user, system, transient }`. Routing differs per kind. Enforced
+   by `verify-op-kinds.mjs`.
+3. **C3 (no workers without proof)** — `runInWorker: true` throws at
+   `defineComputation`. Web Workers only when `--profile` evidence
+   shows repeated >50ms compute causing jank.
+4. **C4 (no compression without telemetry)** — IDB chunks store plain
+   JSON. LZ compression only if quota telemetry proves need.
+5. **C5 (kill-switch dates)** — every legacy shim declares a `killBy`
+   date. CI fails when the date passes with the shim still present.
+6. **C6 (compute classes)** — every computation node declares
+   `class ∈ { topology, quantity, routing, presentation, validation }`.
+7. **C7 (validation scopes)** — every rule declares
+   `scope ∈ { geometry, structural, mep, boq, export, constructability }`.
+8. **C8 (ID exposure policy)** — internal `id` is runtime-only.
+   Exports, revisions, dismissals, persistence, journals MUST use
+   `ifcGlobalId`. Enforced by `verify-id-exposure.mjs`.
+9. **Baseline integrity gate** — every state-building verify script's
+   first assertion is `verifyIntegrity(state).valid`. Pure-math
+   scripts (`verify-iso-projection`, `verify-units`) are exempt.
+10. **Data-UI sync** — every projectSettings subtree has a UI section;
+    every per-entity override slot has a panel section; every emitted
+    BOQ category has a BOQPanel section.
+11. **Presentation model is the single source for export totals** —
+    `excel.js` and `pdf.js` consume `computeBoqPresentationModel(...)`
+    and never recompute amounts/subtotals themselves.
+12. **safeR2 instead of local r2** — no local `r2()` definitions
+    outside `src/lib/numbers.js`. Enforced by `verify-lints.mjs` Rule 1.
+13. **`crypto.randomUUID()` only in `src/lib/ids.js`** — every other
+    file imports `uid()`. Enforced by `verify-lints.mjs` Rule 2.
+
+### Module map — where the load-bearing pieces live
+
+```
+src/lib/
+  numbers.js              — safeR2 / safeRound / safeNum / safeClamp
+  ids.js                  — uid / uidIfc / newEntityIds / uuid↔ifc converters
+src/schema/
+  entities/               — 17 entity schema files + barrel
+  types.js                — FIELD_TYPES registry
+  normalize.js            — normalizeEntity / normalizeCollection / normalizeState
+  validate.js             — validateEntity / validateState
+  integrity.js            — verifyIntegrity / assertIntegrity
+src/operations/
+  _schemaVersion.js       — SCHEMA_VERSION (single source — re-exported by projects/)
+  types.js                — OP_KIND / OP_AUTHOR / buildOp / withInverse
+  registry.js             — OPERATIONS map (13 representative types)
+  dispatch.js             — dispatch / transaction with kind routing
+src/compute/
+  registry.js             — defineComputation / runComputation / COMPUTE_CLASS
+  profile.js              — recordCompute / printProfile (--profile flag)
+src/validation/
+  registry.js             — VALIDATION_SCOPE / sortRulesForRun / dismissal helpers
+  engine.js               — runValidation(state, { scopes, suppressDismissed })
+  rules/                  — 5 structural rules + 3 MEP rules
+src/projects/
+  schemaVersion.js        — MIGRATIONS chain + runMigrations
+  storage/indexedDb.js    — createPersistence(storage) facade + makeMemoryAdapter
+  manager.js              — legacy localStorage (still primary; IDB ready to wire)
+src/specs/
+  catalogManifest.js      — getAllCatalogVersions / diffCatalogManifests
+src/store/
+  legacyAccessors.js      — LEGACY_ACCESSORS registry + SHIM_KILL_BY = 2026-08-15
+```
+
+### Deferred (intentionally — re-evaluate when evidence demands)
+
+- **Web Workers (C3)** — defer until `--profile` shows >50ms repeated jank
+- **LZ compression (C4)** — defer until quota telemetry proves need
+- **Multi-tab BroadcastChannel + real IDB adapter wiring** — facade ready;
+  browser integration commit moves autosave from localStorage to IDB
+- **Physical state-slice refactor (Arch 1)** — boundary contract in place;
+  physical movement to `state.model.X` happens incrementally as
+  component code is touched, gated by `SHIM_KILL_BY = 2026-08-15`
+- **Operation migration of ~80 existing `_save()` callsites** — registry +
+  dispatch infrastructure ready; setters migrate one at a time as
+  features need journal / audit / collab capabilities
+- **Opening hardware fine-grained overrides UI** — schema wired
+  (`opening.hardwareOverrides { add, remove }`); add/remove rows UI
+  stub in place; full picker UI is follow-on
+
+### Future phases (not started)
+
+- **Phase 5 — DXF import** (parse AutoCAD plans → walls/rooms)
+- **Phase 5 — Solar discipline** (catalog + slots ready; sizing/routing/BOQ deferred)
+- **Phase 5 — Rainwater + central hot-water riser** (plumbing graph slots exist)
+- **Phase 6 — IFC export** (`ifcGlobalId` field already populated on every entity)
+- **Phase 7 — Multi-user collaboration** (operation journal is the prerequisite)
+
+---
+
 ## Enterprise architecture — Phase 4 (2026-05-26)
 
 Tier 1 UI gaps closed. Every BOQ Gap 1-8 schema slot + every
