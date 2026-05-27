@@ -1,5 +1,146 @@
 # Building Editor — Developer Notes
 
+## Enterprise architecture — Phase 3 (2026-05-26)
+
+Compute + validation formalization. Builds on the Phase 1 foundation
+(IDs, schemas, integrity) + Phase 2 core (operations, persistence,
+state boundaries). Phase 4 (Tier 1 UI gaps) is the next milestone.
+
+**23 verify scripts now gate every commit.** Phase 3 adds 3 new
+scripts (compute-graph, compute-correctness, validation).
+
+### Phase 3 — Compute + Validation (commits `bc648d8`, `762cba4`)
+
+**Arch 3 — ComputationEngine DAG** (`bc648d8`)
+- `src/compute/registry.js` — `defineComputation` registers a
+  computation node with `id`, `version`, `class` (C6), `inputs`,
+  `dependsOn`, `compute`, `estimatedCost`. Each node has a private
+  cache cell that hits on reference-equality of `inputs(state)`.
+- `runComputation(id, state)` walks the cache: miss → compute +
+  store; hit → return cached. `_resetCache(id)` forces recompute.
+  `validateDagAcyclic()` runs iterative DFS to detect cycles
+  (cached until next `defineComputation` invalidates).
+- **Locked rule (C6 — compute classes):** every node declares
+  `class ∈ { topology, quantity, routing, presentation, validation }`.
+  Used for profiling, batching, and future worker routing decisions.
+  Throws at registration if missing or invalid.
+- **Locked rule (C3 — no workers yet):** `runInWorker: true`
+  throws. Web Worker routing is deferred until `--profile` evidence
+  shows repeated >50ms computations causing canvas jank. Worker
+  decision rule codified in registry.js header.
+- `src/compute/profile.js` — `recordCompute(node, { hit, ms })`
+  builds a per-node profile. Opt-in via `COMPUTE_PROFILE=1` env
+  (Node) or `window.__COMPUTE_PROFILE = true` (browser). Zero-cost
+  no-op when disabled. `printProfile()` dumps a sortable table at
+  verify-script teardown with avg/max ms, hit rate, total time,
+  and a ⚠ marker on nodes averaging >25ms.
+- Existing `createMemo()` in `src/topology/cache.js` keeps working
+  unchanged. Legacy memo cells migrate to `defineComputation`
+  incrementally as aggregators are touched.
+
+**Arch 4 — Validation formalization** (`762cba4`)
+- `src/validation/registry.js` is the new metadata layer wrapping
+  the existing engine. Adds:
+  - `VALIDATION_SCOPE` enum (C7): `geometry | structural | mep |
+    boq | export | constructability`
+  - `sortRulesForRun(rules)` — deterministic `(scope, order, id)`
+    ordering for byte-stable verify output
+  - `filterRulesByScope(rules, scopes)` — selective runs
+    (IFC export only runs `'export'` scope rules)
+  - `buildIssueKey(ruleId, ruleVersion, issue)` — prefers
+    `ifcGlobalId` per C8; falls back to `entityId` for
+    project-level issues
+  - `isIssueDismissed(state, ruleId, ruleVersion, issue)` —
+    checks `projectSettings.validation.dismissals`; honors
+    `expiresAt`
+  - `buildDismissal({ reason, dismissedBy, expiresAt })` —
+    frozen record stamped at dismissal time
+  - `assertRuleWellFormed(rule)` — exposed for verify scripts
+- `src/validation/engine.js::runValidation(state, opts)` extended
+  signature `opts: { scopes?, suppressDismissed? }`:
+  - `scopes` array filters rules (omit → all scopes)
+  - `suppressDismissed` defaults true; false bypasses dismissals
+  - Output adds `byScope`, `dismissalsApplied`, and each issue
+    carries `ruleVersion` + `scope`
+- All 8 existing rules updated with `version=1`, `order`, `scope`,
+  `affectedBy`, `dismissable`. Structural rules use order
+  100-140; MEP rules use 200-220. `slab_no_enclosure` (ERROR
+  severity) declares `dismissable: false` — cannot be suppressed.
+- **Locked rule:** every rule declares all 5 new fields plus the
+  existing `severity / category / message / check`.
+  `assertRuleWellFormed` enforces.
+- **Locked rule (dismissal versioning):** dismissal keys include
+  `ruleVersion`. Bumping a rule's version invalidates all old
+  dismissals so v2's stricter check re-surfaces issues.
+  Verified by test (v1 dismissal does not suppress v2 lookup).
+- **Locked rule:** ERROR-severity rules are never dismissable.
+  Engine gates on `rule.dismissable === true && severity !==
+  ERROR` before checking dismissal map.
+- Validation events (`state.validationEvents`, from store actions
+  that reject ops) default to `scope: 'geometry'`. Surface only
+  when scope filter allows geometry (or no filter).
+
+### Verify-script inventory (23 total)
+
+```
+Phase 1 (12):  same as before — baseline integrity gate
+Phase 2 (8):   same as before — ops + persistence + state boundaries
+Phase 3 (3):
+  verify-compute-graph        ← DAG validation + class taxonomy + memo correctness
+  verify-compute-correctness  ← property tests for memo dep-list correctness
+  verify-validation           ← scopes + dismissals + version tracking + ordering
+```
+
+### Working with the new infrastructure (Phase 3 additions)
+
+**Adding a new computation node:**
+1. Register via `defineComputation({ id, class, version, inputs,
+   dependsOn?, compute, estimatedCost? })` at module scope.
+2. Choose `class` from `COMPUTE_CLASS`:
+   - `topology` — pure spatial relationships
+   - `quantity` — material aggregations (plaster, BBS, etc.)
+   - `routing` — MEP network/route builders
+   - `presentation` — final composition (`getBoqLines`, model)
+   - `validation` — rule outputs
+3. Call via `runComputation('id', state)` from the consumer site.
+4. `verify-compute-correctness` property tests catch dep-list bugs.
+
+**Adding a new validation rule:**
+1. Create `src/validation/rules/<name>.js` (or
+   `src/mep/validation/rules/<name>.js` for MEP).
+2. Export `{ id, version, order, severity, category, scope,
+   affectedBy, dismissable, message, check(state) }`.
+3. Use `VALIDATION_SCOPE.STRUCTURAL` etc. from registry.
+4. Pick `order` in 100-step bands grouped by scope (structural
+   100s, mep 200s, geometry 300s, export 400s, etc.).
+5. Register in the appropriate barrel (`engine.js` for structural,
+   `mep/validation/index.js` for MEP).
+6. `verify-validation` `assertRuleWellFormed` catches missing fields.
+
+**Selective validation runs:**
+```js
+runValidation(state, { scopes: ['export'] })       // IFC export pre-check
+runValidation(state, { scopes: ['structural', 'mep'] }) // skip BOQ checks
+runValidation(state, { suppressDismissed: false }) // QA audit mode
+```
+
+**Dismissing an issue (UI flow):**
+```js
+const issueKey = buildIssueKey(rule.id, rule.version, issue)
+const dismissal = buildDismissal({
+  reason:      'temporary — to be revisited',
+  dismissedBy: currentUserId,
+  expiresAt:   Date.now() + 30 * 24 * 60 * 60 * 1000,  // 30 days
+})
+setProjectSettings({
+  validation: {
+    dismissals: { ...state.projectSettings.validation?.dismissals, [issueKey]: dismissal }
+  }
+})
+```
+
+---
+
 ## Enterprise architecture — Phase 1 + Phase 2 (2026-05-26)
 
 Foundational architecture upgrade across 6 commits. The goal: enterprise-
