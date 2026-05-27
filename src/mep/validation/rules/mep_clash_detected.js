@@ -45,6 +45,11 @@ export const mepClashDetected = {
   // when the rule attaches `severity` to its issue records.
   severity: 'warning',
   category: 'mep',
+  version: 1,
+  order: 220,
+  scope: 'mep',
+  affectedBy: ['walls', 'plumbingFixtures', 'electricalPoints', 'hvacUnits', 'fireDevices', 'elvDevices'],
+  dismissable: true,
   message: 'MEP route clash detected.',
   check(state) {
     if (!state) return { ok: true, issues: [] }

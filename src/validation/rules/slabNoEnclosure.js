@@ -6,6 +6,11 @@ export const slabNoEnclosure = {
   id: 'slab_no_enclosure',
   severity: 'error',
   category: 'structural',
+  version: 1,
+  order: 110,
+  scope: 'structural',
+  affectedBy: ['slabs', 'rooms'],
+  dismissable: false,
   message: 'Slab references a room with no closed polygon.',
   check(state) {
     const issues = []

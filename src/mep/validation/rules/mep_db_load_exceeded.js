@@ -14,6 +14,11 @@ export const mepDbLoadExceeded = {
   id: 'mep_db_load_exceeded',
   severity: 'warning',
   category: 'mep',
+  version: 1,
+  order: 210,
+  scope: 'mep',
+  affectedBy: ['electricalPoints', 'projectSettings'],
+  dismissable: true,
   message: 'Circuit load exceeds IS-732 cap — split into multiple circuits.',
   check(state) {
     if (!state) return { ok: true, issues: [] }

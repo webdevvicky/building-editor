@@ -4,6 +4,11 @@ export const staircaseDisconnected = {
   id: 'staircase_disconnected',
   severity: 'warning',
   category: 'structural',
+  version: 1,
+  order: 130,
+  scope: 'structural',
+  affectedBy: ['staircases', 'projectSettings'],
+  dismissable: true,
   message: 'Staircase has same from/to floor — should connect distinct floors.',
   check(state) {
     const floors = state.projectSettings?.floors ?? []

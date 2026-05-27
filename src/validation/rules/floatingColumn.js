@@ -9,6 +9,11 @@ export const floatingColumn = {
   id: 'floating_column',
   severity: 'warning',
   category: 'structural',
+  version: 1,
+  order: 100,
+  scope: 'structural',
+  affectedBy: ['columns', 'walls', 'nodes'],
+  dismissable: true,
   message: 'Column has no adjacent walls — verify it is intentional.',
   check(state) {
     const { columns, walls, nodes } = state

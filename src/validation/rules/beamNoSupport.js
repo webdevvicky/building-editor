@@ -12,6 +12,11 @@ export const beamNoSupport = {
   id: 'beam_no_support',
   severity: 'warning',
   category: 'structural',
+  version: 1,
+  order: 120,
+  scope: 'structural',
+  affectedBy: ['beams', 'columns'],
+  dismissable: true,
   message: 'Explicit beam endpoint is not a column.',
   check(state) {
     const issues = []

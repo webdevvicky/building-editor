@@ -5,6 +5,11 @@ export const footingNoColumn = {
   id: 'footing_no_column',
   severity: 'warning',
   category: 'structural',
+  version: 1,
+  order: 140,
+  scope: 'structural',
+  affectedBy: ['foundations', 'columns', 'walls'],
+  dismissable: true,
   message: 'Foundation has no attached columns or walls.',
   check(state) {
     const issues = []

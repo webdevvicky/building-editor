@@ -16,6 +16,11 @@ export const mepNoFloorTrap = {
   id: 'mep_no_floor_trap',
   severity: 'warning',
   category: 'mep',
+  version: 1,
+  order: 200,
+  scope: 'mep',
+  affectedBy: ['rooms', 'plumbingFixtures'],
+  dismissable: true,
   message: 'Wet room has no floor trap — drainage will not pass inspection.',
   check(state) {
     if (!state) return { ok: true, issues: [] }
