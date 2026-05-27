@@ -3,6 +3,8 @@ import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
+import { listPaintSystems } from '../specs/paintSystems.js'
+import { listCeilingFinishSystems } from '../specs/ceilingFinishSystems.js'
 import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
@@ -61,6 +63,10 @@ export default function RoomDetailPanel() {
   const setRoomPlasterSystem    = useStore(s => s.setRoomPlasterSystem)
   const setRoomDado             = useStore(s => s.setRoomDado)
   const setRoomIncludeSkirting  = useStore(s => s.setRoomIncludeSkirting)
+  const setRoomPaintSystem         = useStore(s => s.setRoomPaintSystem)
+  const setRoomCeilingFinishSystem = useStore(s => s.setRoomCeilingFinishSystem)
+  const setRoomKitchenCounter      = useStore(s => s.setRoomKitchenCounter)
+  const setRoomBalconyHandrail     = useStore(s => s.setRoomBalconyHandrail)
   const getOverlappingRoomName  = useStore(s => s.getOverlappingRoomName)
 
   const [editingName, setEditingName] = useState(false)
@@ -400,6 +406,257 @@ export default function RoomDetailPanel() {
                   {segBtn('Force off', skirtingMode === 'off',     () => setRoomIncludeSkirting(room.id, false), 'Always exclude skirting')}
                 </div>
               </div>
+            </Section>
+          )
+        })()}
+
+        {/* ── Paint system override (Gap 6) ──────────────────────── */}
+        {(() => {
+          const isPainted    = !!room.finishes?.paint
+          const isOverride   = room.paintSystemId != null
+          const defaultId    = projectSettings?.defaultInteriorPaintSystemId
+          const paintSystems = listPaintSystems().filter(s => s.appliesContext !== 'exterior_walls')
+          const defaultLabel = paintSystems.find(s => s.id === defaultId)?.label ?? '—'
+          return (
+            <Section title="Paint system">
+              {!isPainted ? (
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+                  Enable "Paint" in Finishes to configure.
+                </div>
+              ) : (
+                <>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    marginBottom: 4,
+                  }}>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                      System
+                    </span>
+                    <span style={{
+                      fontSize: 'var(--text-xs)',
+                      color: isOverride ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                      fontWeight: isOverride ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                    }}>
+                      {isOverride ? 'Custom override' : 'Project default'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
+                    <div style={{ flex: 1 }}>
+                      <select
+                        value={room.paintSystemId ?? ''}
+                        onChange={e => setRoomPaintSystem(room.id, e.target.value || null)}
+                        style={{ width: '100%' }}
+                      >
+                        <option value="">Use project default ({defaultLabel})</option>
+                        {paintSystems.map(s => (
+                          <option key={s.id} value={s.id}>{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {isOverride && (
+                      <Button size="sm" variant="ghost"
+                        onClick={() => setRoomPaintSystem(room.id, null)}
+                        title="Revert to project default">
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+            </Section>
+          )
+        })()}
+
+        {/* ── Ceiling finish override (Gap 7) ────────────────────── */}
+        {(() => {
+          const hasCeilingPlaster = !!room.finishes?.ceilingPlaster
+          const isOverride        = room.ceilingFinishId != null
+          const defaultId         = projectSettings?.defaultCeilingFinishSystemId
+          const ceilingSystems    = listCeilingFinishSystems()
+          const defaultLabel      = ceilingSystems.find(s => s.id === defaultId)?.label ?? '—'
+          return (
+            <Section title="Ceiling finish">
+              {!hasCeilingPlaster ? (
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+                  Enable Ceiling plaster in Finishes to configure false-ceiling materials.
+                </div>
+              ) : (
+                <>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    marginBottom: 4,
+                  }}>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                      Finish
+                    </span>
+                    <span style={{
+                      fontSize: 'var(--text-xs)',
+                      color: isOverride ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                      fontWeight: isOverride ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                    }}>
+                      {isOverride ? 'Custom override' : 'Project default'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
+                    <div style={{ flex: 1 }}>
+                      <select
+                        value={room.ceilingFinishId ?? ''}
+                        onChange={e => setRoomCeilingFinishSystem(room.id, e.target.value || null)}
+                        style={{ width: '100%' }}
+                      >
+                        <option value="">Use project default ({defaultLabel})</option>
+                        {ceilingSystems.map(s => (
+                          <option key={s.id} value={s.id}>{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {isOverride && (
+                      <Button size="sm" variant="ghost"
+                        onClick={() => setRoomCeilingFinishSystem(room.id, null)}
+                        title="Revert to project default">
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+            </Section>
+          )
+        })()}
+
+        {/* ── Kitchen counter override (KITCHEN-only) ────────────── */}
+        {room.type === 'KITCHEN' && (() => {
+          const defaultDepthFt   = projectSettings?.kitchenCounter?.defaultDepthFt ?? 2
+          const defaultLengthMode = projectSettings?.kitchenCounter?.defaultLengthMode ?? 'longest_wall'
+          const isOverride       = room.kitchenCounter != null
+          return (
+            <Section title="Kitchen counter override">
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                marginBottom: 4,
+              }}>
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                  Source
+                </span>
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  color: isOverride ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                  fontWeight: isOverride ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                }}>
+                  {isOverride ? 'Custom override' : 'Project default (auto)'}
+                </span>
+              </div>
+              {isOverride ? (
+                <>
+                  <Field label="Length">
+                    <FeetInchesInput
+                      value={room.kitchenCounter.lengthFt ?? 0}
+                      onCommit={ft => setRoomKitchenCounter(room.id, { ...room.kitchenCounter, lengthFt: ft })}
+                      min={0}
+                      precision={DEFAULT_PRECISION.foundation}
+                    />
+                  </Field>
+                  <Field label="Depth">
+                    <FeetInchesInput
+                      value={room.kitchenCounter.depthFt ?? defaultDepthFt}
+                      onCommit={ft => setRoomKitchenCounter(room.id, { ...room.kitchenCounter, depthFt: ft })}
+                      min={0}
+                      precision={DEFAULT_PRECISION.foundation}
+                    />
+                  </Field>
+                  <Button size="sm" variant="ghost" onClick={() => setRoomKitchenCounter(room.id, null)}>
+                    Clear (use auto)
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div style={{
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--color-text-muted)',
+                    marginBottom: 'var(--space-2)',
+                  }}>
+                    Auto: {defaultLengthMode === 'longest_wall' ? 'longest polygon edge' :
+                           defaultLengthMode === 'half_perimeter' ? 'half room perimeter' : 'manual'} × {defaultDepthFt}ft depth
+                  </div>
+                  <Button size="sm" variant="ghost"
+                    onClick={() => setRoomKitchenCounter(room.id, { lengthFt: 8, depthFt: defaultDepthFt })}>
+                    Set manual override
+                  </Button>
+                </>
+              )}
+            </Section>
+          )
+        })()}
+
+        {/* ── Balcony handrail override (BALCONY-only) ───────────── */}
+        {room.type === 'BALCONY' && (() => {
+          const grills          = projectSettings?.grills ?? {}
+          const defaultEnabled  = grills.balconyHandrailEnabled !== false
+          const defaultHeightFt = grills.balconyHandrailHeightFt ?? 3.5
+          const override        = room.balconyHandrail
+          const isOverride      = override != null
+          const enabledMode     = !isOverride                ? 'default'
+                                : override.enabled === true  ? 'on'
+                                : override.enabled === false ? 'off'
+                                : 'default'
+          const effectiveHeight = isOverride && override.heightFt != null ? override.heightFt : defaultHeightFt
+
+          const segBtn = (label, active, onClick, title) => (
+            <button
+              key={label}
+              type="button"
+              onClick={onClick}
+              title={title}
+              style={{
+                flex: 1,
+                fontSize: 'var(--text-xs)',
+                padding: '4px var(--space-2)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                background: active ? 'var(--color-primary-bg)' : 'var(--color-surface)',
+                color:      active ? 'var(--color-primary)'   : 'var(--color-text-secondary)',
+                fontWeight: active ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                cursor: 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          )
+
+          return (
+            <Section title="Balcony handrail">
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                marginBottom: 4,
+              }}>
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                  Include handrail
+                </span>
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  color: isOverride ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                  fontWeight: isOverride ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                }}>
+                  {isOverride
+                    ? (enabledMode === 'on' ? 'Forced on' : enabledMode === 'off' ? 'Forced off' : 'Custom override')
+                    : `Project default (${defaultEnabled ? 'on' : 'off'})`}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-1)', marginBottom: 'var(--space-2)' }}>
+                {segBtn('Default',   enabledMode === 'default', () => setRoomBalconyHandrail(room.id, null),                                    'Use project default rule')}
+                {segBtn('Force on',  enabledMode === 'on',      () => setRoomBalconyHandrail(room.id, { enabled: true,  heightFt: effectiveHeight }), 'Always include handrail')}
+                {segBtn('Force off', enabledMode === 'off',     () => setRoomBalconyHandrail(room.id, { enabled: false, heightFt: effectiveHeight }), 'Always exclude handrail')}
+              </div>
+              {isOverride && enabledMode !== 'off' && (
+                <Field label="Height">
+                  <FeetInchesInput
+                    value={effectiveHeight}
+                    onCommit={ft => setRoomBalconyHandrail(room.id, { ...override, heightFt: ft })}
+                    min={0}
+                    precision={DEFAULT_PRECISION.foundation}
+                  />
+                </Field>
+              )}
             </Section>
           )
         })()}

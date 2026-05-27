@@ -22,6 +22,11 @@ import { useUnits } from '../hooks/useUnits'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { getOpeningSubtypesByParent, SUBTYPE_SOURCE } from '../constants/joinery'
+import { resolveOpeningHardware, HARDWARE_RESOLUTION_SOURCE } from '../specs/hardware/resolution.js'
+import {
+  listHardwareSetsByAppliesTo,
+  listWindowHardwareSetsByAppliesTo,
+} from '../specs/hardware/hardwareSets.js'
 
 // 4 door orientations — mirrored from OpeningPanel.jsx
 const ORIENT_LABELS = ['↖', '↙', '↗', '↘']
@@ -41,6 +46,8 @@ export default function OpeningDetailPanel() {
   const selectOpening    = useStore(s => s.selectOpening)
   const setOpeningSubtype = useStore(s => s.setOpeningSubtype)
   const setOpeningGrill   = useStore(s => s.setOpeningGrill)
+  const setOpeningHardware = useStore(s => s.setOpeningHardware)
+  const projectSettings   = useStore(s => s.projectSettings)
   const undo             = useStore(s => s.undo)
   const { fmtLength }    = useUnits()
 
@@ -234,6 +241,125 @@ export default function OpeningDetailPanel() {
           </label>
         </div>
       )}
+
+      {/* Hardware (Gap 4/5) */}
+      {opening.subtype && (() => {
+        const isDoorSubtype = opening.subtype === 'MAIN_DOOR' || opening.subtype === 'INTERNAL_DOOR'
+        const availableSets = isDoorSubtype
+          ? listHardwareSetsByAppliesTo(opening.subtype)
+          : listWindowHardwareSetsByAppliesTo(opening.subtype)
+        const resolved = resolveOpeningHardware({ projectSettings }, opening)
+        const overrideCount = (opening.hardwareOverrides?.add?.length ?? 0)
+          + (opening.hardwareOverrides?.remove?.length ?? 0)
+        return (
+          <div style={{ marginBottom: 'var(--space-3)' }}>
+            <div style={{
+              fontSize: 'var(--text-xs)',
+              fontWeight: 'var(--weight-bold)',
+              color: 'var(--color-text-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.6,
+              marginBottom: 'var(--space-2)',
+            }}>Hardware</div>
+
+            {/* Source badge */}
+            <div style={{
+              fontSize: 'var(--text-xs)',
+              color: resolved.source === HARDWARE_RESOLUTION_SOURCE.EXPLICIT
+                ? 'var(--color-primary)'
+                : 'var(--color-text-muted)',
+              marginBottom: 'var(--space-1)',
+              fontWeight: resolved.source === HARDWARE_RESOLUTION_SOURCE.EXPLICIT
+                ? 'var(--weight-semibold)'
+                : 'var(--weight-regular)',
+            }}>
+              {resolved.source === HARDWARE_RESOLUTION_SOURCE.EXPLICIT
+                && `Custom override: ${resolved.setLabel ?? '(none)'}`}
+              {resolved.source === HARDWARE_RESOLUTION_SOURCE.PROJECT_DEFAULT
+                && `Project default: ${resolved.setLabel ?? '(none)'}`}
+              {resolved.source === HARDWARE_RESOLUTION_SOURCE.NONE
+                && 'No hardware configured'}
+            </div>
+
+            {/* Set picker */}
+            <Field label="Set">
+              <select
+                value={opening.hardwareSetId ?? ''}
+                onKeyDown={e => e.stopPropagation()}
+                onChange={e => setOpeningHardware(sel.wallId, sel.openingId, {
+                  hardwareSetId: e.target.value || null,
+                })}
+              >
+                <option value="">Use project default</option>
+                {availableSets.map(s => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+            </Field>
+
+            {/* Resolved items preview */}
+            {resolved.items.length > 0 && (
+              <div style={{
+                marginTop: 'var(--space-2)',
+                padding: 'var(--space-2)',
+                background: 'var(--color-bg-muted)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 'var(--text-xs)',
+              }}>
+                <div style={{ color: 'var(--color-text-secondary)', marginBottom: 4 }}>
+                  Resolves to {resolved.items.length} item{resolved.items.length !== 1 ? 's' : ''}:
+                </div>
+                {resolved.items.map((it, i) => (
+                  <div key={i} style={{
+                    color: 'var(--color-text-muted)',
+                    marginLeft: 'var(--space-2)',
+                  }}>
+                    • {it.itemId} × {it.qty} {it.source === 'OVERRIDE_ADD' ? '(added)' : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Advanced overrides — collapsed stub */}
+            <details style={{ marginTop: 'var(--space-2)' }}>
+              <summary style={{
+                cursor: 'pointer',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--color-text-secondary)',
+              }}>
+                Advanced overrides ({overrideCount} active)
+              </summary>
+              <div style={{
+                marginTop: 'var(--space-2)',
+                fontSize: 'var(--text-xs)',
+                color: 'var(--color-text-muted)',
+              }}>
+                Add / remove individual items from the resolved set.
+                Schema is wired — full UI lands in a follow-on commit.
+              </div>
+              {(opening.hardwareOverrides?.add?.length > 0
+                || opening.hardwareOverrides?.remove?.length > 0) && (
+                <div style={{ marginTop: 'var(--space-1)' }}>
+                  {opening.hardwareOverrides?.add?.map(a => (
+                    <div key={a.itemId} style={{ fontSize: 'var(--text-xs)' }}>
+                      + {a.itemId} × {a.qty}
+                    </div>
+                  ))}
+                  {opening.hardwareOverrides?.remove?.map(r => (
+                    <div key={r} style={{ fontSize: 'var(--text-xs)' }}>− {r}</div>
+                  ))}
+                  <Button size="sm" variant="ghost"
+                    onClick={() => setOpeningHardware(sel.wallId, sel.openingId, {
+                      hardwareOverrides: null,
+                    })}>
+                    Clear overrides
+                  </Button>
+                </div>
+              )}
+            </details>
+          </div>
+        )
+      })()}
 
       {/* Delete */}
       <div style={{
