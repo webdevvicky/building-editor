@@ -904,6 +904,44 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // Phase 4 Commit A — per-room paint system override.
+  // null = inherit projectSettings.defaultInteriorPaintSystemId.
+  setRoomPaintSystem(roomId, paintSystemId) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, paintSystemId: paintSystemId || null } } }
+    })
+  },
+
+  // Phase 4 Commit A — per-room ceiling finish system override.
+  // null = inherit projectSettings.defaultCeilingFinishSystemId.
+  setRoomCeilingFinishSystem(roomId, ceilingFinishId) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return { rooms: { ...s.rooms, [roomId]: { ...room, ceilingFinishId: ceilingFinishId || null } } }
+    })
+  },
+
+  // Phase 4 Commit A — per-opening hardware override.
+  // partial = { hardwareSetId?, hardwareOverrides? }
+  //   hardwareSetId: string | null  — null = inherit per-subtype default
+  //   hardwareOverrides: { add: [{itemId, qty}], remove: [itemId] } | null
+  setOpeningHardware(wallId, openingId, partial) {
+    get()._save()
+    set(s => {
+      const wall = s.walls[wallId]
+      if (!wall) return {}
+      const openings = (wall.openings ?? []).map(o =>
+        o.id === openingId ? { ...o, ...partial } : o
+      )
+      return { walls: { ...s.walls, [wallId]: { ...wall, openings } } }
+    })
+  },
+
   renameRoom(roomId, name) {
     set(s => {
       const room = s.rooms[roomId]

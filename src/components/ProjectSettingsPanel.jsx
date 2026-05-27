@@ -8,6 +8,13 @@ import { Field } from './ui/Field.jsx'
 import FeetInchesInput from './ui/FeetInchesInput.jsx'
 import { DEFAULT_PRECISION, formatFeetInches } from '../lib/units.js'
 import { FULL_SENTINEL, _fullHeightFt } from '../quantities/tiles.js'
+// Phase 4 Commit A — catalogs + setters for the 9 new sections.
+import { listPaintSystems } from '../specs/paintSystems.js'
+import { listCeilingFinishSystems } from '../specs/ceilingFinishSystems.js'
+import {
+  listHardwareSets, listHardwareSetsByAppliesTo,
+  listWindowHardwareSets, listWindowHardwareSetsByAppliesTo,
+} from '../specs/hardware/hardwareSets.js'
 
 const sectionHead = {
   fontSize: 'var(--text-xs)',
@@ -141,6 +148,15 @@ export default function ProjectSettingsPanel() {
   const setProjectSettings      = useStore(s => s.setProjectSettings)
   const setFoundationDefaults   = useStore(s => s.setFoundationDefaults)
   const setTileDefaults         = useStore(s => s.setTileDefaults)
+  // Phase 4 Commit A — 9 new setters.
+  const setProjectMeta             = useStore(s => s.setProjectMeta)
+  const setContingency             = useStore(s => s.setContingency)
+  const setDefaultPaintSystems     = useStore(s => s.setDefaultPaintSystems)
+  const setDefaultCeilingFinishSystem = useStore(s => s.setDefaultCeilingFinishSystem)
+  const setDoorHardwareDefaults    = useStore(s => s.setDoorHardwareDefaults)
+  const setWindowHardwareDefaults  = useStore(s => s.setWindowHardwareDefaults)
+  const setProjectCosts            = useStore(s => s.setProjectCosts)
+  const setMepSizingStrategy       = useStore(s => s.setMepSizingStrategy)
   // The full-height sentinel resolution needs to read state.projectSettings
   // (floors + slabSettings) on every render — _fullHeightFt does that.
 
@@ -593,6 +609,351 @@ export default function ProjectSettingsPanel() {
         onChange={v => setStaircaseDefaults({ flightWidthFt: v })}
         precision={DEFAULT_PRECISION.staircase}
       />
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          Phase 4 Commit A — 9 new sections (BOQ Gaps 1-8 UI surface +
+          MEP sizing strategy picker).
+          ═══════════════════════════════════════════════════════════════════ */}
+
+      <div style={divider} />
+
+      {/* 9. Project Metadata (Gap 1) — header for Excel + PDF exports */}
+      <div style={sectionHead}>Project Metadata</div>
+      {[
+        ['projectTitle', 'Project title'],
+        ['ownerName',    'Owner'],
+        ['location',     'Location'],
+        ['preparedBy',   'Prepared by'],
+        ['checkedBy',    'Checked by'],
+        ['approvedBy',   'Approved by'],
+      ].map(([key, label]) => (
+        <div key={key} style={fieldRow}>
+          <span style={lbl}>{label}</span>
+          <input
+            type="text"
+            style={{ ...numInput, width: 240 }}
+            value={projectSettings?.projectMeta?.[key] ?? ''}
+            onKeyDown={e => e.stopPropagation()}
+            onChange={e => setProjectMeta({ [key]: e.target.value })}
+          />
+        </div>
+      ))}
+      <div style={fieldRow}>
+        <span style={lbl}>Date prepared</span>
+        <input
+          type="date"
+          style={{ ...numInput, width: 160 }}
+          value={projectSettings?.projectMeta?.preparedDate ?? ''}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setProjectMeta({ preparedDate: e.target.value || null })}
+        />
+      </div>
+      <div style={hintText}>Surfaces on Excel cover sheet + PDF cover page.</div>
+
+      <div style={divider} />
+
+      {/* 10. Contingency (Gap 2) — defaultPercent + per-category overrides */}
+      <div style={sectionHead}>Contingency</div>
+      <NumField
+        label="Default percent (%)" step={1} min={0}
+        value={projectSettings?.contingency?.defaultPercent ?? 10}
+        onChange={v => setContingency({ defaultPercent: v })}
+      />
+      <div style={fieldRow}>
+        <span style={lbl}>Display mode</span>
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          {['clean', 'detailed'].map(mode => (
+            <Button
+              key={mode}
+              size="sm"
+              variant={(projectSettings?.contingency?.displayMode ?? 'clean') === mode ? 'primary' : 'ghost'}
+              onClick={() => setContingency({ displayMode: mode })}
+            >
+              {mode === 'clean' ? 'Clean' : 'Detailed (Base | +% | Total)'}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <div style={{
+        fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)',
+        marginTop: 'var(--space-2)', marginBottom: 'var(--space-1)',
+      }}>
+        Per-category overrides
+      </div>
+      {[
+        ['steel',              'Steel'],
+        ['joinery',            'Joinery'],
+        ['joinery_hardware',   'Joinery hardware'],
+        ['plumbing_supply',    'Plumbing supply'],
+        ['plumbing_drainage',  'Plumbing drainage'],
+        ['plumbing_fixtures',  'Plumbing fixtures'],
+        ['electrical_lighting','Electrical lighting'],
+        ['electrical_power',   'Electrical power'],
+        ['electrical_hvac',    'Electrical (HVAC)'],
+      ].map(([cat, label]) => (
+        <div key={cat} style={fieldRow}>
+          <span style={lbl}>{label}</span>
+          <input
+            type="number" min={0} max={100} step={1}
+            style={numInput}
+            value={projectSettings?.contingency?.overrides?.[cat] ?? ''}
+            placeholder={`(${projectSettings?.contingency?.defaultPercent ?? 10})`}
+            onKeyDown={e => e.stopPropagation()}
+            onChange={e => {
+              const val = e.target.value === '' ? null : parseFloat(e.target.value)
+              const next = { ...(projectSettings?.contingency?.overrides ?? {}) }
+              if (val === null) delete next[cat]
+              else next[cat] = val
+              // setContingency does a deep merge on overrides, so passing
+              // the FULL replacement requires writing through state directly.
+              setContingency({ overrides: next })
+            }}
+          />
+          <span style={{ marginLeft: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>%</span>
+        </div>
+      ))}
+      <div style={hintText}>Blank = use default %. NOS / set / lumpsum units never get contingency.</div>
+
+      <div style={divider} />
+
+      {/* 11. Default Paint Systems (Gap 6) */}
+      <div style={sectionHead}>Default Paint Systems</div>
+      <div style={fieldRow}>
+        <span style={lbl}>Interior</span>
+        <select
+          style={selectStyle}
+          value={projectSettings?.defaultInteriorPaintSystemId ?? ''}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setDefaultPaintSystems({ interior: e.target.value })}
+        >
+          {listPaintSystems()
+            .filter(s => s.appliesContext !== 'exterior_walls')
+            .map(sys => <option key={sys.id} value={sys.id}>{sys.label}</option>)}
+        </select>
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Exterior</span>
+        <select
+          style={selectStyle}
+          value={projectSettings?.defaultExteriorPaintSystemId ?? ''}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setDefaultPaintSystems({ exterior: e.target.value })}
+        >
+          {listPaintSystems()
+            .filter(s => s.appliesContext !== 'interior_walls_and_ceiling')
+            .map(sys => <option key={sys.id} value={sys.id}>{sys.label}</option>)}
+        </select>
+      </div>
+      <div style={hintText}>Per-room override available in Room panel.</div>
+
+      <div style={divider} />
+
+      {/* 12. Default Ceiling Finish (Gap 7) */}
+      <div style={sectionHead}>Default Ceiling Finish</div>
+      <div style={fieldRow}>
+        <span style={lbl}>System</span>
+        <select
+          style={selectStyle}
+          value={projectSettings?.defaultCeilingFinishSystemId ?? 'NONE'}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setDefaultCeilingFinishSystem(e.target.value)}
+        >
+          {listCeilingFinishSystems().map(sys =>
+            <option key={sys.id} value={sys.id}>{sys.label}</option>
+          )}
+        </select>
+      </div>
+      <div style={hintText}>
+        Only rooms with Ceiling plaster checked get a finish.
+        Per-room override available in Room panel.
+      </div>
+
+      <div style={divider} />
+
+      {/* 13. Door Hardware Defaults (Gap 4) */}
+      <div style={sectionHead}>Door Hardware Defaults</div>
+      {[
+        ['MAIN_DOOR',     'Main door'],
+        ['INTERNAL_DOOR', 'Internal door'],
+      ].map(([subtype, label]) => {
+        const sets = listHardwareSetsByAppliesTo(subtype)
+        return (
+          <div key={subtype} style={fieldRow}>
+            <span style={lbl}>{label}</span>
+            <select
+              style={selectStyle}
+              value={projectSettings?.doorHardwareDefaults?.[subtype] ?? ''}
+              onKeyDown={e => e.stopPropagation()}
+              onChange={e => setDoorHardwareDefaults({ [subtype]: e.target.value || null })}
+            >
+              <option value="">(no default — no hardware)</option>
+              {sets.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+        )
+      })}
+
+      <div style={divider} />
+
+      {/* 14. Window Hardware Defaults (Gap 5) */}
+      <div style={sectionHead}>Window Hardware Defaults</div>
+      {[
+        ['WINDOW',     'Window'],
+        ['VENTILATOR', 'Ventilator'],
+      ].map(([subtype, label]) => {
+        const sets = listWindowHardwareSetsByAppliesTo(subtype)
+        return (
+          <div key={subtype} style={fieldRow}>
+            <span style={lbl}>{label}</span>
+            <select
+              style={selectStyle}
+              value={projectSettings?.windowHardwareDefaults?.[subtype] ?? ''}
+              onKeyDown={e => e.stopPropagation()}
+              onChange={e => setWindowHardwareDefaults({ [subtype]: e.target.value || null })}
+            >
+              <option value="">(no default — no hardware)</option>
+              {sets.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+        )
+      })}
+
+      <div style={divider} />
+
+      {/* 15. Project Costs (Gap 8) — labor + supervision + GST */}
+      <div style={sectionHead}>Project Costs</div>
+      <div style={hintText}>
+        Labor, supervision, and GST are added to the materials subtotal on
+        the Excel Summary + PDF cover. They are NOT individual BOQ lines.
+      </div>
+      {/* Labor */}
+      <div style={fieldRow}>
+        <span style={lbl}>Labor mode</span>
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          {['percent', 'lumpsum'].map(mode => (
+            <Button
+              key={mode} size="sm"
+              variant={(projectSettings?.projectCosts?.laborMode ?? 'percent') === mode ? 'primary' : 'ghost'}
+              onClick={() => setProjectCosts({ laborMode: mode })}
+            >{mode === 'percent' ? '% of materials' : 'Lumpsum'}</Button>
+          ))}
+        </div>
+      </div>
+      {(projectSettings?.projectCosts?.laborMode ?? 'percent') === 'percent' ? (
+        <NumField label="Labor (%)" step={1} min={0}
+          value={projectSettings?.projectCosts?.laborPercent ?? 15}
+          onChange={v => setProjectCosts({ laborPercent: v })} />
+      ) : (
+        <NumField label="Labor (Rs.)" step={1000} min={0}
+          value={projectSettings?.projectCosts?.laborLumpsum ?? 0}
+          onChange={v => setProjectCosts({ laborLumpsum: v })} />
+      )}
+      {/* Supervision */}
+      <div style={fieldRow}>
+        <span style={lbl}>Supervision mode</span>
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          {['percent', 'lumpsum'].map(mode => (
+            <Button
+              key={mode} size="sm"
+              variant={(projectSettings?.projectCosts?.supervisionMode ?? 'percent') === mode ? 'primary' : 'ghost'}
+              onClick={() => setProjectCosts({ supervisionMode: mode })}
+            >{mode === 'percent' ? '% of materials' : 'Lumpsum'}</Button>
+          ))}
+        </div>
+      </div>
+      {(projectSettings?.projectCosts?.supervisionMode ?? 'percent') === 'percent' ? (
+        <NumField label="Supervision (%)" step={1} min={0}
+          value={projectSettings?.projectCosts?.supervisionPercent ?? 5}
+          onChange={v => setProjectCosts({ supervisionPercent: v })} />
+      ) : (
+        <NumField label="Supervision (Rs.)" step={1000} min={0}
+          value={projectSettings?.projectCosts?.supervisionLumpsum ?? 0}
+          onChange={v => setProjectCosts({ supervisionLumpsum: v })} />
+      )}
+      <NumField label="Overhead (%)" step={1} min={0}
+        value={projectSettings?.projectCosts?.overheadPercent ?? 0}
+        onChange={v => setProjectCosts({ overheadPercent: v })} />
+      <NumField label="Profit (%)" step={1} min={0}
+        value={projectSettings?.projectCosts?.profitPercent ?? 0}
+        onChange={v => setProjectCosts({ profitPercent: v })} />
+      <NumField label="GST (%)" step={1} min={0}
+        value={projectSettings?.projectCosts?.gstPercent ?? 18}
+        onChange={v => setProjectCosts({ gstPercent: v })} />
+      <CheckField
+        label="GST applies to labor"
+        value={projectSettings?.projectCosts?.gstAppliesToLabor ?? false}
+        onChange={v => setProjectCosts({ gstAppliesToLabor: v })} />
+
+      <div style={divider} />
+
+      {/* 16. MEP Sizing Strategy — per-discipline picker */}
+      <div style={sectionHead}>MEP Sizing Strategy</div>
+      <div style={hintText}>
+        CATALOG = catalog-driven (default). HUNTER = fixture-unit roll-up
+        for plumbing. LOAD_BASED = electrical voltage-drop. GRADIENT_DRAIN
+        = soil-stack slope tagging.
+      </div>
+      {[
+        ['PLUMBING',   'Plumbing'],
+        ['ELECTRICAL', 'Electrical'],
+        ['HVAC',       'HVAC'],
+        ['FIRE',       'Fire'],
+        ['ELV',        'ELV'],
+        ['SOLAR',      'Solar (deferred)'],
+      ].map(([discipline, label]) => (
+        <div key={discipline} style={fieldRow}>
+          <span style={lbl}>{label}</span>
+          <select
+            style={selectStyle}
+            value={projectSettings?.mepSizing?.[discipline] ?? 'CATALOG'}
+            onKeyDown={e => e.stopPropagation()}
+            onChange={e => setMepSizingStrategy(discipline, e.target.value)}
+          >
+            <option value="CATALOG">CATALOG (default)</option>
+            <option value="HUNTER">HUNTER (plumbing fixture units)</option>
+            <option value="LOAD_BASED">LOAD_BASED (electrical 3% drop)</option>
+            <option value="GRADIENT_DRAIN">GRADIENT_DRAIN (1/80 soil, 1/40 waste)</option>
+          </select>
+        </div>
+      ))}
+
+      <div style={divider} />
+
+      {/* 17. autoSunkenRoomTypes picker — Arch 8 fix folded into Commit A */}
+      <div style={sectionHead}>Auto-Sunken Slab Room Types</div>
+      <div style={hintText}>
+        Room types that automatically get a sunken slab (lowered floor for
+        plumbing fall). Default: Toilet + Balcony.
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr',
+        gap: 'var(--space-1) var(--space-2)',
+        marginBottom: 'var(--space-2)',
+      }}>
+        {ROOM_TYPES.map(type => {
+          const active = (slabSettings.autoSunkenRoomTypes ?? []).includes(type)
+          return (
+            <label key={type} style={{
+              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+              fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer',
+            }}>
+              <input type="checkbox" checked={active}
+                onKeyDown={e => e.stopPropagation()}
+                onChange={e => {
+                  const cur = slabSettings.autoSunkenRoomTypes ?? []
+                  const next = e.target.checked
+                    ? [...new Set([...cur, type])]
+                    : cur.filter(t => t !== type)
+                  setSlabSettings({ autoSunkenRoomTypes: next })
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+              {ROOM_TYPE_LABELS[type] ?? type}
+            </label>
+          )
+        })}
+      </div>
     </Modal>
   )
 }
