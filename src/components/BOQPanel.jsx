@@ -29,7 +29,13 @@ import ElectricalBoqSection from './boq/ElectricalBoqSection'
 import HvacBoqSection       from './boq/HvacBoqSection'
 import FireBoqSection       from './boq/FireBoqSection'
 import ElvBoqSection        from './boq/ElvBoqSection'
+// Phase 4 Commit C — 4 new BOQ category sections (BOQ Gaps 3 / 4-5 / 6 / 7).
+import SteelByDiaSection         from './boq/SteelByDiaSection'
+import JoineryHardwareBoqSection from './boq/JoineryHardwareBoqSection'
+import PaintMaterialsBoqSection  from './boq/PaintMaterialsBoqSection'
+import CeilingFinishBoqSection   from './boq/CeilingFinishBoqSection'
 import { getBoqLines, totalBoqCost, groupBoqLinesByCategory } from '../boq/lines'
+import { computeBoqPresentationModel } from '../boq/presentationModel.js'
 import { scopeStateToFloor } from '../boq/scope'
 import { runValidation } from '../validation/engine'
 import { exportBoqPdf } from '../export/pdf'
@@ -272,6 +278,11 @@ export default function BOQPanel() {
   const joineryLines      = linesByCat.joinery      ?? []
   const tilesLines        = linesByCat.tiles        ?? []
   const grillsLines       = linesByCat.grills       ?? []
+  // Phase 4 Commit C — 4 new categories (BOQ Gaps 3 / 4-5 / 6 / 7).
+  const steelByDiaLines        = linesByCat.steel_by_diameter ?? []
+  const joineryHardwareLines   = linesByCat.joinery_hardware  ?? []
+  const paintMaterialsLines    = linesByCat.paint_materials   ?? []
+  const ceilingFinishLines     = linesByCat.ceiling_finish    ?? []
   const plumbingSupplyLines   = linesByCat.plumbing_supply   ?? []
   const plumbingDrainageLines = linesByCat.plumbing_drainage ?? []
   const plumbingFixturesLines = linesByCat.plumbing_fixtures ?? []
@@ -338,6 +349,15 @@ export default function BOQPanel() {
   // ── Cost total + validation. Validation is GLOBAL (across all floors).
   const totalCost  = totalBoqCost(canonicalLines)
   const validation = runValidation(liveState)
+
+  // Phase 4 Commit C — presentation model surface for the 3 header blocks.
+  // Reads projectMeta / scopeOfWork / projectCosts / contingencySummary
+  // off the same canonical model the exporters consume.
+  const presentationModel = computeBoqPresentationModel(canonicalLines, rates, liveState)
+  const scopeOfWork        = presentationModel.scopeOfWork
+  const projectCosts       = presentationModel.projectCosts
+  const contingencySummary = presentationModel.contingencySummary
+  const setContingency     = useStore(s => s.setContingency)
 
   // ── Formula popover dispatcher. Uses unscoped state for now — formula
   // explainers are read-only computations that work on either.
@@ -561,7 +581,87 @@ export default function BOQPanel() {
         infoId="wallArea" openId={openPopoverId} onInfoClick={handleInfoClick} />
       <hr className="boq-divider" />
       <InfoRow label="Floor area" value={fmtArea(totalFloorArea)} />
+
+      {/* Phase 4 Commit C — Scope of work block (collapsible). Reads from
+          presentation model so it mirrors what exports render. */}
+      <details className="boq-scope-of-work" style={{ marginTop: 'var(--space-2)' }}>
+        <summary style={{
+          cursor: 'pointer',
+          fontSize: 'var(--text-xs)',
+          fontWeight: 'var(--weight-semibold)',
+          color: 'var(--color-text-secondary)',
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+          padding: 'var(--space-1) 0',
+        }}>
+          Scope of work
+        </summary>
+        <div style={{ paddingLeft: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
+          <InfoRow label="Floors"      value={scopeOfWork.floorCount} />
+          <InfoRow label="Built-up"    value={`${scopeOfWork.totalBuiltUpAreaSft} Sft`} />
+          {scopeOfWork.plotAreaSft > 0 && (
+            <InfoRow label="Plot area" value={`${scopeOfWork.plotAreaSft} Sft`} />
+          )}
+          <InfoRow label="Doors"       value={scopeOfWork.openingCounts.doors} />
+          <InfoRow label="Windows"     value={scopeOfWork.openingCounts.windows} />
+          <InfoRow label="Ventilators" value={scopeOfWork.openingCounts.ventilators} />
+          {Object.keys(scopeOfWork.roomCountByType).length > 0 && (
+            <div style={{ marginTop: 'var(--space-2)', color: 'var(--color-text-muted)' }}>
+              Rooms by type:{' '}
+              {Object.entries(scopeOfWork.roomCountByType)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([t, n]) => `${t}×${n}`)
+                .join(', ')}
+            </div>
+          )}
+        </div>
+      </details>
+
       <hr className="boq-divider" />
+
+      {/* Phase 4 Commit C — Contingency displayMode toggle.
+          Affects Excel + PDF column layout via presentation model.
+          'clean' bakes contingency into the single Qty column;
+          'detailed' splits into Qty (Base) | +% | Qty (Total). */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-2)',
+        marginBottom: 'var(--space-2)',
+        fontSize: 'var(--text-xs)',
+      }}>
+        <span style={{ color: 'var(--color-text-muted)' }}>
+          Contingency display:
+        </span>
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          {['clean', 'detailed'].map(mode => {
+            const active = contingencySummary.displayMode === mode
+            return (
+              <button key={mode}
+                type="button"
+                onClick={() => setContingency({ displayMode: mode })}
+                title={mode === 'clean'
+                  ? 'Single Qty column (contingency baked in)'
+                  : 'Qty (Base) | +% | Qty (Total) columns'}
+                style={{
+                  fontSize: 'var(--text-xs)',
+                  padding: '2px var(--space-2)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  background:  active ? 'var(--color-primary-bg)' : 'var(--color-surface)',
+                  color:       active ? 'var(--color-primary)'   : 'var(--color-text-secondary)',
+                  fontWeight:  active ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+                  cursor: 'pointer',
+                }}>
+                {mode === 'clean' ? 'Clean' : 'Detailed'}
+              </button>
+            )
+          })}
+        </div>
+        <span style={{ color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
+          Default {contingencySummary.defaultPercent}%
+        </span>
+      </div>
 
       {/* Column headers for priceable section */}
       <div className="boq-col-header">
@@ -708,6 +808,32 @@ export default function BOQPanel() {
         openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
         onSelectEntity={handleSelectEntity} />
 
+      {/* Phase 4 Commit C — 4 new BOQ category sections. */}
+
+      {/* Steel — by bar diameter (BOQ Gap 3) — procurement rollup */}
+      <SteelByDiaSection lines={steelByDiaLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
+      {/* Joinery hardware (BOQ Gap 4 + 5) — hinges, locks, mesh, etc. */}
+      <JoineryHardwareBoqSection lines={joineryHardwareLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
+      {/* Paint materials (BOQ Gap 6) — gallons by layer */}
+      <PaintMaterialsBoqSection lines={paintMaterialsLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
+      {/* Ceiling finish (BOQ Gap 7) — false ceiling materials */}
+      <CeilingFinishBoqSection lines={ceilingFinishLines}
+        rates={rates} onRateChange={setRate}
+        openId={openPopoverId} onInfoClick={handleInfoClick} unit={unit}
+        onSelectEntity={handleSelectEntity} />
+
       {/* Plaster, Paint, Waterproofing, Roofing — other finishes */}
       {otherFinishLines.length > 0 && (
         <div className="boq-group">
@@ -757,9 +883,44 @@ export default function BOQPanel() {
         </div>
       )}
 
-      {/* Total cost — always rendered */}
+      {/* Phase 4 Commit C — Project costs block (labor / supervision / GST).
+          Renders above the materials total when ANY component has a non-zero
+          value, mirroring Excel Summary + PDF cover layout. */}
+      {(projectCosts.laborCost > 0 || projectCosts.supervisionCost > 0 ||
+        projectCosts.overheadCost > 0 || projectCosts.profitCost > 0 ||
+        projectCosts.gstCost > 0) && (
+        <details className="boq-project-costs" open style={{
+          marginTop: 'var(--space-3)',
+          padding: 'var(--space-2)',
+          background: 'var(--color-bg-muted)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: 'var(--text-xs)',
+        }}>
+          <summary style={{
+            cursor: 'pointer',
+            fontWeight: 'var(--weight-semibold)',
+            color: 'var(--color-text-secondary)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            marginBottom: 'var(--space-1)',
+          }}>
+            Project Cost Summary
+          </summary>
+          <div style={{ marginTop: 'var(--space-1)' }}>
+            {projectCosts.breakdown.map((row, i) => (
+              <InfoRow key={i}
+                label={row.label}
+                value={fmtCost(row.amount)} />
+            ))}
+            <hr className="boq-divider" />
+            <InfoRow label="GRAND TOTAL" value={fmtCost(projectCosts.grandTotal)} />
+          </div>
+        </details>
+      )}
+
+      {/* Total cost — always rendered (materials subtotal) */}
       <div className="boq-total-row">
-        <span className="boq-total-label">Total cost estimate</span>
+        <span className="boq-total-label">Materials total</span>
         <span className={`boq-total-amount${hasCostValue ? '' : ' boq-total-amount--empty'}`}>
           {fmtCost(totalCost)}
         </span>
