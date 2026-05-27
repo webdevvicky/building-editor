@@ -236,6 +236,79 @@ export function verifyIntegrity(state) {
   }
 }
 
+// ── FK_DESCRIPTORS — single FK authority (Correction 8) ───────────────────
+//
+// Declarative description of every cross-entity reference checked above.
+// Consumed by the template rewriter (src/projects/templates.js) to remap
+// IDs when cloning a project. The contract: ANY new FK added to the
+// inline verifier walk above MUST also appear here. Verify-templates
+// enforces sync by cloning a fixture that exercises every descriptor
+// and asserting verifyIntegrity passes after the rewrite — if the
+// verifier added a check that the descriptor list lacks, the rewriter
+// leaves a dangling reference and the assertion fires.
+//
+// Shape:
+//   { collection, field, target, isArray?, gateField?, gateValue? }
+//   - collection: top-level state key whose entities have the FK
+//   - field:      dot-path to the FK value on an entity
+//   - target:     'nodes' | 'walls' | 'rooms' | 'columns' | etc. (entity collection)
+//                 OR 'floors' (refers to projectSettings.floors[].id)
+//   - isArray:    true when field holds an array of FKs (room.wallIds, slab.roomIds, ...)
+//   - gateField + gateValue: only follow the FK when entity[gateField] === gateValue
+//                            (used for beam endpoints — only COLUMN endpoints carry an FK)
+export const FK_DESCRIPTORS = Object.freeze([
+  // Walls → nodes
+  Object.freeze({ collection: 'walls', field: 'n1', target: 'nodes' }),
+  Object.freeze({ collection: 'walls', field: 'n2', target: 'nodes' }),
+  // Rooms → walls
+  Object.freeze({ collection: 'rooms', field: 'wallIds', target: 'walls', isArray: true }),
+  // Columns → nodes
+  Object.freeze({ collection: 'columns', field: 'attachedNodeId', target: 'nodes', optional: true }),
+  // Beams → columns (only when endpoint.type === 'COLUMN')
+  Object.freeze({ collection: 'beams', field: 'endpoints.from.columnId', target: 'columns',
+                  optional: true, gateField: 'endpoints.from.type', gateValue: 'COLUMN' }),
+  Object.freeze({ collection: 'beams', field: 'endpoints.to.columnId',   target: 'columns',
+                  optional: true, gateField: 'endpoints.to.type',   gateValue: 'COLUMN' }),
+  // Slabs → rooms
+  Object.freeze({ collection: 'slabs', field: 'roomIds', target: 'rooms', isArray: true }),
+  // Foundations → columns + walls
+  Object.freeze({ collection: 'foundations', field: 'columnIds', target: 'columns', isArray: true }),
+  Object.freeze({ collection: 'foundations', field: 'wallIds',   target: 'walls',   isArray: true }),
+  // MEP — wallId + roomId on 6 collections
+  ...[
+    'plumbingFixtures', 'electricalPoints', 'hvacUnits',
+    'fireDevices', 'elvDevices', 'solarEquipment',
+  ].flatMap(coll => [
+    Object.freeze({ collection: coll, field: 'wallId', target: 'walls', optional: true }),
+    Object.freeze({ collection: coll, field: 'roomId', target: 'rooms', optional: true }),
+  ]),
+])
+
+// Floor refs (target: projectSettings.floors[].id). Separate because the
+// "collection" of floor IDs lives in projectSettings.floors[], not as a
+// top-level entity map. Floors are NOT remapped during template cloning
+// (floor IDs like 'F1' are project-internal and collision-free), but the
+// rewriter walks this list to validate every reference resolves post-clone.
+export const FLOOR_REF_DESCRIPTORS = Object.freeze([
+  Object.freeze({ collection: 'nodes', field: 'floorIds', isArray: true }),
+  Object.freeze({ collection: 'walls', field: 'floorId' }),
+  Object.freeze({ collection: 'rooms', field: 'floorId' }),
+  Object.freeze({ collection: 'stamps', field: 'floorId' }),
+  Object.freeze({ collection: 'columns', field: 'baseFloorId' }),
+  Object.freeze({ collection: 'columns', field: 'topFloorId' }),
+  Object.freeze({ collection: 'beams', field: 'floorId' }),
+  Object.freeze({ collection: 'slabs', field: 'floorId' }),
+  Object.freeze({ collection: 'staircases', field: 'fromFloorId' }),
+  Object.freeze({ collection: 'staircases', field: 'toFloorId' }),
+  Object.freeze({ collection: 'staircases', field: 'floorId' }),
+  Object.freeze({ collection: 'foundations', field: 'floorId' }),
+  ...['plumbingFixtures', 'electricalPoints', 'hvacUnits',
+      'fireDevices', 'elvDevices', 'solarEquipment'].map(coll =>
+    Object.freeze({ collection: coll, field: 'floorId' })),
+  Object.freeze({ collection: 'risers', field: 'fromFloorId' }),
+  Object.freeze({ collection: 'risers', field: 'toFloorId' }),
+])
+
 // Convenience for verify scripts: throws if integrity fails.
 export function assertIntegrity(state, contextLabel = '') {
   const result = verifyIntegrity(state)

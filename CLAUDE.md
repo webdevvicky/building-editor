@@ -1,5 +1,417 @@
 # Building Editor — Developer Notes
 
+## Codebase Overview
+
+Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus 27 verify scripts that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
+
+For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
+
+## Phase 6 — Dimension Convention + Drawing Speed (2026-05-27)
+
+9-step landing closing two long-standing gaps: (a) finishes were over-quoted
+7-14% because every quantity engine measured from centerline (Option C —
+dimension mode); (b) drawing a flat took 30-45 min — landed 4 new flows
+to halve that. **27 verify scripts now gate every commit** (+3 new:
+`verify-dimension-mode`, `verify-rect-room`, `verify-templates`).
+
+### What landed
+
+**Area 1 — Dimension Convention (Steps 1-4):**
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | Math kernel + verify-dimension-mode | `getRoomGeometry(state, roomId, mode)` is the **single geometry entry point** (Correction 9). `EffectiveRoomEdge[]` primitive carries `{wallId, a, b, lengthFt, insetDistanceIn, sourceEdgeIndex}` (Correction 1) — polygons derive from edges. Inset via per-edge half-thickness offset + adjacent-line intersection. Miter cap = `3 × max(adjacentHalfThicknesses)` (Correction 3). Collapsed rooms return zero-area edges with `collapsed:true` + warnings, **never null** (Correction 4). `scripts/verify-dimension-mode.mjs` ships 92 assertions including the **400-config fuzz suite** (Correction 10): 200 random rectangles + 200 random L-shapes covering winding bugs, intersection instability, self-intersections, precision drift. |
+| 2 | `projectSettings.dimensionMode` setting | Default `'centerline'` (legacy-safe). `loadProject` detects `data.projectSettings == null` as a new-project signal → stamps `'clear_internal'`. `setDimensionMode(mode)` action validates the input set. ProjectSettingsPanel "Dimension Convention" section appears at the top. verify-persistence extended for IDB round-trip of the field. |
+| 3 | Aggregator wiring | `plaster.js`, `tiles.js`, `paint.js`, `ceilingFinish.js` all route through `getRoomGeometry`. Inner-face wall area uses **Option A**: per-edge `lengthFt × wallHeightFt − openings` (Correction 1's wallId-keyed edges). External wall outer face unchanged — that's the physical centerline on the exterior. Centerline mode produces byte-identical output to today (verify-boq still 250+ green). |
+| 4 | Canvas display | Wall labels query `getEffectiveWallLengthFt(state, wallId, mode)` (Correction 2 — no centerline−halfThickness approximation; the helper looks up the matching wallId edge for exact length). RoomPanel "Floor" row dual readout: `85.6 ft² (clear) · 100 ft² (centerline)` when modes diverge. Ghost line during draw stays centerline (second endpoint isn't a real node yet). |
+
+**Area 2 — Drawing Speed (Steps 5-9):**
+
+| # | Item | Notes |
+|---|---|---|
+| 5 | Smart MEP defaults default-on | `projectSettings.autoMepDefaultsEnabled` (default **true**). RoomPanel.saveRoom branch: auto-applies suggest{Plumbing/Electrical/Hvac/Fire/Elv}ForRoom + shows undo toast; legacy `mep:room-created` event only fires when disabled. IS-732 catalog audit: BEDROOM +TV_POINT, KITCHEN +EXHAUST_FAN, LIVING LIGHT→4 +AC_INDOOR_POINT. verify-mep extended. |
+| 6 | Wall chain drawing | `drawChainOriginId` local state in Canvas tracks first node of chain. **Enter key** ends chain via `canvas:end-chain` window event (Correction 5; keyboard hook stays decoupled, mirrors `boq:toggle` pattern). Double-click ends chain. Auto-close when next click snaps to chain origin. Green ring on origin node. Hint banner: "Click to continue · Click origin to close · Double-click or Enter to end · Esc to cancel". |
+| 7 | Rectangle-room tool + verify-rect-room | `addRectangleRoom(x1,y1,x2,y2,opts)` action. **`_runAtomically(fn)`** wraps the whole batch (nodes + walls + room + auto-MEP) in **ONE history frame** (Correction 6) — re-entrant, gates nested `_save` via `_inBatch` flag. New `rect_room` tool, Shift+R shortcut, ghost rectangle preview with dim labels (via the Step-4 effective helper — single source). 26 assertions including atomic undo + re-entrancy. |
+| 8 | Template infra + verify-templates | New `TEMPLATES` IDB store (DB_VERSION bumped 2→3). `src/projects/templates.js`: snapshot is **MODEL ONLY** (Correction 7 — buildSnapshot already excludes history/selection/hover/activeTool/memo/derived/transient/revisions/_inBatch). ID rewriter walks **`FK_DESCRIPTORS`** from `src/schema/integrity.js` — the **single FK authority** (Correction 8). Cross-check: verify-templates asserts `verifyIntegrity(clonedState).valid` post-rewrite, catching any new FK the verifier checks that the descriptor list lacks. 55 assertions. |
+| 9 | Templates UI | ProjectsPanel "Templates" tab with Use/Rename/Delete. ProjectSettingsPanel footer "Save as template" button. `bootPersistence` lazy-imports `_setTemplateStorage` so templates share the manager's IDB adapter. Factory templates deferred per plan (v2). |
+
+### 10 architectural corrections (locked from review)
+
+These were locked **before** implementation began and survived every commit:
+
+CORRECTION 1 — `getRoomPolygonInsetEdges` returns `EffectiveRoomEdge[]`
+as the primary primitive. Polygon point arrays are DERIVED from these
+edges. All consumers (plaster/tiles/paint/canvas labels) use edge
+identity, not just points.
+
+CORRECTION 2 — Canvas wall labels query `getRoomPolygonInsetEdges()` via
+`getEffectiveWallLengthFt(state, wallId, mode)`. No
+`centerlineLen − halfThicknessAtN1 − halfThicknessAtN2` approximation —
+that breaks at non-orthogonal angles.
+
+CORRECTION 3 — Miter cap = `3 × max(adjacentHalfThicknesses)` —
+deterministic. Not average.
+
+CORRECTION 4 — Collapsed polygon: return zero-area edges with
+`_collapsed:true` + warnings. NEVER null. Aggregators stay deterministic.
+
+CORRECTION 5 — Enter key ends wall chain (CAD muscle memory). Same
+behavior as double-click or Esc.
+
+CORRECTION 6 — Rectangle-room atomicity: nodes + walls + room + auto-MEP
++ naming all in ONE history frame. Single `_runAtomically` at the top.
+Undo restores entire rect+room atomically.
+
+CORRECTION 7 — Templates contain MODEL ONLY. Exclude: history/undo
+stack, selections, hover state, active tool, memo caches, derived
+aggregates, transient UI flags, revision journals, `_inBatch` flag.
+
+CORRECTION 8 — Use `src/schema/integrity.js::FK_DESCRIPTORS` as the
+single FK authority. Do NOT maintain a separate FK list in the template
+rewriter. The verify-templates sync check enforces it.
+
+CORRECTION 9 — All effective geometry goes through `getRoomGeometry`.
+No scattered `mode === 'clear_internal'` checks. Single entry point
+returns memoized `{polygon, insetEdges, area, perimeter, longestWall,
+collapsed, warnings}`.
+
+CORRECTION 10 — 200-config fuzz testing for inset polygons. Not optional
+for a geometry kernel change. verify-dimension-mode covers 200
+rectangles + 200 L-shapes.
+
+### Verify-script inventory (27 total — Phase 6 adds 3)
+
+```
+Phase 1-5 (24): unchanged. All byte-identical under centerline default.
+Phase 6 (3):
+  verify-dimension-mode  ← 92 assertions including 400-config fuzz
+  verify-rect-room       ← 26 assertions (atomicity + node-snap + re-entrancy)
+  verify-templates       ← 55 assertions (model-only + FK rewrite + IDB)
+```
+
+### Locked rules added by Phase 6
+
+- **Geometry consumers go through `getRoomGeometry` (Correction 9).** No
+  raw `getRoomArea` / `getRoomPerimeterFt` / `getLongestPolygonEdgeFt`
+  calls in finish aggregators. No `mode === 'clear_internal'` branches
+  scattered across code. Centerline-only consumers (masonry, structural,
+  MEP routing) keep using the bare topology helpers — they're the
+  documented exemption.
+- **Inset wall-area math = Option A.** Inner face area per room iterates
+  `geom.insetEdges` (NOT room.wallIds), computes `edge.lengthFt ×
+  wallHeightFt − openings`, rounds the result the same way
+  `state.getWallArea` rounds (preserves centerline byte parity).
+- **External wall outer face stays centerline.** It IS the physical
+  plaster line on the exterior — there's no perpendicular interior wall
+  to shrink it. Documented in plaster.js Pass-2.
+- **`EffectiveRoomEdge` is the primary primitive (Correction 1).** Any
+  new consumer that needs per-wall lengths queries
+  `getRoomPolygonInsetEdges(state, roomId)` and matches by wallId. Don't
+  reconstruct from polygon points.
+- **Canvas labels use one geometry source (Correction 2).** Wall
+  dimension labels + RoomPanel area + ghost rect labels all go through
+  the same `getEffectiveWallLengthFt` / `getRoomGeometry` helpers.
+- **`_runAtomically(fn)` for batch operations (Correction 6).** Any
+  multi-action sequence (rect-room + auto-MEP, future bulk import, etc.)
+  wraps in this so undo restores the whole batch as one frame. Re-entrant
+  — nested calls share the outer batch. Nested `_save()` calls become
+  no-ops via the `_inBatch` flag.
+- **Templates are MODEL ONLY (Correction 7).** `buildSnapshot` in
+  `src/projects/_snapshot.js` is the authoritative shape — never carries
+  history/selection/hover/activeTool/pendingWallIds/_inBatch/etc.
+  Templates store reuses this shape.
+- **`FK_DESCRIPTORS` is the single FK authority (Correction 8).** The
+  template rewriter walks this list to remap IDs. Any new cross-entity
+  reference added to `verifyIntegrity` MUST be mirrored in
+  `FK_DESCRIPTORS` or `FLOOR_REF_DESCRIPTORS`. verify-templates'
+  `verifyIntegrity(clonedState).valid` assertion catches the drift.
+- **New projects default to `'clear_internal'`; legacy saves stay
+  `'centerline'`.** `loadProject` uses `data.projectSettings == null` as
+  the new-project signal. Legacy projects with explicit projectSettings
+  but no `dimensionMode` field fall back to `'centerline'` via
+  `DEFAULT_PROJECT_SETTINGS.dimensionMode`. Switch is reversible via
+  ProjectSettingsPanel.
+- **Quantity engines still never consume rendered geometry.** This
+  Phase-1 invariant survives: every aggregator under `src/quantities/`
+  reads canonical state geometry only. The `getRoomGeometry` helper IS
+  canonical state geometry — it's pure topology math.
+
+### Module map — Phase 6 additions
+
+```
+src/topology/rooms.js  — EXTENDED with the dimension-mode kernel:
+                         insetPolygonByPerWallHalfThickness (private),
+                         getRoomPolygonInsetEdges (memoized),
+                         getRoomGeometry (single entry — Correction 9),
+                         getEffectiveWallLengthFt (canvas labels),
+                         resolveDimensionMode
+src/schema/integrity.js — EXTENDED with FK_DESCRIPTORS +
+                          FLOOR_REF_DESCRIPTORS exports (Correction 8 —
+                          single FK authority)
+src/projects/templates.js (NEW) — saveCurrentAsTemplate / listTemplates /
+                                  getTemplate / createSnapshotFromTemplate /
+                                  renameTemplate / deleteTemplate +
+                                  buildIdRemap + rewriteSnapshot
+src/projects/storage/indexedDb.js — DB_VERSION bumped 2→3, TEMPLATES
+                                    store added to DB_STORES
+src/store.js — added _inBatch flag + _runAtomically(fn) wrapper +
+               addRectangleRoom action + setDimensionMode action;
+               loadProject detects new-project path and stamps
+               'clear_internal'
+src/components/Canvas.jsx — wall labels via getEffectiveWallLengthFt;
+                            wall chain drawing (drawChainOriginId,
+                            Enter via canvas:end-chain, double-click,
+                            auto-close, green origin ring, hint banner);
+                            rect_room tool (rectFirstCorner, ghost rect,
+                            two-click atomic create with auto-MEP)
+src/components/RoomDetailPanel.jsx — dual area readout
+src/components/RoomPanel.jsx — autoMepDefaultsEnabled two-path branch
+                               (auto-apply vs legacy modal)
+src/components/ProjectSettingsPanel.jsx — Dimension Convention section,
+                                          Smart MEP Defaults toggle,
+                                          Save as template footer button
+src/components/ProjectsPanel.jsx — Templates tab (list/Use/Rename/Delete)
+src/components/toolbarConfig.js — rect_room tool entry (Shift+R)
+src/hooks/useKeyboardShortcuts.js — Enter→canvas:end-chain, Shift+R→rect_room
+src/mep/catalogs/is732Defaults.js — BEDROOM +TV_POINT,
+                                    KITCHEN +EXHAUST_FAN,
+                                    LIVING LIGHT 2→4, +AC_INDOOR_POINT
+src/projects/manager.js — bootPersistence wires _setTemplateStorage
+scripts/verify-dimension-mode.mjs (NEW) — 92 assertions
+scripts/verify-rect-room.mjs       (NEW) — 26 assertions
+scripts/verify-templates.mjs       (NEW) — 55 assertions
+```
+
+---
+
+## Phase 5 — Tier 2 sweep + IDB autosave + Underlay (2026-05-27)
+
+19-step landing that closes the Tier 2 UI audit, migrates project
+autosave from localStorage to IDB, and ships the PDF/image underlay
+workflow with two-click calibration. **24 verify scripts now gate
+every commit** (+1 `verify-underlay`).
+
+### What landed
+
+**Phase A — Tier 2 UI gaps (6 commits):**
+
+| # | Item | Notes |
+|---|---|---|
+| 20 | SlabPanel role picker | + `slab.roleSource: 'AUTO'\|'MANUAL'` provenance (ADD 1). No-op `setSlabRole` calls leave provenance untouched. New `resetSlabRoleToAuto` action. |
+| 30 | RoomDetailPanel materials breakdown | Memoized on `[roomId, boqRevision, ratesRevision]` (ADD 7). Both counters added to store + bumped in `_save` and `setRate`. |
+| 25 | Electrical circuit click-to-highlight | `state.selection.electricalCircuitId` (ADD 3 — namespaced). Canvas overlay highlights matching points + wires + dims the rest. |
+| 24 | HVAC manual pairing picker | `pairingSource: 'AUTO'\|'MANUAL'\|null`. New `setHvacPairing(unitId, partnerId, source)` action handles bidirectional pairing + orphan cleanup. |
+| 29 | Slab canvas rendering | Translucent solid fills only (ADD 6) — no SVG patterns. SUNKEN gets dashed border. `layerVisibility.slabs` defaults off. |
+| 26 | MEP per-instance overrides | `src/mep/resolution.js` ships **first** (ADD 2) with `resolveFixtureFlowLpm / resolveWireGauge / resolveRefrigerantPipeOD`. Override fields added to 3 schemas. Panels consume the resolver only — never inline the fallback chain. |
+
+Already shipped pre-Tier-2 (audit confirmed in code; updated list stale):
+19, 21, 22, 23, 28, 31, 32.
+
+**Phase B — IDB-canonical persistence:**
+
+- `src/projects/manager.js` rewritten — IDB is the canonical source.
+  Synchronous read cache (`listProjects` / `getCurrentProjectId` stable
+  refs) backed by async IDB writes via `createPersistence(idbStorage)`.
+  ProjectsPanel's `useSyncExternalStore` continues to work unchanged.
+- One-shot **localStorage → IDB migration** runs on boot from
+  `src/main.jsx::bootPersistence()`. Migration flag stored in IDB
+  METADATA store (`localStorage-migrated`) so it runs exactly once.
+  Legacy localStorage data is **not** deleted — release-cycle safety
+  net.
+- `src/projects/autosave.js` writes through manager → IDB. Chunked
+  writes via `_splitDataIntoChunks` write only `model` / `projectSettings`
+  / `settings` slices per autosave tick.
+- **BroadcastChannel** `'boq-projects'` syncs across tabs — every write
+  posts a typed event (`project-created` / `project-saved` /
+  `project-renamed` / `project-deleted` / `current-changed`); the
+  listener re-hydrates cache from IDB and notifies React subscribers.
+  Browser-only — `_isBrowser()` guard prevents the channel from
+  holding Node's event loop open during verify scripts.
+- **Serializing write queue** — fire-and-forget IDB writes are chained
+  through `_writeQueue`. Production code never awaits; verify scripts
+  use exposed `flushPendingWrites()` to drain between assertions.
+- `src/projects/storage/assets.js` (ADD 4) — generic binary asset
+  primitive (`storeAsset / getAsset / deleteAsset / deleteProjectAssets`)
+  keyed `${projectId}::${assetType}::${assetId}`. `deleteProject`
+  cascades to drop owned asset blobs.
+- `src/projects/storage/idbAdapter.js` — real browser IDB adapter via
+  native `indexedDB`. `IDB_SCHEMA_VERSION = 1` lives in METADATA
+  store (ADD 5). `IDB_MIGRATIONS` chain in place for future bumps.
+  `DB_VERSION` bumped to 2 (assets + metadata stores added).
+- `_snapshot.js` extracted from autosave.js so verify scripts can
+  import `buildSnapshot` without dragging in Toast.jsx (Node ESM can't
+  parse JSX).
+
+**Phase C — PDF/image underlay:**
+
+- `pdfjs-dist ^4.10.38` added to dependencies. Dynamic import keeps
+  the ~600 KB bundle off the cold path.
+- `src/underlay/pdfRender.js` — PDF page 1 → offscreen canvas →
+  PNG dataUrl. Image files use native FileReader. Both paths converge
+  on a single `{ dataUrl, wPx, hPx, mimeType }` shape.
+- `src/underlay/calibration.js` — `computeInchesPerPixel`,
+  `buildCalibration`, `renderDimensionsInches`. Calibration stored in
+  IMAGE PIXEL space per ADD 8 (not world coords — decouples from
+  canvas viewport).
+- `src/components/UnderlayLayer.jsx` — SVG `<image>` inside Canvas's
+  transform group, between group open and grid rect. Blob lazy-loaded
+  from IDB via module-level cache.
+- `src/components/CalibrationModal.jsx` — **two-click capture** is the
+  canonical flow (user clicks two reference points on the canvas with
+  `calibrate_underlay` tool active; modal opens prompting for known
+  distance). Full-width fallback preserved for users who know "this
+  drawing is X ft wide" without an exact reference segment.
+- Visual markers on Canvas: clicked points render as primary-colour
+  dots, with a dashed line between them once both are captured.
+- LayersPanel Underlay group hidden when no underlay loaded (ADD 9).
+- Toolbar `View & Settings → Underlay` group: Import / Calibrate / Clear.
+
+### 9 architectural additions (locked from review)
+
+ADD 1 — `slab.roleSource: 'AUTO' | 'MANUAL'` provenance; manual setters
+stamp MANUAL only when value changes.
+ADD 2 — Centralized MEP override resolution in `src/mep/resolution.js`
+ships **before** consumers; mirror `src/specs/resolution.js`.
+ADD 3 — Selection-state namespace `state.selection.xxxId` for cross-
+canvas highlighting (electrical circuit, future plumbing zone, HVAC
+loop, riser trace).
+ADD 4 — Generic binary-asset storage in `src/projects/storage/assets.js`
+serves underlay + future DXF / IFC / photo / texture imports.
+ADD 5 — IDB schema versioning + forward-migration chain.
+ADD 6 — Slab canvas fills are translucent solid only — no SVG patterns
+(performance risk at zoom + transparency).
+ADD 7 — Room BOQ memoization keyed on `[roomId, boqRevision, ratesRevision]`.
+ADD 8 — Underlay calibration stored in IMAGE PIXEL space (`p1Px`, `p2Px`,
+`inchesPerPixel`); world coords derived at render time.
+ADD 9 — LayersPanel Underlay group entirely hidden when no underlay
+exists.
+
+### Verify-script inventory (24 total — `verify-underlay` added)
+
+`verify-persistence` extended with full manager.js coverage:
+migration shim, sync cache + async IDB write serialization, chunked
+storage round-trip, rename / delete / setCurrent flows, autosave
+snapshot shape, re-boot doesn't duplicate migration.
+
+### Locked rules added by Phase 5
+
+- **Never scope down without approval.** If a step looks bigger than
+  expected, surface the trade-off and ask BEFORE shipping a smaller
+  version. "Scope deviation flagged" in the final report is NOT consent.
+- **Selection-state writes go through `setSelection(partial)`** —
+  shallow-merges into the namespace. Flat `selectedXId` fields stay
+  where they are; new highlight features land in the namespace.
+- **Binary assets never live in localStorage.** Every blob goes through
+  `assets.js → IDB`. New asset types add a string to `ASSET_TYPES`.
+- **Underlay never participates in BOQ or exports.** `excel.js` /
+  `pdf.js` skip `projectSettings.underlay`. JSON export omits the
+  storage pointer; on import the underlay is dropped (storage-bound,
+  not portable).
+- **`projectSettings.underlay.calibration.inchesPerPixel` is the
+  single source of scale.** Never store `pxPerInch` (inverse) or
+  derive scale from world coords.
+- **`useSyncExternalStore` getSnapshot must return a stable reference
+  when nothing changed.** Cached arrays/objects must not be
+  re-allocated on every read — return a frozen singleton for the
+  empty / null case. `src/revisions/manager.js::listRevisions(null)`
+  uses a `const _EMPTY = Object.freeze([])` singleton; React's
+  infinite-loop guard fires on a fresh `[]` every call. Same rule
+  applies to any future external-store façade.
+- **Async writes in `manager.js` serialize via the queue.** Direct
+  `_persistence.put`/`saveCurrent` calls go through `_enqueueWrite`
+  so a `createProject` immediately followed by `saveCurrent(sameId)`
+  doesn't read an absent PROJECTS record. Tests drain via
+  `await flushPendingWrites()`; production code never awaits.
+- **`buildSnapshot` lives in `src/projects/_snapshot.js`** — extracted
+  from `autosave.js` so Node verify scripts can pull the pure
+  snapshot shape without dragging in Toast.jsx (Node's ESM loader
+  can't parse JSX). Production `autosave.js` re-exports it.
+
+### Module map — Phase 5 additions
+
+```
+src/projects/storage/
+  indexedDb.js          — async storage facade (existing) + ASSETS + METADATA
+                          stores added (DB_VERSION bumped 1→2)
+  idbAdapter.js         — real browser IndexedDB adapter via native indexedDB
+  assets.js             — generic binary asset primitive (ADD 4):
+                          storeAsset / getAsset / deleteAsset /
+                          deleteProjectAssets / listProjectAssets
+                          + BroadcastChannel 'boq-assets' notifier
+  getAssetStorage.js    — lazy adapter accessor (IDB in browser, memory
+                          adapter in Node verify scripts)
+src/projects/
+  manager.js            — REWRITTEN. IDB-canonical with sync read cache;
+                          serializing _writeQueue; BroadcastChannel
+                          'boq-projects' multi-tab sync; bootPersistence()
+                          + _bootForTest() seam; flushPendingWrites()
+                          drain helper
+  _snapshot.js          — pure buildSnapshot (no UI deps; safe for Node tests)
+  autosave.js           — debounced autosave routed through manager → IDB
+src/underlay/
+  calibration.js        — computeInchesPerPixel + buildCalibration +
+                          renderDimensionsInches (pure math; image-pixel
+                          space per ADD 8)
+  pdfRender.js          — dynamic pdfjs-dist import; PDF page 1 → PNG
+                          dataUrl; image FileReader path; importUnderlayFile
+                          driver
+src/mep/
+  resolution.js         — central MEP override resolution (ADD 2) —
+                          resolveFixtureFlowLpm / resolveWireGauge /
+                          resolveRefrigerantPipeOD; mirrors specs/resolution.js
+src/components/
+  UnderlayLayer.jsx     — SVG <image> inside Canvas transform group; lazy
+                          blob load from IDB via module-level cache
+  CalibrationModal.jsx  — two-click mode (canonical) + full-width fallback
+                          + visual canvas markers
+scripts/
+  verify-underlay.mjs   — 36 assertions: calibration math round-trip,
+                          buildCalibration edge cases, store action
+                          round-trips, asset round-trip via memory adapter
+  verify-persistence.mjs — EXTENDED. Full manager.js flow, migration
+                          shim, chunked autosave, idempotent re-boot
+```
+
+### Two-click calibration flow
+
+```
+1. User: View & Settings → Underlay → Calibrate scale
+   → activeTool = 'calibrate_underlay'
+2. User clicks p1 on canvas:
+   Canvas.handleSVGClick → screenToWorldRaw → image-pixel coords
+   → setSelection({ calibrationCapture: { p1Px, p2Px: null } })
+3. Visual marker renders at p1 (primary dot, drawn in <g data-layer
+   ="calibration-capture"> inside Canvas transform group)
+4. Status banner shows "First point captured at (x, y) — click second"
+5. User clicks p2:
+   → setSelection({ calibrationCapture: { p1Px, p2Px } })
+6. Both markers + dashed line render between p1 and p2
+7. CalibrationModal opens with two-click mode preselected, distance
+   readout in pixels, FeetInchesInput for known length
+8. Apply: buildCalibration(p1Px, p2Px, knownFt) →
+   setUnderlayCalibration → Canvas re-renders underlay at new scale
+9. Modal closes, capture cleared, tool returns to 'select'
+```
+
+Image-pixel coords stored, not world coords. World transforms (pan /
+zoom / placement nudges) never affect calibration once locked. World
+→ image conversion at click: `pxX = (worldX - placement.xIn) / ipp`,
+`pxY = ((placement.yIn + hIn) - worldY) / ipp` (Y-flip).
+
+### End-to-end test (Playwright, 2026-05-27)
+
+Verified the full workflow on dev server:
+
+| # | Step | Result |
+|---|---|---|
+| 1 | Create project + draw walls + save | 4 walls + 4 nodes round-tripped |
+| 2 | Reload page → loads from IDB | `localStorage` only holds UI prefs; project data in IDB `boq-app` v2 |
+| 3 | Two tabs → BroadcastChannel sync | Rename in tab 2 reflected in tab 1 within 500ms |
+| 4 | PDF import + two-click calibration | 1191×1684 PNG via pdfjs-dist; `inchesPerPixel = 0.42` (matches `14ft × 12in / 400px`) |
+| 5 | BOQ categories | 38 lines across 10 categories; quantities match 10×10ft room expectations |
+
+---
+
 ## Enterprise architecture upgrade — COMPLETE (2026-05-26)
 
 A 4-phase architectural upgrade landed in 14 commits. Every BOQ Gap
@@ -1447,7 +1859,12 @@ Phase 1a–1c-4 + Phase 1.5 + Stage 0 + Phase 1.6 + Architectural Fixes 1–4 +
 Phase 1.8 + Phase 1.9 + Phase 1.7 + Phase 2.0 + UI Phases 1–4 +
 Collapsible BOQ sidebar + **Topology Layer (Steps 0–9)** + **MEP Phase 0
 + Plumbing + Electrical + HVAC + Fire + ELV + Clash Detection +
-Load-Based Sizing** complete on `main` (2026-05-18).
+Load-Based Sizing** + **Phase 4 Enterprise Architecture (Phases 1–4)** +
+**Phase 5 Tier-2 sweep + IDB autosave + PDF/image Underlay** +
+**Phase 6 Dimension Convention (Option C) + Drawing Speed (chain draw +
+rect-room atomic create + smart MEP defaults + project templates)**
+complete on `main` (latest 2026-05-27). See **Phase 6** section at the
+top of this file for the most recent landing.
 
 Topology layer (commits step-0 → step-9) is the canonical read-only
 spatial-relationship surface for downstream discipline engines
@@ -1548,11 +1965,35 @@ Query Context7 before writing any code that uses:
 Training data for these versions is outdated.
 
 ## Verification Commands
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs        # single-floor BOQ checks
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-multifloor.mjs # multi-floor scope + topology guard
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-topology.mjs   # 23 topology-layer relationship checks
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-mep.mjs        # 242 MEP assertions across 5 disciplines + clash + sizing
-All four must pass green before any commit.
+
+Run individually:
+```
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs         # single-floor BOQ checks
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-multifloor.mjs  # multi-floor scope + topology guard
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-topology.mjs    # topology-layer relationship checks
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-mep.mjs         # 257+ MEP assertions across 5 disciplines + clash + sizing + Phase-5 overrides + pairing
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-persistence.mjs # IDB layer + manager.js + migration shim + chunked autosave
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-underlay.mjs       # calibration math + state setter round-trip + asset blob storage
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-dimension-mode.mjs # Phase 6 — math kernel + 400-config fuzz + aggregator wiring
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-rect-room.mjs      # Phase 6 — atomic rect-room create + node-snap + re-entrancy
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-templates.mjs      # Phase 6 — MODEL-ONLY snapshot + FK rewrite via integrity + IDB
+```
+
+Run all 27 in one go (POSIX shell):
+```
+for s in scripts/verify-*.mjs; do
+  if node --experimental-loader ./scripts/resolver-hook.mjs "$s" > /tmp/v.log 2>&1; then
+    echo "PASS: $s"
+  else
+    echo "FAIL: $s"; tail -25 /tmp/v.log
+  fi
+done
+```
+
+All 27 must pass green before any commit. Phase 6 adds three scripts —
+`verify-dimension-mode.mjs` (92 assertions inc. 400-config fuzz),
+`verify-rect-room.mjs` (26 assertions inc. atomic-undo), and
+`verify-templates.mjs` (55 assertions inc. FK-rewrite sync check).
 
 ## Planned Features (do not implement yet)
 - DXF import (Phase 2.1) — parse AutoCAD floor plans into walls/rooms

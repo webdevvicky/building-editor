@@ -28,6 +28,9 @@ export const plumbingFixtureSchema = Object.freeze({
     hasWaterInlet:      Object.freeze({ type: 'boolean', required: true, default: false }),
     hasDrainOutlet:     Object.freeze({ type: 'boolean', required: true, default: false }),
     hasHotWaterInlet:   Object.freeze({ type: 'boolean', required: true, default: false }),
+    // Phase 4 Tier-2 Item 26 + ADD 2: per-instance flow override (L/min).
+    // null = inherit catalog default. Read via src/mep/resolution.js.
+    flowLpmOverride:    Object.freeze({ type: 'number|null', required: true, default: null, min: 0, unit: 'lpm' }),
   }),
   invariants: Object.freeze([
     Object.freeze({

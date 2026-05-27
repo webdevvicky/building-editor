@@ -49,6 +49,9 @@ export default function Toolbar() {
   const loadProject         = useStore(s => s.loadProject)
 
   const fileInputRef = useRef(null)
+  // Phase 4 Tier-2 Step 18 — separate file input for underlay imports
+  // (different accept filter + handler) so the JSON import stays intact.
+  const underlayInputRef = useRef(null)
 
   // ── One-shot action handlers ────────────────────────────────────────────
 
@@ -108,12 +111,107 @@ export default function Toolbar() {
     else toast.success('Project saved.')
   }
 
+  // Per-floor underlay import (Fix 3). Each floor owns its own asset blob
+  // under a deterministic key: `${projectId}::underlay::${floorId}`. We
+  // pass that floorId through to storeAsset via opts.assetId so the key is
+  // stable across re-imports (replacing a floor's plan keeps the same key).
+  // FIX 2 wires the multi-page page picker by pre-importing pdfRender and
+  // checking numPages; we call selectPage() either automatically (1 page)
+  // or by opening PDFPagePickerModal (>1 page) before storing.
+  async function handleUnderlayImport(file) {
+    if (!file) return
+    try {
+      const { importUnderlayFile } = await import('../underlay/pdfRender.js')
+      const { storeAsset, deleteAsset, ASSET_TYPES }
+        = await import('../projects/storage/assets.js')
+      const { getAssetStorage }
+        = await import('../projects/storage/getAssetStorage.js')
+      const projectId = getCurrentProjectId() ?? 'orphan'
+      const floorId   = useStore.getState().currentFloorId
+      if (!floorId) {
+        dialog.alert('No active floor — open Floors and select one first.', { title: 'No floor selected' })
+        return
+      }
+      const result = await importUnderlayFile(file, {
+        // FIX 2 — multi-page PDF page picker. When the PDF has >1 page,
+        // importUnderlayFile returns { needsPagePicker: true, choosePage,
+        // numPages, thumbnails } so we can prompt the user. Single-page
+        // PDFs and images skip this branch entirely.
+        async onMultiPage({ numPages, thumbnails, choosePage }) {
+          // Mount the modal via the imperative dialog primitive? No — we
+          // need a dedicated thumbnails UI. Mount through the page-picker
+          // request channel: store the pending request and let the modal
+          // component drive the choice.
+          return new Promise((resolve) => {
+            const detail = { numPages, thumbnails, resolve, choosePage }
+            window.dispatchEvent(new CustomEvent('underlay:page-picker', { detail }))
+          })
+        },
+      })
+      if (result == null) return  // user cancelled the page picker
+      const storage = getAssetStorage()
+      // If this floor already had an underlay, drop its blob first so we
+      // don't strand orphaned assets when the new storeAsset overwrites.
+      const prev = useStore.getState().projectSettings?.floors?.find(f => f.id === floorId)?.underlay
+      if (prev?.storageKey && prev.storageKey !== `${projectId}::underlay::${floorId}`) {
+        try { await deleteAsset(storage, prev.storageKey) } catch { /* swallow */ }
+      }
+      const storageKey = await storeAsset(
+        storage, projectId, ASSET_TYPES.UNDERLAY, result.dataUrl,
+        {
+          assetId:          floorId,   // deterministic key per floor
+          mimeType:         result.mimeType,
+          originalFileName: result.originalFileName,
+          naturalSize:      { wPx: result.wPx, hPx: result.hPx },
+        },
+      )
+      useStore.getState().setUnderlay({
+        kind:             result.kind,
+        storageKey,
+        originalFileName: result.originalFileName,
+        naturalSize:      { wPx: result.wPx, hPx: result.hPx },
+        placement:        { xIn: 0, yIn: 0, rotationDeg: 0 },
+        calibration:      null,
+        opacity:          0.35,
+        visible:          true,
+        pageNumber:       result.pageNumber ?? null,
+      }, floorId)
+      toast.success(`Imported ${result.originalFileName}. Run "Calibrate scale" next.`)
+    } catch (err) {
+      console.error(err)
+      dialog.alert(
+        `Could not import "${file.name}". Make sure it is a valid PDF or image.`,
+        { title: 'Underlay import failed' }
+      )
+    }
+  }
+
+  async function handleUnderlayClear() {
+    const floorId = useStore.getState().currentFloorId
+    const u = useStore.getState().projectSettings?.floors?.find(f => f.id === floorId)?.underlay
+    if (!u) return
+    const ok = await dialog.confirm(
+      `Remove the imported floor plan "${u.originalFileName ?? 'underlay'}" from this floor?`,
+      { title: 'Clear underlay', confirmLabel: 'Remove', variant: 'danger' }
+    )
+    if (!ok) return
+    try {
+      const { deleteAsset } = await import('../projects/storage/assets.js')
+      const { getAssetStorage } = await import('../projects/storage/getAssetStorage.js')
+      if (u.storageKey) await deleteAsset(getAssetStorage(), u.storageKey)
+    } catch { /* swallow */ }
+    useStore.getState().clearUnderlay(floorId)
+    toast.success('Underlay cleared from this floor.')
+  }
+
   const ACTION_HANDLERS = {
     save:   handleSaveProject,
     import: () => fileInputRef.current?.click(),
     export: handleExportJson,
     undo,
     redo,
+    underlay_import: () => underlayInputRef.current?.click(),
+    underlay_clear:  handleUnderlayClear,
   }
 
   const ACTION_DISABLED = {
@@ -207,6 +305,17 @@ export default function Toolbar() {
         accept=".json"
         style={{ display: 'none' }}
         onChange={handleLoadFile}
+      />
+      <input
+        ref={underlayInputRef}
+        type="file"
+        accept="image/*,.pdf"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const f = e.target.files?.[0]
+          handleUnderlayImport(f)
+          e.target.value = ''
+        }}
       />
     </div>
   )

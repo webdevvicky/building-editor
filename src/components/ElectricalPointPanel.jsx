@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useUnits } from '../hooks/useUnits'
 import { listPointTypes, getPointType } from '../mep/catalogs/index.js'
+import { resolveWireGauge, humanizeMepSource } from '../mep/resolution.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
@@ -51,6 +52,8 @@ export default function ElectricalPointPanel() {
   const selectElectricalPoint     = useStore(s => s.selectElectricalPoint)
   const applyRoomMepDefaults      = useStore(s => s.applyRoomMepDefaults)
   const undo                      = useStore(s => s.undo)
+  const setSelection              = useStore(s => s.setSelection)
+  const highlightedCircuitId      = useStore(s => s.selection?.electricalCircuitId ?? null)
   const suggestFn                 = useSuggestFn()
 
   if (!selectedElectricalPointId) return null
@@ -181,6 +184,31 @@ export default function ElectricalPointPanel() {
         />
       </Field>
 
+      {/* Phase 4 Tier-2 Item 26 + ADD 2: per-instance wire-gauge override.
+          Resolution flows through src/mep/resolution.js — sizing engines
+          and panels share the same INSTANCE → CATALOG chain. */}
+      {(() => {
+        const resolved = resolveWireGauge(point, catalog)
+        return (
+          <Field label={`Wire gauge (mm²) — ${humanizeMepSource(resolved.source)}`}>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={point.wireGaugeMm2Override ?? ''}
+              placeholder={String(catalog?.wireGaugeMm2 ?? 0)}
+              onChange={e => {
+                const v = e.target.value
+                updateElectricalPoint(point.id, {
+                  wireGaugeMm2Override: v === '' ? null : Number(v),
+                })
+              }}
+              onKeyDown={e => e.stopPropagation()}
+            />
+          </Field>
+        )
+      })()}
+
       <Field label="Mount height (ft)">
         <input
           type="number"
@@ -199,17 +227,34 @@ export default function ElectricalPointPanel() {
       <div style={fieldRow}>
         <div style={labelStyle}>Circuit</div>
         <div style={{ fontSize: 'var(--text-sm)' }}>
-          {point.circuitId
-            ? <span style={{
-                fontSize: 'var(--text-xs)',
-                padding: '2px var(--space-2)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-primary-bg)',
-                color: 'var(--color-primary)',
-              }}>
-                {point.circuitId}
-              </span>
-            : <span style={{ color: 'var(--color-text-muted)' }}>Unassigned</span>}
+          {point.circuitId ? (
+            (() => {
+              const active = highlightedCircuitId === point.circuitId
+              return (
+                <button
+                  type="button"
+                  onClick={() => setSelection({ electricalCircuitId: active ? null : point.circuitId })}
+                  title={active
+                    ? 'Click to clear circuit highlight'
+                    : 'Click to highlight every point + wire on this circuit'}
+                  style={{
+                    fontSize: 'var(--text-xs)',
+                    padding: '2px var(--space-2)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: active ? 'var(--color-primary)' : 'var(--color-primary-bg)',
+                    color: active ? 'var(--color-primary-text)' : 'var(--color-primary)',
+                    border: '1px solid transparent',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {point.circuitId}{active ? ' ✓' : ''}
+                </button>
+              )
+            })()
+          ) : (
+            <span style={{ color: 'var(--color-text-muted)' }}>Unassigned</span>
+          )}
         </div>
       </div>
 

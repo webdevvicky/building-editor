@@ -19,6 +19,10 @@ import {
   DEFAULT_EXTERIOR_PAINT_SYSTEM_ID,
 } from '../specs/paintSystems.js'
 import { computePlasterQuantities } from './plaster.js'
+// Area 1 — dimension-mode kernel. Per-room ceiling area + interior wall
+// area route through getRoomGeometry so they honor projectSettings
+// .dimensionMode. Centerline mode is byte-identical to today.
+import { getRoomGeometry } from '../topology/rooms.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
 import { safeR2 as r2 } from '../lib/numbers.js'
 
@@ -37,6 +41,26 @@ function _resolveExteriorSystemId(state) {
 // For each room with paint=true, system = room.paintSystemId ?? project
 // interior default. Ceiling area is per-room (only if paint flag is set).
 // Wall area is per-room walls (getRoomWallArea).
+// Per-room: wall area summed across inset edges (Option A — Correction 1),
+// ceiling area from geom.area. Same rounding rule as state.getWallArea so
+// centerline mode produces byte-identical output to today.
+function _roomInteriorWallSft(state, room) {
+  const geom = getRoomGeometry(state, room.id)
+  if (!geom) return state.getRoomWallArea?.(room.id) ?? 0
+  let sum = 0
+  for (const edge of geom.insetEdges) {
+    const w = state.walls?.[edge.wallId]
+    if (!w || w.isVirtual || w.isPlot) continue
+    const heightFt = (w.height ?? 120) / 12
+    const grossArea = edge.lengthFt * heightFt
+    const openingDeduction = (w.openings ?? []).reduce(
+      (s, o) => s + (o.width / 12) * (o.height / 12), 0
+    )
+    sum += r2(Math.max(0, grossArea - openingDeduction))
+  }
+  return r2(sum)
+}
+
 function _accumulateInteriorBySystem(state) {
   const bySystem = {}   // { [systemId]: { interiorWallsSft, ceilingSft, rooms: [] } }
   const interiorDefault = _resolveInteriorSystemId(state)
@@ -47,8 +71,9 @@ function _accumulateInteriorBySystem(state) {
     if (!room?.finishes?.paint) continue
     const sysId = room.paintSystemId ?? interiorDefault
     if (!bySystem[sysId]) bySystem[sysId] = { interiorWallsSft: 0, ceilingSft: 0, rooms: [] }
-    const wallSft    = state.getRoomWallArea?.(rid) ?? 0
-    const ceilingSft = state.getRoomArea?.(rid) ?? 0
+    const wallSft    = _roomInteriorWallSft(state, room)
+    const geom       = getRoomGeometry(state, rid)
+    const ceilingSft = geom?.area ?? state.getRoomArea?.(rid) ?? 0
     bySystem[sysId].interiorWallsSft += wallSft
     bySystem[sysId].ceilingSft       += ceilingSft
     bySystem[sysId].rooms.push({ roomId: rid, name: room.name, wallSft: r2(wallSft), ceilingSft: r2(ceilingSft) })

@@ -14,6 +14,8 @@ import SlabPanel from './components/SlabPanel'
 import ProjectSettingsPanel from './components/ProjectSettingsPanel'
 import LayersPanel from './components/LayersPanel'
 import FoundationPanel from './components/FoundationPanel'
+import CalibrationModal from './components/CalibrationModal'
+import PDFPagePickerModal from './components/PDFPagePickerModal'
 import FloorSwitcher from './components/FloorSwitcher'
 import FloorsManagerPanel from './components/FloorsManagerPanel'
 import BBSSpecPanel from './components/BBSSpecPanel'
@@ -49,6 +51,8 @@ export default function App() {
         <StaircasePanel />
         <SlabPanel />
         <FoundationPanel />
+        <CalibrationModal />
+        <PDFPagePickerModal />
         <FloorsManagerPanel />
         <BBSSpecPanel />
         <PlumbingFixturePanel />

@@ -104,6 +104,8 @@ export default function SlabPanel() {
   const assignRoomToSlab = useStore(s => s.assignRoomToSlab)
   const setSlabReinforcementSpec = useStore(s => s.setSlabReinforcementSpec)
   const applyReinforcementSpecToMatching = useStore(s => s.applyReinforcementSpecToMatching)
+  const setSlabRole = useStore(s => s.setSlabRole)
+  const resetSlabRoleToAuto = useStore(s => s.resetSlabRoleToAuto)
   const projectSettings = useStore(s => s.projectSettings)
 
   const open = activeTool === 'slabs'
@@ -249,19 +251,49 @@ export default function SlabPanel() {
                 )
               })()}
 
-              {/* Role badge — Fix 3 */}
-              {slab.role && (
-                <div
-                  style={{
-                    fontSize: 'var(--text-xs)',
-                    color: 'var(--color-text-muted)',
-                    marginBottom: 'var(--space-1)',
-                  }}
-                >
-                  Role:{' '}
-                  <strong style={{ color: 'var(--color-text-secondary)' }}>{slab.role}</strong>
+              {/* Role picker — Fix 3 + Phase 4 Tier-2 ADD 1 (roleSource provenance) */}
+              <div style={{ marginBottom: 'var(--space-2)' }}>
+                <div style={inlineRow}>
+                  <label style={labelStyle}>Role</label>
+                  <select
+                    style={selectStyle}
+                    value={slab.role ?? ''}
+                    onKeyDown={e => e.stopPropagation()}
+                    onChange={e => setSlabRole(slab.id, e.target.value)}
+                  >
+                    <option value="ROOF">ROOF</option>
+                    <option value="FLOOR">FLOOR</option>
+                    <option value="SUNKEN">SUNKEN</option>
+                    <option value="STAIR_LANDING">STAIR_LANDING</option>
+                  </select>
+                  <span
+                    style={{
+                      ...chip,
+                      background: slab.roleSource === 'MANUAL'
+                        ? 'var(--color-warning-bg)'
+                        : 'var(--color-bg-muted)',
+                      color: slab.roleSource === 'MANUAL'
+                        ? 'var(--color-warning)'
+                        : 'var(--color-text-muted)',
+                    }}
+                    title={slab.roleSource === 'MANUAL'
+                      ? 'Role set manually — re-derivation will skip this slab'
+                      : 'Role auto-derived from floor stack position'}
+                  >
+                    {slab.roleSource ?? 'AUTO'}
+                  </span>
+                  {slab.roleSource === 'MANUAL' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => resetSlabRoleToAuto(slab.id)}
+                      title="Re-derive role from floor stack position"
+                    >
+                      Reset to auto
+                    </Button>
+                  )}
                 </div>
-              )}
+              </div>
 
               {slab.roomIds.length > 0 && (
                 <div style={{ marginTop: 'var(--space-1)' }}>

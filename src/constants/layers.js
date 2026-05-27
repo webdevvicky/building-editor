@@ -1,9 +1,14 @@
 export const DEFAULT_LAYER_VISIBILITY = Object.freeze({
+  // ---------- Underlay (PDF/image background) ----------
+  underlay:   true,  // Phase 4 Tier-2 Steps 16-17 — hidden when no underlay is loaded.
+
   // ---------- Structural ----------
   walls:      true,
   columns:    true,
   beams:      true,
   stamps:     true,
+  slabs:      false,  // Phase 4 Tier-2 Item 29 — off by default (plan-view
+                      //   clutter); engineers toggle on for QA / clash review.
   roomFills:  true,
   roomLabels: true,
   nodes:      true,

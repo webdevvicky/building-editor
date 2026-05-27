@@ -4,7 +4,12 @@ import {
   listProjects, createProject, openProject, renameProject, deleteProject,
   getCurrentProjectId, setCurrentProjectId, subscribe,
 } from '../projects/manager'
+import {
+  listTemplates as listTemplatesApi, deleteTemplate, renameTemplate,
+  createSnapshotFromTemplate,
+} from '../projects/templates'
 import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 
@@ -93,6 +98,19 @@ export default function ProjectsPanel() {
   const projects  = useManagerProjects()
   const currentId = useCurrentProjectId()
 
+  // Area 2C Step 9 — Templates tab. Async-fetched list (templates live in
+  // IDB, not in the manager's sync cache). Refresh on tab open + after
+  // every CRUD action via _templatesRev bump.
+  const [tab, setTab] = useState('projects')
+  const [templates, setTemplates] = useState([])
+  const [templatesRev, setTemplatesRev] = useState(0)
+  useEffect(() => {
+    if (tab !== 'templates') return
+    let cancelled = false
+    listTemplatesApi().then(list => { if (!cancelled) setTemplates(list) })
+    return () => { cancelled = true }
+  }, [tab, templatesRev])
+
   // On mount: if no current project id is set, force the modal open.
   const [forceOpen, setForceOpen] = useState(false)
   useEffect(() => {
@@ -146,6 +164,41 @@ export default function ProjectsPanel() {
     deleteProject(id)
   }
 
+  // Area 2C Step 9 — template actions.
+  async function handleUseTemplate(tmpl) {
+    const projectName = await dialog.prompt('Name the new project', {
+      title: `Use template "${tmpl.name}"`,
+      defaultValue: tmpl.name,
+    })
+    if (!projectName || !projectName.trim()) return
+    const snap = await createSnapshotFromTemplate(tmpl.id)
+    if (!snap) { toast.error('Template not found'); return }
+    const rec = createProject(projectName.trim(), 'Residential')
+    if (!rec) return
+    // openProject returns the empty-shape blank; we then loadProject with
+    // the rewritten template snapshot so the new project starts populated.
+    openProject(rec.id)
+    loadProject(snap)
+    setCurrentProjectId(rec.id)
+    setForceOpen(false)
+    if (activeTool === 'projects') setTool('select')
+    toast.success(`Created "${projectName}" from template`)
+  }
+  async function handleRenameTemplate(tmpl) {
+    const next = await dialog.prompt('New template name', { title: 'Rename template', defaultValue: tmpl.name })
+    if (!next || !next.trim()) return
+    await renameTemplate(tmpl.id, next.trim())
+    setTemplatesRev(v => v + 1)
+  }
+  async function handleDeleteTemplate(tmpl) {
+    const ok = await dialog.confirm(`Delete template "${tmpl.name}"? This can't be undone.`, {
+      title: 'Delete template', variant: 'danger', confirmLabel: 'Delete',
+    })
+    if (!ok) return
+    await deleteTemplate(tmpl.id)
+    setTemplatesRev(v => v + 1)
+  }
+
   const recent      = projects.slice(0, 5)
   const canDismiss  = !!getCurrentProjectId()
 
@@ -156,6 +209,54 @@ export default function ProjectsPanel() {
       title="Projects"
       width={560}
     >
+      {/* Area 2C Step 9 — Tabs row */}
+      <div style={{ display: 'flex', gap: 'var(--space-2)', borderBottom: '1px solid var(--color-border)', marginBottom: 'var(--space-3)' }}>
+        <button
+          onClick={() => setTab('projects')}
+          style={{
+            padding: 'var(--space-2) var(--space-3)',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: tab === 'projects' ? '2px solid var(--color-primary)' : '2px solid transparent',
+            color: tab === 'projects' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: 'var(--weight-medium)',
+            cursor: 'pointer',
+          }}>Recent projects</button>
+        <button
+          onClick={() => setTab('templates')}
+          style={{
+            padding: 'var(--space-2) var(--space-3)',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: tab === 'templates' ? '2px solid var(--color-primary)' : '2px solid transparent',
+            color: tab === 'templates' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+            fontWeight: 'var(--weight-medium)',
+            cursor: 'pointer',
+          }}>Templates</button>
+      </div>
+
+      {tab === 'templates' ? (
+        templates.length === 0 ? (
+          <div style={{ color: 'var(--color-text-muted)', padding: 'var(--space-3) var(--space-1)' }}>
+            No templates saved yet. Open a project and use “Save as template” in Project Settings to create one.
+          </div>
+        ) : (
+          <div>
+            {templates.map(t => (
+              <div key={t.id} style={rowStyle}>
+                <div style={nameStyle}>
+                  {t.name}
+                  <div style={metaStyle}>{t.kind} · saved {formatDate(t.createdAt)}</div>
+                </div>
+                <Button variant="primary"   size="sm" onClick={() => handleUseTemplate(t)}>Use</Button>
+                <Button variant="secondary" size="sm" onClick={() => handleRenameTemplate(t)}>Rename</Button>
+                <Button variant="danger"    size="sm" onClick={() => handleDeleteTemplate(t)}>Delete</Button>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+      <>
       {recent.length === 0 ? (
         <div
           style={{
@@ -219,6 +320,8 @@ export default function ProjectsPanel() {
         >
           Open or create a project to continue.
         </div>
+      )}
+      </>
       )}
     </Modal>
   )

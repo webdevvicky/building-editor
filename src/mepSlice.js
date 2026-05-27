@@ -81,6 +81,8 @@ export const createMepSlice = (set, get, uid) => ({
       hasWaterInlet: null,         // catalog default applied by panel/quantity engine
       hasDrainOutlet: null,
       hasHotWaterInlet: null,
+      // Phase 4 Tier-2 Item 26: per-instance flow override (null = catalog default).
+      flowLpmOverride: null,
     }
     get()._save()
     set(s => ({ plumbingFixtures: { ...s.plumbingFixtures, [fx.id]: fx } }))
@@ -117,6 +119,8 @@ export const createMepSlice = (set, get, uid) => ({
       loadW: null,                 // catalog default
       circuitId: null,             // routing engine assigns
       mountHeightFt: null,         // catalog default
+      // Phase 4 Tier-2 Item 26: per-instance wire-gauge override (null = catalog default).
+      wireGaugeMm2Override: null,
     }
     get()._save()
     set(s => ({ electricalPoints: { ...s.electricalPoints, [pt.id]: pt } }))
@@ -153,6 +157,9 @@ export const createMepSlice = (set, get, uid) => ({
       capacityTons: null,
       pairedOutdoorId: null,       // indoor units link to their outdoor pair
       pairedIndoorId: null,
+      // Phase 4 Tier-2 Item 24 + Item 26: provenance + override defaults.
+      pairingSource: null,
+      refrigerantPipeOdInOverride: null,
     }
     get()._save()
     set(s => ({ hvacUnits: { ...s.hvacUnits, [u.id]: u } }))
@@ -176,6 +183,61 @@ export const createMepSlice = (set, get, uid) => ({
     })
   },
   selectHvacUnit(id) { set({ selectedHvacUnitId: id }) },
+
+  // Phase 4 Tier-2 Item 24: bidirectional HVAC pairing setter.
+  // unitId is the unit whose picker the user touched; partnerId is the
+  // chosen counterpart (null to unpair). Source defaults to 'MANUAL'
+  // — auto-pair handlers pass 'AUTO' explicitly.
+  //
+  // Handles:
+  //   - clearing any prior pairing on BOTH ends (no orphan refs)
+  //   - correct field choice per side (indoor → pairedOutdoorId, outdoor → pairedIndoorId)
+  //   - source mirrored on both ends
+  setHvacPairing(unitId, partnerId, source = 'MANUAL') {
+    const state = get()
+    const unit = state.hvacUnits[unitId]
+    if (!unit) return
+    const indoor = unit.type === 'AC_INDOOR_UNIT' || unit.type === 'DUCTED_AC_INDOOR'
+    const outdoor = unit.type === 'AC_OUTDOOR_UNIT' || unit.type === 'DUCTED_AC_OUTDOOR'
+    if (!indoor && !outdoor) return
+    if (partnerId !== null) {
+      const partner = state.hvacUnits[partnerId]
+      if (!partner) return
+      // Side check — pairing must be indoor↔outdoor.
+      const partnerIndoor = partner.type === 'AC_INDOOR_UNIT' || partner.type === 'DUCTED_AC_INDOOR'
+      const partnerOutdoor = partner.type === 'AC_OUTDOOR_UNIT' || partner.type === 'DUCTED_AC_OUTDOOR'
+      if (indoor && !partnerOutdoor) return
+      if (outdoor && !partnerIndoor) return
+    }
+    get()._save()
+    set(s => {
+      const next = { ...s.hvacUnits }
+      // 1. Clear any prior pairing on unit
+      const priorPartnerId = indoor ? unit.pairedOutdoorId : unit.pairedIndoorId
+      if (priorPartnerId && next[priorPartnerId]) {
+        const priorField = indoor ? 'pairedIndoorId' : 'pairedOutdoorId'
+        next[priorPartnerId] = { ...next[priorPartnerId], [priorField]: null, pairingSource: null }
+      }
+      // 2. Clear any prior pairing on new partner
+      if (partnerId && next[partnerId]) {
+        const partner = next[partnerId]
+        const partnerIndoor = partner.type === 'AC_INDOOR_UNIT' || partner.type === 'DUCTED_AC_INDOOR'
+        const partnerPriorId = partnerIndoor ? partner.pairedOutdoorId : partner.pairedIndoorId
+        if (partnerPriorId && partnerPriorId !== unitId && next[partnerPriorId]) {
+          const ppField = partnerIndoor ? 'pairedIndoorId' : 'pairedOutdoorId'
+          next[partnerPriorId] = { ...next[partnerPriorId], [ppField]: null, pairingSource: null }
+        }
+      }
+      // 3. Set new pairing
+      const unitField = indoor ? 'pairedOutdoorId' : 'pairedIndoorId'
+      const partnerField = indoor ? 'pairedIndoorId' : 'pairedOutdoorId'
+      next[unitId] = { ...next[unitId], [unitField]: partnerId, pairingSource: partnerId ? source : null }
+      if (partnerId) {
+        next[partnerId] = { ...next[partnerId], [partnerField]: unitId, pairingSource: source }
+      }
+      return { hvacUnits: next }
+    })
+  },
 
   // ── Fire devices ─────────────────────────────────────────────────────────
 
@@ -373,6 +435,16 @@ export const createMepSlice = (set, get, uid) => ({
         ifcType: null,
         classificationCode: null,
         meta: null,
+        // Phase 4 Tier-2 Item 24: HVAC pairingSource provenance. Harmless
+        // on other MEP collections (their schemas don't declare the field
+        // so validateEntity ignores it).
+        pairingSource: null,
+        // Phase 4 Tier-2 Item 26 + ADD 2: per-instance MEP overrides.
+        // null = catalog default. Discipline-specific; harmless cross-
+        // discipline since validateEntity walks schema.fields only.
+        flowLpmOverride: null,
+        wireGaugeMm2Override: null,
+        refrigerantPipeOdInOverride: null,
         ...e,
       }
       if (!out[id].ifcGlobalId) out[id].ifcGlobalId = uidIfc()

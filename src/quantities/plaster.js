@@ -52,6 +52,11 @@ import {
   PLASTER_SYSTEMS, PLASTER_KIND, DEFAULT_PLASTER_SYSTEM_ID, FT2_TO_M2,
 } from '../specs/plasterSystems'
 import { isExternalWall } from '../topology/walls.js'
+// Area 1 — dimension-mode kernel. PASS 1 iterates inset edges per room
+// (Correction 1 — EffectiveRoomEdge identity), so centerline mode produces
+// byte-identical numbers to today while clear_internal mode shrinks each
+// inner face by the perpendicular walls' half-thicknesses at each end.
+import { getRoomGeometry } from '../topology/rooms.js'
 import { getColumnPerimeterFt } from '../lib/columnShapes.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
 import { safeR2 as r2 } from '../lib/numbers.js'
@@ -137,28 +142,44 @@ export function computePlasterQuantities(state) {
 
     const wallContributions = []
     let roomWallSum = 0
-    for (const wid of (room.wallIds ?? [])) {
-      const w = walls[wid]
-      if (!w) continue
-      if (w.isVirtual) { if (!excluded.virtualWalls.includes(wid)) excluded.virtualWalls.push(wid); continue }
-      if (w.isPlot)    { if (!excluded.plotWalls.includes(wid))    excluded.plotWalls.push(wid);    continue }
-      const faceArea = state.getWallArea(wid)
-      const openingDeduction = (w.openings ?? []).reduce(
-        (s, o) => s + (o.width / 12) * (o.height / 12), 0
-      )
-      const isExt = isExternalWall(state, wid)
-      wallContributions.push({
-        wallId: wid,
-        wallType: isExt ? 'EXTERNAL' : 'PARTITION',
-        faceAreaFt2: r2(faceArea),
-        openingDeductionFt2: r2(openingDeduction),
-      })
-      roomWallSum += faceArea
-      if (isExt) totalsByFace.externalInnerFaces += faceArea
-      else       totalsByFace.partitionInnerFaces += faceArea
+    // Inner-face wall area via getRoomGeometry insetEdges (Correction 1 +
+    // Option A from plan): edge.lengthFt × wallHeightFt − openings,
+    // rounded the same way state.getWallArea rounds (so centerline-mode
+    // output is byte-identical to today's state.getWallArea).
+    const geom = getRoomGeometry(state, roomId)
+    if (geom) {
+      for (const edge of geom.insetEdges) {
+        const w = walls[edge.wallId]
+        if (!w) continue
+        if (w.isVirtual) { if (!excluded.virtualWalls.includes(edge.wallId)) excluded.virtualWalls.push(edge.wallId); continue }
+        if (w.isPlot)    { if (!excluded.plotWalls.includes(edge.wallId))    excluded.plotWalls.push(edge.wallId);    continue }
+        const heightFt = (w.height ?? 120) / 12
+        const grossArea = edge.lengthFt * heightFt
+        const openingDeduction = (w.openings ?? []).reduce(
+          (s, o) => s + (o.width / 12) * (o.height / 12), 0
+        )
+        const faceArea = r2(Math.max(0, grossArea - openingDeduction))
+        const isExt = isExternalWall(state, edge.wallId)
+        wallContributions.push({
+          wallId: edge.wallId,
+          wallType: isExt ? 'EXTERNAL' : 'PARTITION',
+          effectiveLengthFt:   edge.lengthFt,
+          insetDistanceIn:     edge.insetDistanceIn,
+          faceAreaFt2:         faceArea,
+          openingDeductionFt2: r2(openingDeduction),
+        })
+        roomWallSum += faceArea
+        if (isExt) totalsByFace.externalInnerFaces += faceArea
+        else       totalsByFace.partitionInnerFaces += faceArea
+      }
     }
 
-    const ceilingFt2 = room.finishes?.ceilingPlaster ? state.getRoomArea(roomId) : 0
+    // Ceiling uses geom.area when available (effective when mode='clear_internal',
+    // centerline-identical otherwise). Falls back to state.getRoomArea for
+    // structurally invalid rooms (shouldn't happen — validIds filter).
+    const ceilingFt2 = room.finishes?.ceilingPlaster
+      ? (geom?.area ?? state.getRoomArea(roomId))
+      : 0
     bucket.internalWallsAreaFt2 += roomWallSum
     bucket.ceilingAreaFt2       += ceilingFt2
     totalsByFace.ceilingFaces   += ceilingFt2

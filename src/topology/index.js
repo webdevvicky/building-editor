@@ -21,6 +21,11 @@ export {
   getValidRoomIds, sumRoomAreas,
   getRoomCentroid, getRoofPolygon, getShaftPolygons,
   getRoomPerimeterFt, getLongestPolygonEdgeFt,
+  // Dimension-mode kernel — Area 1 (Option C). Single entry point per
+  // Correction 9. EffectiveRoomEdge primitive per Correction 1.
+  // getEffectiveWallLengthFt for canvas labels (Correction 2).
+  getRoomGeometry, getRoomPolygonInsetEdges, resolveDimensionMode,
+  getEffectiveWallLengthFt,
 } from './rooms.js'
 
 // Floor scope

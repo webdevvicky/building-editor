@@ -7,6 +7,8 @@ export const ROOM_ELECTRICAL_DEFAULTS = Object.freeze({
     Object.freeze({ type: 'FAN', n: 1 }),
     Object.freeze({ type: 'SOCKET_5A', n: 4 }),
     Object.freeze({ type: 'AC_INDOOR_POINT', n: 1 }),
+    // Smart-defaults spec — typical Indian residential bedroom has a TV point.
+    Object.freeze({ type: 'TV_POINT', n: 1 }),
   ]),
   MASTER_BEDROOM: Object.freeze([
     Object.freeze({ type: 'LIGHT', n: 2 }),
@@ -27,14 +29,16 @@ export const ROOM_ELECTRICAL_DEFAULTS = Object.freeze({
   KITCHEN: Object.freeze([
     Object.freeze({ type: 'LIGHT', n: 1 }),
     Object.freeze({ type: 'FAN', n: 1 }),
+    Object.freeze({ type: 'EXHAUST_FAN', n: 1 }),   // Smart-defaults spec
     Object.freeze({ type: 'SOCKET_15A', n: 6 }),
     Object.freeze({ type: 'GEYSER_POINT', n: 1 }),
   ]),
   LIVING: Object.freeze([
-    Object.freeze({ type: 'LIGHT', n: 2 }),
+    Object.freeze({ type: 'LIGHT', n: 4 }),         // Smart-defaults spec (was 2)
     Object.freeze({ type: 'FAN', n: 2 }),
     Object.freeze({ type: 'SOCKET_5A', n: 6 }),
     Object.freeze({ type: 'TV_POINT', n: 1 }),
+    Object.freeze({ type: 'AC_INDOOR_POINT', n: 1 }), // Smart-defaults spec
   ]),
   DINING: Object.freeze([
     Object.freeze({ type: 'LIGHT', n: 1 }),

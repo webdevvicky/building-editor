@@ -74,6 +74,10 @@ export default function ElectricalOverlay() {
   const selectedPointId   = useStore(s => s.selectedElectricalPointId)
   const selectElectricalPoint = useStore(s => s.selectElectricalPoint)
   const activeTool        = useStore(s => s.activeTool)
+  // Phase 4 Tier-2 ADD 3: circuit-highlight selection from the namespaced
+  // selection state. Points + routes whose circuitId matches get the
+  // primary stroke + bumped width.
+  const highlightedCircuitId = useStore(s => s.selection?.electricalCircuitId ?? null)
   // Subscribe to keep overlay reactive when engines populate routes.
   const getElectricalRoutes = useStore(s => s.getElectricalRoutes)
 
@@ -105,9 +109,13 @@ export default function ElectricalOverlay() {
           .map(p => `${sx(p.x)},${sy(p.y)}`)
           .join(' ')
         if (!pts) return null
-        const stroke = routeStrokeVar(route.kind)
+        const matchesCircuit = highlightedCircuitId && route.circuitId === highlightedCircuitId
+        const stroke = matchesCircuit ? 'var(--color-primary)' : routeStrokeVar(route.kind)
         const onActiveFloor = !multiFloor || (route.floorId ?? 'F1') === currentFloorId
-        const opacity = onActiveFloor ? 0.9 : 0.15
+        // Dim non-matching routes when a circuit is highlighted so the
+        // active circuit visually pops.
+        const dimmed = highlightedCircuitId && !matchesCircuit
+        const opacity = onActiveFloor ? (dimmed ? 0.25 : 0.9) : 0.15
         const isSubmain = route.kind === 'ELECTRICAL_SUBMAIN'
         return (
           <g key={route.id ?? `eroute-${pts.length}-${route.kind}`} style={{ pointerEvents: 'none' }}>
@@ -126,7 +134,7 @@ export default function ElectricalOverlay() {
               points={pts}
               fill="none"
               stroke={stroke}
-              strokeWidth={isSubmain ? 1.5 : 1}
+              strokeWidth={matchesCircuit ? (isSubmain ? 2.5 : 2) : (isSubmain ? 1.5 : 1)}
               strokeLinecap="round"
               strokeLinejoin="round"
               opacity={opacity}
@@ -139,7 +147,12 @@ export default function ElectricalOverlay() {
       {showPoints && Object.values(electricalPoints).map((point) => {
         const catalog = getPointType(point.type)
         const isSel   = point.id === selectedPointId
-        const fStyle  = entityStyle(point)
+        const matchesCircuit = highlightedCircuitId && point.circuitId === highlightedCircuitId
+        const dimmed = highlightedCircuitId && !matchesCircuit
+        const fStyleRaw = entityStyle(point)
+        const fStyle = dimmed
+          ? { opacity: (fStyleRaw.opacity ?? 1) * 0.3, pointerEvents: fStyleRaw.pointerEvents }
+          : fStyleRaw
         const cx = sx(point.x)
         const cy = sy(point.y)
         const isDB = isDistributionBoard(point.type)
@@ -147,7 +160,9 @@ export default function ElectricalOverlay() {
 
         const interactive = activeTool === 'select' || activeTool === 'electrical'
 
-        const strokeColor = 'var(--color-electrical-wire)'
+        const strokeColor = matchesCircuit
+          ? 'var(--color-primary)'
+          : 'var(--color-electrical-wire)'
         const selStroke   = 'var(--color-primary)'
 
         return (

@@ -58,6 +58,16 @@ function getStampDimensionsFt(stamp) {
   return { wFt, hFt, dFt, perimeterFt: 2 * (wFt + hFt), footprintFt2: wFt * hFt }
 }
 
+// Area 2B — auto-name "Room N" where N = first unused integer starting at 1.
+function _autoRectRoomName(rooms) {
+  const taken = new Set(Object.values(rooms).map(r => r.name))
+  for (let i = 1; i < 10000; i++) {
+    const name = `Room ${i}`
+    if (!taken.has(name)) return name
+  }
+  return 'Room'
+}
+
 function removeOrphanNodes(nodes, walls) {
   const used = new Set()
   Object.values(walls).forEach(w => { used.add(w.n1); used.add(w.n2) })
@@ -87,6 +97,10 @@ export const useStore = create((set, get) => ({
 
   history: [],
   future:  [],
+  // Area 2B Correction 6 — batch flag for _runAtomically. Set true while a
+  // transactional batch is in flight so nested _save() calls collapse to a
+  // single history frame.
+  _inBatch: false,
 
   activeTool:      'draw',
   drawVirtual:     false,
@@ -101,6 +115,13 @@ export const useStore = create((set, get) => ({
   selectedOpening: null,
   pendingWallIds:  [],
   draftOpening:    null,
+
+  // Phase 4 Tier-2 ADD 3: namespaced cross-canvas selection state.
+  // Lives outside the legacy `selectedX` flat fields. New "highlight a
+  // collection" features (electrical circuit, plumbing zone, HVAC
+  // refrigerant loop, riser trace) all live here. View-slice only —
+  // never history-tracked, never persisted.
+  selection: {},
 
   // Default display unit. 'ft-in' targets Indian residential construction
   // (engineers think 10'-6" not 10.5 ft). Existing projects whose autosave
@@ -120,8 +141,19 @@ export const useStore = create((set, get) => ({
   // edit; Ctrl+Z should not unwind rate keystrokes).
   ratesByKey: {},
   setRate(key, val) {
-    set(s => ({ ratesByKey: { ...s.ratesByKey, [key]: val } }))
+    set(s => ({
+      ratesByKey: { ...s.ratesByKey, [key]: val },
+      ratesRevision: (s.ratesRevision ?? 0) + 1,
+    }))
   },
+
+  // Phase 4 Tier-2 ADD 7: revision counters for downstream memoization.
+  // boqRevision bumps on any structural mutation (via _save). ratesRevision
+  // bumps on any setRate call. Consumers (RoomDetailPanel materials, future
+  // per-room cost dashboards) key useMemo on these so getBoqLines() only
+  // recomputes when its real inputs changed.
+  boqRevision: 0,
+  ratesRevision: 0,
 
   // Ring buffer of action-emitted validation events (Phase 1.7+ floor topology).
   // Store actions that REJECT an invalid operation (e.g., splitWall on an
@@ -133,6 +165,14 @@ export const useStore = create((set, get) => ({
   // ── History ───────────────────────────────────────────────────────────
 
   _save() {
+    // Area 2B — Correction 6. When _runAtomically opened a batch, the
+    // pre-batch snapshot is already on history; suppress nested _save calls
+    // so the whole batch undoes as ONE frame.
+    if (get()._inBatch) {
+      // Still bump boqRevision so downstream memos see the in-flight changes.
+      set(s => ({ boqRevision: (s.boqRevision ?? 0) + 1 }))
+      return
+    }
     const {
       nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
       plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
@@ -143,7 +183,24 @@ export const useStore = create((set, get) => ({
         plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
       }],
       future: [],
+      // ADD 7: any structural mutation invalidates BOQ memo subscribers.
+      boqRevision: (s.boqRevision ?? 0) + 1,
     }))
+  },
+
+  // Area 2B — Correction 6. Wraps a multi-action batch so it occupies a
+  // SINGLE history frame. Use for any operation that calls multiple
+  // _save-emitting actions (addRectangleRoom, multi-import, etc.).
+  // Undo restores the pre-batch state atomically.
+  _runAtomically(fn) {
+    if (get()._inBatch) return fn()  // re-entrancy: caller already owns the batch
+    get()._save()
+    set({ _inBatch: true })
+    try {
+      return fn()
+    } finally {
+      set({ _inBatch: false })
+    }
   },
 
   undo() {
@@ -332,6 +389,60 @@ export const useStore = create((set, get) => ({
     }))
   },
 
+  // Area 2B — atomic rectangle-room creation. ONE history frame for nodes
+  // + walls + room (+ auto-MEP if caller wraps an outer _runAtomically).
+  // x1/y1/x2/y2 are world inches (any corner ordering accepted).
+  // opts: { name?: string, type?: string }. Returns:
+  //   { roomId, wallIds } on success
+  //   { error: 'too-small' | 'node-snap-failed' | 'wall-create-failed' | <saveRoom error> }
+  addRectangleRoom(x1, y1, x2, y2, opts = {}) {
+    return get()._runAtomically(() => {
+      const minX = Math.min(x1, x2), maxX = Math.max(x1, x2)
+      const minY = Math.min(y1, y2), maxY = Math.max(y1, y2)
+      if (maxX - minX < GRID_IN || maxY - minY < GRID_IN) {
+        return { error: 'too-small' }
+      }
+      // 4 corners CCW from SW so winding matches getRoomPolygon convention.
+      const sw = get().getOrCreateNode(minX, minY)
+      const se = get().getOrCreateNode(maxX, minY)
+      const ne = get().getOrCreateNode(maxX, maxY)
+      const nw = get().getOrCreateNode(minX, maxY)
+      if (!sw || !se || !ne || !nw) return { error: 'node-snap-failed' }
+
+      // addWall is idempotent on dup geometry (returns early). After all
+      // four calls, look up the wallId between each consecutive pair —
+      // reuses existing walls when corners snapped to existing nodes.
+      get().addWall(sw, se)
+      get().addWall(se, ne)
+      get().addWall(ne, nw)
+      get().addWall(nw, sw)
+      const pairs = [[sw, se], [se, ne], [ne, nw], [nw, sw]]
+      const wallIds = pairs.map(([a, b]) => {
+        const w = Object.values(get().walls).find(
+          x => (x.n1 === a && x.n2 === b) || (x.n1 === b && x.n2 === a)
+        )
+        return w?.id ?? null
+      })
+      if (wallIds.some(id => !id)) return { error: 'wall-create-failed' }
+
+      // saveRoom consumes pendingWallIds. Stage them, save, then clear.
+      set({ pendingWallIds: wallIds })
+      const type = ROOM_PRESETS[opts.type] ? opts.type : 'OTHER'
+      const name = (opts.name && String(opts.name).trim())
+                   || _autoRectRoomName(get().rooms)
+      const result = get().saveRoom(name, type)
+      if (result?.error) return result
+
+      // Recover the new room id (most-recent room on current floor with this name).
+      const cur = get().currentFloorId ?? DEFAULT_FLOOR_ID
+      const created = Object.values(get().rooms)
+        .filter(r => (r.floorId ?? DEFAULT_FLOOR_ID) === cur && r.name === name)
+        .at(-1)
+      if (!created) return { error: 'save-room-failed' }
+      return { roomId: created.id, wallIds }
+    })
+  },
+
   deleteWall(wallId) {
     get()._save()
     set(s => {
@@ -357,6 +468,14 @@ export const useStore = create((set, get) => ({
     set({ selectedWallId: wallId, selectedWallIds: [], selectedStampId: null, selectedRoomId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null })
   },
   selectRoom(roomId) { set({ selectedRoomId: roomId, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, selectedOpening: null, draftOpening: null }) },
+
+  // ADD 3: shallow-merge into state.selection. Pass an object with the
+  // namespace field to set (`electricalCircuitId`, `plumbingZoneId`,
+  // `hvacRefrigerantLoopId`, `riserTraceId`, etc.). Pass `null` for a
+  // field to clear it. Pass `{}` to clear all.
+  setSelection(partial) {
+    set(s => ({ selection: { ...s.selection, ...partial } }))
+  },
 
   // Select a single opening within its parent wall. Pass (null, null) to clear.
   // Clears every other entity selection so panels remain mutually exclusive.
@@ -1122,6 +1241,8 @@ export const useStore = create((set, get) => ({
 
     // ── Migrate slabs ──
     // Fix 3: populate classification/role on saved slabs that lack it.
+    // Phase 4 Tier-2 ADD 1: legacy slabs without an explicit roleSource
+    // default to 'AUTO' (conservative — re-derivation reproduces the value).
     const migratedSlabs = {}
     for (const [id, slab] of Object.entries(data.slabs ?? {})) {
       const role = slab.role ?? slab.classification ?? (slab.type === 'SUNKEN' ? 'SUNKEN' : 'ROOF')
@@ -1129,6 +1250,7 @@ export const useStore = create((set, get) => ({
         floorId:             DEFAULT_FLOOR_ID,
         reinforcementSpecId: null,
         meta:                null,
+        roleSource:          'AUTO',
         ...slab,
         classification: role,
         role,
@@ -1181,6 +1303,11 @@ export const useStore = create((set, get) => ({
       currentFloorId: DEFAULT_FLOOR_ID,
       // Structural state — migrate then load.
       projectSettings: (() => {
+        // Detect "new project" path: caller passed _emptyProjectData() with
+        // null projectSettings. These projects opt into 'clear_internal'
+        // (Area 1 — Option C); legacy saves keep whatever their saved
+        // dimensionMode is (typically absent → 'centerline' via fallback).
+        const _isNewProject = data.projectSettings == null
         const ps = data.projectSettings ?? DEFAULT_PROJECT_SETTINGS
         // Layer 4 migration: resolve footingTypeId → inline footing dims on column types.
         // Old format: ct.footingTypeId = 'F1' with separate ps.footingTypes array.
@@ -1201,12 +1328,22 @@ export const useStore = create((set, get) => ({
         // Plaster split (v2): inject defaultExternalPlasterSystemId for saves without it.
         const defaultExternalPlasterSystemId = psRest.defaultExternalPlasterSystemId ?? DEFAULT_PROJECT_SETTINGS.defaultExternalPlasterSystemId
         // Stage 0 T1 migration: synthesize floors[] from legacy heights if absent.
-        const floors = psRest.floors ?? [
+        const rawFloors = psRest.floors ?? [
           { id: DEFAULT_FLOOR_ID, label: 'Floor 1', sequence: 0,
             plinthHeightFt: psRest.heights?.plinthHeightFt ?? 1.5,
             floorHeightFt:  psRest.heights?.floorHeightFt  ?? 10,
             meta: null },
         ]
+        // Per-floor underlay (Fix 3). Legacy saves stored a single
+        // projectSettings.underlay; migrate it onto the first floor and drop
+        // the legacy field. Floors without an underlay default to null.
+        const legacyUnderlay = psRest.underlay ?? null
+        const floors = rawFloors.map((f, i) => ({
+          ...f,
+          underlay: f.underlay ?? (i === 0 ? legacyUnderlay : null),
+        }))
+        // Strip the legacy field from psRest so spread doesn't reintroduce it.
+        delete psRest.underlay
         // Rev 2 — inject tile / kitchen counter / grills defaults if absent.
         // Deep-merge dadoHeightsFt so saves that defined a partial map
         // (e.g. only TOILET) still pick up the other defaults.
@@ -1222,11 +1359,18 @@ export const useStore = create((set, get) => ({
         })()
         const kitchenCounter = psRest.kitchenCounter ?? DEFAULT_PROJECT_SETTINGS.kitchenCounter
         const grills         = { ...DEFAULT_PROJECT_SETTINGS.grills, ...(psRest.grills ?? {}) }
+        // Area 1 — Option C. New projects opt into 'clear_internal';
+        // loaded projects keep their saved dimensionMode (or stay legacy
+        // 'centerline' via DEFAULT_PROJECT_SETTINGS when unset on save).
+        const dimensionMode = _isNewProject
+          ? 'clear_internal'
+          : (psRest.dimensionMode ?? DEFAULT_PROJECT_SETTINGS.dimensionMode)
         return {
           ...psRest,
           columnTypes: migratedColumnTypes,
           rccSpecs, defaultPlasterSystemId, defaultExternalPlasterSystemId, floors,
           tileDefaults, kitchenCounter, grills,
+          dimensionMode,
         }
       })(),
       columns:     migratedColumns,

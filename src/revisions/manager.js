@@ -95,9 +95,14 @@ function pruneOverCap(list) {
 
 // ── public API ───────────────────────────────────────────────────────────────
 
+// Singleton empty array — keeps useSyncExternalStore happy when no
+// projectId is set (returning a fresh [] each call triggers React's
+// infinite-loop guard).
+const _EMPTY = Object.freeze([])
+
 // Returns newest-first array of revisions. Caches by projectId for stable refs.
 export function listRevisions(projectId) {
-  if (!projectId) return []
+  if (!projectId) return _EMPTY
   const cached = _cache.get(projectId)
   if (cached) return cached
   const all = readAll(projectId)

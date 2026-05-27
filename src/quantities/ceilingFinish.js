@@ -13,6 +13,8 @@ import {
   getCeilingFinishSystem,
   DEFAULT_CEILING_FINISH_SYSTEM_ID,
 } from '../specs/ceilingFinishSystems.js'
+// Area 1 — ceiling area through getRoomGeometry honors dimensionMode.
+import { getRoomGeometry } from '../topology/rooms.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
 import { safeR2 as r2 } from '../lib/numbers.js'
 
@@ -56,7 +58,8 @@ export function computeCeilingFinishQuantities(state) {
     if (sysId === 'NONE') continue
     const sys = getCeilingFinishSystem(sysId)
     if (!sys || (sys.materials?.length ?? 0) === 0) continue
-    const areaSft = state.getRoomArea?.(rid) ?? 0
+    const geom = getRoomGeometry(state, rid)
+    const areaSft = geom?.area ?? state.getRoomArea?.(rid) ?? 0
     if (areaSft <= 0) continue
 
     if (!bySystem[sysId]) {

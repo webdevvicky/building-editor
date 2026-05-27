@@ -4,6 +4,15 @@ import { ROOM_TYPES, ROOM_TYPE_LABELS } from '../roomPresets'
 import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import { toast } from './ui/Toast'
+// Area 2D — Smart MEP defaults. When autoMepDefaultsEnabled is true,
+// suggest*ForRoom outputs apply immediately after saveRoom; the legacy
+// MepDefaultsModal flow only fires when the setting is disabled.
+import { suggestPlumbingFixturesForRoom } from '../mep/plumbing/suggestions.js'
+import { suggestElectricalPointsForRoom } from '../mep/electrical/suggestions.js'
+import { suggestHvacUnitsForRoom }        from '../mep/hvac/suggestions.js'
+import { suggestFireDevicesForRoom }      from '../mep/fire/suggestions.js'
+import { suggestElvDevicesForRoom }       from '../mep/elv/suggestions.js'
 
 export default function RoomPanel() {
   const activeTool     = useStore(s => s.activeTool)
@@ -43,8 +52,7 @@ export default function RoomPanel() {
     if (result?.error) {
       setSaveError(result)
     } else {
-      // Find the room we just created so MepDefaultsModal can offer to apply
-      // IS-2065 plumbing defaults. saveRoom doesn't return the id, so we
+      // Find the room we just created. saveRoom doesn't return the id, so
       // pick the most recently-added room on the current floor that matches
       // the entered name (a unique enough proxy in normal use).
       const state = useStore.getState()
@@ -53,9 +61,35 @@ export default function RoomPanel() {
         .filter(r => (r.floorId ?? 'F1') === fId && r.name === trimmed)
         .at(-1)
       if (created) {
-        window.dispatchEvent(new CustomEvent('mep:room-created', {
-          detail: { roomId: created.id },
-        }))
+        const autoOn = state.projectSettings?.autoMepDefaultsEnabled !== false
+        if (autoOn) {
+          // Smart-defaults path: apply ALL discipline suggestions immediately.
+          const sug = {
+            plumbing:   suggestPlumbingFixturesForRoom(state, created.id),
+            electrical: suggestElectricalPointsForRoom(state, created.id),
+            hvac:       suggestHvacUnitsForRoom(state, created.id),
+            fire:       suggestFireDevicesForRoom(state, created.id),
+            elv:        suggestElvDevicesForRoom(state, created.id),
+          }
+          const added = state.applyRoomMepDefaults?.(created.id, sug) ?? {}
+          const count = (added.plumbing?.length ?? 0)
+                      + (added.electrical?.length ?? 0)
+                      + (added.hvac?.length ?? 0)
+                      + (added.fire?.length ?? 0)
+                      + (added.elv?.length ?? 0)
+          if (count > 0) {
+            toast.action(`Added ${count} MEP item${count === 1 ? '' : 's'} for ${created.name}. Adjust in panels.`, {
+              label: 'Undo',
+              onClick: () => useStore.getState().undo?.(),
+              duration: 6000,
+            })
+          }
+        } else {
+          // Legacy path: MepDefaultsModal opens for manual selection.
+          window.dispatchEvent(new CustomEvent('mep:room-created', {
+            detail: { roomId: created.id },
+          }))
+        }
       }
       setName('')
       setPendingType('OTHER')

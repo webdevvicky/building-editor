@@ -11,6 +11,11 @@ import { FULL_SENTINEL, _fullHeightFt } from '../quantities/tiles.js'
 // Phase 4 Commit A — catalogs + setters for the 9 new sections.
 import { listPaintSystems } from '../specs/paintSystems.js'
 import { listCeilingFinishSystems } from '../specs/ceilingFinishSystems.js'
+// Area 2C Step 9 — Save current project as a template.
+import { saveCurrentAsTemplate } from '../projects/templates.js'
+import { buildSnapshot } from '../projects/_snapshot.js'
+import { dialog } from './ui/Dialog'
+import { toast } from './ui/Toast'
 import {
   listHardwareSets, listHardwareSetsByAppliesTo,
   listWindowHardwareSets, listWindowHardwareSetsByAppliesTo,
@@ -157,6 +162,8 @@ export default function ProjectSettingsPanel() {
   const setWindowHardwareDefaults  = useStore(s => s.setWindowHardwareDefaults)
   const setProjectCosts            = useStore(s => s.setProjectCosts)
   const setMepSizingStrategy       = useStore(s => s.setMepSizingStrategy)
+  // Area 1 — dimension convention setter (Option C).
+  const setDimensionMode           = useStore(s => s.setDimensionMode)
   // The full-height sentinel resolution needs to read state.projectSettings
   // (floors + slabSettings) on every render — _fullHeightFt does that.
 
@@ -208,8 +215,77 @@ export default function ProjectSettingsPanel() {
       onClose={onClose}
       title="Project Settings"
       width={560}
-      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+      footer={
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              const name = await dialog.prompt('Template name', {
+                title: 'Save current project as template',
+                defaultValue: '',
+              })
+              if (!name || !name.trim()) return
+              const snap = buildSnapshot(useStore.getState())
+              try {
+                await saveCurrentAsTemplate(name.trim(), snap)
+                toast.success(`Saved template "${name.trim()}"`)
+              } catch (err) {
+                toast.error(`Couldn't save template: ${err?.message ?? err}`)
+              }
+            }}
+          >
+            Save as template
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </div>
+      }
     >
+      {/* 0a. Smart MEP defaults (Area 2D) */}
+      <div style={sectionHead}>Smart MEP Defaults</div>
+      <div style={fieldRow}>
+        <span style={lbl}>Auto-place MEP</span>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)' }}>
+          <input
+            type="checkbox"
+            checked={projectSettings?.autoMepDefaultsEnabled !== false}
+            onChange={e => setProjectSettings({ autoMepDefaultsEnabled: e.target.checked })}
+          />
+          <span>Enable</span>
+        </label>
+      </div>
+      <div style={hintText}>
+        When you add a new room, common MEP for the room type (plumbing
+        fixtures, electrical points, HVAC, fire, ELV) is placed
+        automatically. Disable to pick items manually via the defaults
+        modal that opens after saveRoom.
+      </div>
+
+      <div style={divider} />
+
+      {/* 0. Dimension convention (Area 1 — Option C) */}
+      <div style={sectionHead}>Dimension Convention</div>
+      <div style={fieldRow}>
+        <span style={lbl}>Mode</span>
+        <select
+          style={selectStyle}
+          value={projectSettings?.dimensionMode ?? 'centerline'}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setDimensionMode(e.target.value)}
+        >
+          <option value="centerline">Centerline (as-drawn)</option>
+          <option value="clear_internal">Clear internal (recommended)</option>
+        </select>
+      </div>
+      <div style={hintText}>
+        Centerline measures from wall centerlines (matches structural drawings;
+        over-quotes finishes by 7–14%). Clear internal measures inside the
+        room (matches site tape; Indian construction convention). Affects
+        floor area, perimeter, tile, paint, and ceiling quantities. New
+        projects default to clear internal.
+      </div>
+
+      <div style={divider} />
+
       {/* 1. Floor Heights */}
       <div style={sectionHead}>Floor Heights</div>
       <FtField

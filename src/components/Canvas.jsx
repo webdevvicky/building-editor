@@ -7,7 +7,14 @@ import {
 } from '../geometry'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
-import { getNearestWallToPoint } from '../topology/index.js'
+import { getNearestWallToPoint, getEffectiveWallLengthFt } from '../topology/index.js'
+// Area 2B — rect-room tool atomically creates walls + room + auto-MEP.
+import { suggestPlumbingFixturesForRoom } from '../mep/plumbing/suggestions.js'
+import { suggestElectricalPointsForRoom } from '../mep/electrical/suggestions.js'
+import { suggestHvacUnitsForRoom }        from '../mep/hvac/suggestions.js'
+import { suggestFireDevicesForRoom }      from '../mep/fire/suggestions.js'
+import { suggestElvDevicesForRoom }       from '../mep/elv/suggestions.js'
+import { toast } from './ui/Toast'
 import { formatLength } from '../lib/units.js'
 import FeetInchesInput from './ui/FeetInchesInput.jsx'
 import PlumbingOverlay from './canvas/PlumbingOverlay.jsx'
@@ -17,6 +24,7 @@ import FireOverlay from './canvas/FireOverlay.jsx'
 import ElvOverlay from './canvas/ElvOverlay.jsx'
 import ClashOverlay from './canvas/ClashOverlay.jsx'
 import './Canvas.css'
+import UnderlayLayer from './UnderlayLayer.jsx'
 
 // Phase 1 plumbing — fixed placeholder type until a floating type picker
 // lands. Plumbing tool drops one WC per click; user then changes the type
@@ -115,6 +123,7 @@ const ROOM_COLORS = ['#3498db','#e74c3c','#2ecc71','#f39c12','#9b59b6','#1abc9c'
 
 const TOOL_CURSOR = {
   draw:          'crosshair',
+  rect_room:     'crosshair',
   split:         'crosshair',
   select:        'default',
   room:          'default',
@@ -147,6 +156,16 @@ export default function Canvas() {
   const walls          = useStore(s => s.walls)
   const rooms          = useStore(s => s.rooms)
   const stamps         = useStore(s => s.stamps)
+  const slabs          = useStore(s => s.slabs)
+  // Phase 4 Tier-2 (Phase C — two-click calibration) — keep markers reactive.
+  const calibrationCapture = useStore(s => s.selection?.calibrationCapture ?? null)
+  // Per-floor underlay (Fix 3): the calibration overlay reads the current
+  // floor's underlay so two-click capture lines up with whatever plan is
+  // visible.
+  const calibrationUnderlay = useStore(s => {
+    const fid = s.currentFloorId
+    return s.projectSettings?.floors?.find(f => f.id === fid)?.underlay ?? null
+  })
   const isRoomValid    = useStore(s => s.isRoomValid)
   const getRoomPolygon = useStore(s => s.getRoomPolygon)
   const activeTool     = useStore(s => s.activeTool)
@@ -160,6 +179,8 @@ export default function Canvas() {
   const drawVirtual    = useStore(s => s.drawVirtual)
   const showDimensions = useStore(s => s.showDimensions)
   const unit           = useStore(s => s.unit)
+  // Area 1 — dimension mode drives wall-label length (Correction 2).
+  const dimensionMode  = useStore(s => s.projectSettings?.dimensionMode ?? 'centerline')
   const draftOpening   = useStore(s => s.draftOpening)
   const selectedRoomId = useStore(s => s.selectedRoomId)
 
@@ -217,6 +238,15 @@ export default function Canvas() {
   const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY } in world inches
   const [beamFromColId, setBeamFromColId] = useState(null)      // first column selected for beam
   const [beamLevelPicker, setBeamLevelPicker] = useState(null)  // { fromColId, toColId, screenX, screenY }
+  // Area 2A — wall chain drawing. drawChainOriginId tracks the FIRST node
+  // of the active chain. End triggers: double-click on SVG, Enter key
+  // (fired via window event from useKeyboardShortcuts), Esc (existing
+  // cancelAction path), or auto-close when the next click snaps to the
+  // chain origin (a closing wall is created, then chain ends).
+  const [drawChainOriginId, setDrawChainOriginId] = useState(null)
+  // Area 2B — rect_room tool first-corner stash (world inches). Cleared
+  // on Esc / tool change / second click.
+  const [rectFirstCorner, setRectFirstCorner] = useState(null)
 
   useEffect(() => { panRef.current  = pan  }, [pan])
   useEffect(() => { zoomRef.current = zoom }, [zoom])
@@ -299,6 +329,29 @@ export default function Canvas() {
 
   useEffect(() => { if (!drawStartId) setLockedLength('') }, [drawStartId])
 
+  // Area 2A — wall chain end via Enter key (dispatched from
+  // useKeyboardShortcuts as a window event to keep the hook decoupled
+  // from Canvas internals, mirroring the boq:toggle pattern).
+  useEffect(() => {
+    function endChain() {
+      setDrawStart(null)
+      setDrawChainOriginId(null)
+    }
+    window.addEventListener('canvas:end-chain', endChain)
+    return () => window.removeEventListener('canvas:end-chain', endChain)
+  }, [setDrawStart])
+
+  // Clear chain-origin whenever the user leaves the draw tool. Esc already
+  // calls setTool('select'); we just shadow the chain-origin state too.
+  useEffect(() => {
+    if (activeTool !== 'draw') setDrawChainOriginId(null)
+  }, [activeTool])
+
+  // Area 2B — clear rectFirstCorner when leaving rect_room tool.
+  useEffect(() => {
+    if (activeTool !== 'rect_room') setRectFirstCorner(null)
+  }, [activeTool])
+
   const startNode    = drawStartId ? nodes[drawStartId] : null
   // lockedLength may be '' (free draw) or a number-as-string ('10.5') or a
   // number — FeetInchesInput commits numbers, the legacy clear button
@@ -365,6 +418,32 @@ export default function Canvas() {
 
   function handleSVGClick(e) {
     if (isPanningRef.current || spaceDown) return
+
+    // Phase 4 Tier-2 (Phase C — Step 18 follow-on): two-click calibration.
+    // First click stores p1Px; second click stores p2Px and re-opens the
+    // CalibrationModal which now prompts for known length between them.
+    // Coords are converted to IMAGE PIXEL space per ADD 8.
+    if (activeTool === 'calibrate_underlay') {
+      const underlay = useStore.getState().getFloorUnderlay()
+      if (!underlay) return
+      const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), pan, zoom)
+      const ipp = underlay.calibration?.inchesPerPixel ?? 1
+      const hIn = (underlay.naturalSize?.hPx ?? 0) * ipp
+      const placement = underlay.placement ?? { xIn: 0, yIn: 0 }
+      // world → image pixel (Y-flip: image-top is world Y = placement.yIn + hIn).
+      const pxX = (x - placement.xIn) / ipp
+      const pxY = ((placement.yIn + hIn) - y) / ipp
+      const setSelection = useStore.getState().setSelection
+      const capture = useStore.getState().selection?.calibrationCapture ?? null
+      if (!capture || !capture.p1Px) {
+        setSelection({ calibrationCapture: { p1Px: { x: pxX, y: pxY }, p2Px: null } })
+      } else {
+        setSelection({
+          calibrationCapture: { p1Px: capture.p1Px, p2Px: { x: pxX, y: pxY } },
+        })
+      }
+      return
+    }
 
     if (activeTool === 'column') {
       const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
@@ -527,16 +606,80 @@ export default function Canvas() {
     }
 
     if (activeTool === 'select') { selectWall(null); selectStamp(null); selectColumn(null); return }
+
+    // Area 2B — rectangle-room tool. Two-click flow; atomic on second click.
+    if (activeTool === 'rect_room') {
+      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      if (!rectFirstCorner) {
+        setRectFirstCorner({ x, y })
+        return
+      }
+      // Second click → atomic create wrapping addRectangleRoom + auto-MEP
+      // in ONE history frame (Correction 6).
+      const c1 = rectFirstCorner
+      const c2 = { x, y }
+      setRectFirstCorner(null)
+      const store = useStore.getState()
+      store._runAtomically(() => {
+        const result = store.addRectangleRoom(c1.x, c1.y, c2.x, c2.y, { type: 'OTHER' })
+        if (result?.error) {
+          toast.error(`Couldn't create room: ${result.error}${result.conflictName ? ` (overlaps ${result.conflictName})` : ''}`)
+          return
+        }
+        // Auto-MEP per Area 2D — runs inside the same batch so undo is atomic.
+        const stAfter = useStore.getState()
+        const autoOn = stAfter.projectSettings?.autoMepDefaultsEnabled !== false
+        if (autoOn && result?.roomId) {
+          const sug = {
+            plumbing:   suggestPlumbingFixturesForRoom(stAfter, result.roomId),
+            electrical: suggestElectricalPointsForRoom(stAfter, result.roomId),
+            hvac:       suggestHvacUnitsForRoom(stAfter, result.roomId),
+            fire:       suggestFireDevicesForRoom(stAfter, result.roomId),
+            elv:        suggestElvDevicesForRoom(stAfter, result.roomId),
+          }
+          const added = stAfter.applyRoomMepDefaults?.(result.roomId, sug) ?? {}
+          const count = (added.plumbing?.length ?? 0)
+                      + (added.electrical?.length ?? 0)
+                      + (added.hvac?.length ?? 0)
+                      + (added.fire?.length ?? 0)
+                      + (added.elv?.length ?? 0)
+          toast.action(`Room created with ${count} MEP item${count === 1 ? '' : 's'}.`, {
+            label: 'Undo',
+            onClick: () => useStore.getState().undo?.(),
+            duration: 6000,
+          })
+        } else {
+          toast.success('Room created.')
+        }
+      })
+      // Switch to select so the user can rename / re-type the new room.
+      setTool('select')
+      return
+    }
+
     if (activeTool !== 'draw') return
 
     const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-    if (!drawStartId) { setDrawStart(getOrCreateNode(x, y)); return }
+    if (!drawStartId) {
+      const id = getOrCreateNode(x, y)
+      setDrawStart(id)
+      setDrawChainOriginId(id)   // First click of a new chain.
+      return
+    }
     const snapped = hasLock
       ? (shiftDown ? applyLockedLengthFree(startNode, { x, y }, parsedLength) : applyLockedLength(startNode, { x, y }, parsedLength))
       : (shiftDown ? { x, y } : apply90(startNode, x, y))
     const endNodeId = getOrCreateNode(snapped.x, snapped.y)
-    if (endNodeId === drawStartId) { setDrawStart(null); return }
+    if (endNodeId === drawStartId) { setDrawStart(null); setDrawChainOriginId(null); return }
     addWall(drawStartId, endNodeId)
+    // Auto-close: if this click landed on the chain origin (and we drew at
+    // least one wall to get here), the closing wall has been created and
+    // the chain ends.
+    if (endNodeId === drawChainOriginId) {
+      setDrawStart(null)
+      setDrawChainOriginId(null)
+      return
+    }
     setDrawStart(endNodeId)
   }
 
@@ -679,6 +822,26 @@ export default function Canvas() {
       </div>
     </div>
 
+    {/* Area 2A — chain-drawing hint */}
+    {activeTool === 'draw' && drawStartId && (
+      <div style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+        background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: '6px 14px',
+        zIndex: 20, fontSize: 12, color: '#555' }}>
+        Click to continue · Click origin to close · Double-click or Enter to end · Esc to cancel
+      </div>
+    )}
+
+    {/* Area 2B — rectangle-room hint */}
+    {activeTool === 'rect_room' && (
+      <div style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+        background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: '6px 14px',
+        zIndex: 20, fontSize: 12, color: '#555' }}>
+        {rectFirstCorner
+          ? 'Click opposite corner to create room · Esc to cancel'
+          : 'Click first corner · Click opposite corner to create 4 walls + room'}
+      </div>
+    )}
+
     {/* Stamp tool hint */}
     {STAMP_TOOLS.has(activeTool) && (
       <div style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
@@ -699,6 +862,13 @@ export default function Canvas() {
       width="100%" height="100%"
       style={{ background: '#f5f5f5', display: 'block', cursor: svgCursor }}
       onClick={handleSVGClick}
+      onDoubleClick={() => {
+        // Area 2A — end wall chain on double-click.
+        if (activeTool === 'draw' && (drawStartId || drawChainOriginId)) {
+          setDrawStart(null)
+          setDrawChainOriginId(null)
+        }
+      }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -723,6 +893,44 @@ export default function Canvas() {
         className="canvas-floor-layer"
         data-fading={floorFading ? 'true' : 'false'}
       >
+
+        {/* Phase 4 Tier-2 Step 16: PDF/image underlay layer (rendered
+            below the grid so user-drawn content always sits on top). */}
+        <UnderlayLayer />
+
+        {/* Two-click calibration markers — visible when activeTool ===
+            'calibrate_underlay' and at least one point has been captured. */}
+        {activeTool === 'calibrate_underlay' && (() => {
+          const underlay = calibrationUnderlay
+          const capture = calibrationCapture
+          if (!underlay || !capture) return null
+          const ipp = underlay.calibration?.inchesPerPixel ?? 1
+          const hIn = (underlay.naturalSize?.hPx ?? 0) * ipp
+          const placement = underlay.placement ?? { xIn: 0, yIn: 0 }
+          // Image-pixel → world inches (inverse of click handler)
+          const px2world = (p) => ({
+            x: placement.xIn + p.x * ipp,
+            y: (placement.yIn + hIn) - p.y * ipp,
+          })
+          const p1 = capture.p1Px ? px2world(capture.p1Px) : null
+          const p2 = capture.p2Px ? px2world(capture.p2Px) : null
+          return (
+            <g style={{ pointerEvents: 'none' }} data-layer="calibration-capture">
+              {p1 && (
+                <circle cx={sx(p1.x)} cy={sy(p1.y)} r={6}
+                  fill="var(--color-primary)" stroke="var(--color-bg)" strokeWidth={2}/>
+              )}
+              {p2 && (
+                <circle cx={sx(p2.x)} cy={sy(p2.y)} r={6}
+                  fill="var(--color-primary)" stroke="var(--color-bg)" strokeWidth={2}/>
+              )}
+              {p1 && p2 && (
+                <line x1={sx(p1.x)} y1={sy(p1.y)} x2={sx(p2.x)} y2={sy(p2.y)}
+                  stroke="var(--color-primary)" strokeWidth={2} strokeDasharray="6 4"/>
+              )}
+            </g>
+          )
+        })()}
 
         {/* Grid */}
         <rect x="-10000" y="-10000" width="30000" height="30000" fill="url(#grid)"/>
@@ -772,6 +980,53 @@ export default function Canvas() {
                 style={{ cursor: activeTool === 'select' ? 'pointer' : 'default' }}
                 onClick={activeTool === 'select' ? e => { e.stopPropagation(); selectRoom(room.id) } : undefined}
               />
+            </g>
+          )
+        })}
+        </>)}
+
+        {/* Phase 4 Tier-2 Item 29 + ADD 6: slab overlays — translucent solid
+            fills only, no SVG patterns (performance risk at zoom +
+            transparency). SUNKEN gets a dashed border to distinguish.
+            Off by default; engineers toggle on for QA + clash review. */}
+        {layerVisibility.slabs && (<>
+        {Object.values(slabs).map((slab) => {
+          // Floor scope — slabs only render on their own floor (no ghosting,
+          // a slab on a different floor isn't visually meaningful in plan view).
+          if (multiFloor && slab.floorId !== currentFloorId) return null
+          const role = slab.role ?? slab.classification ?? 'FLOOR'
+          const fillVar =
+            role === 'ROOF'          ? 'var(--color-primary-bg)' :
+            role === 'SUNKEN'        ? 'var(--color-warning-bg)' :
+            role === 'STAIR_LANDING' ? 'var(--color-success-bg)' :
+                                       'var(--color-bg-muted)'
+          const strokeVar =
+            role === 'SUNKEN'        ? 'var(--color-warning)' :
+            role === 'STAIR_LANDING' ? 'var(--color-success)' :
+                                       'var(--color-text-muted)'
+          const dashArray = role === 'SUNKEN' ? '6,4' : undefined
+          return (
+            <g key={slab.id} style={{ pointerEvents: 'none' }}>
+              {(slab.roomIds ?? []).map(rid => {
+                const room = rooms[rid]
+                if (!room) return null
+                if (!isRoomValid(rid)) return null
+                const poly = getRoomPolygon(rid)
+                if (!poly || poly.length < 3) return null
+                const pts = poly.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')
+                return (
+                  <polygon
+                    key={`slab-${slab.id}-${rid}`}
+                    points={pts}
+                    fill={fillVar}
+                    fillOpacity={0.35}
+                    stroke={strokeVar}
+                    strokeOpacity={0.6}
+                    strokeWidth={1}
+                    strokeDasharray={dashArray}
+                  />
+                )
+              })}
             </g>
           )
         })}
@@ -914,7 +1169,12 @@ export default function Canvas() {
           const glowW   = baseStroke + 6
           const dashArray = isVirtual ? '8 5' : undefined
           const hitW      = Math.max(14, thickPx + 8)
-          const len       = wallLength(a, b)
+          // Effective label length: in 'clear_internal' mode this returns
+          // the inset edge length (queries getRoomPolygonInsetEdges via
+          // wallId — Correction 2). In 'centerline' mode it equals the
+          // bare wallLength. Free-standing walls (no room) fall back to
+          // centerline naturally.
+          const len = getEffectiveWallLengthFt(useStore.getState(), wall.id, dimensionMode)
           // SVG-group coords for the wall nodes
           const ax = sx(a.x), ay = sy(a.y)
           const bx = sx(b.x), by = sy(b.y)
@@ -1150,6 +1410,36 @@ export default function Canvas() {
          * below the UI overlays / nodes / columns layers. */}
         <ClashOverlay />
 
+        {/* Area 2B — ghost rectangle while rect_room tool is active */}
+        {activeTool === 'rect_room' && rectFirstCorner && cursor && (() => {
+          const c1 = rectFirstCorner
+          const c2 = cursor
+          const xs = [c1.x, c2.x].sort((a, b) => a - b)
+          const ys = [c1.y, c2.y].sort((a, b) => a - b)
+          const wFt = Math.abs(c2.x - c1.x) / GRID_IN
+          const hFt = Math.abs(c2.y - c1.y) / GRID_IN
+          const sxA = sx(xs[0]), sxB = sx(xs[1])
+          const syA = sy(ys[0]), syB = sy(ys[1])
+          // SVG: y-flip means syA > syB visually; reorder for <rect>.
+          const rx = Math.min(sxA, sxB)
+          const ry = Math.min(syA, syB)
+          const rw = Math.abs(sxB - sxA)
+          const rh = Math.abs(syA - syB)
+          return (
+            <g style={{ pointerEvents: 'none' }}>
+              <rect x={rx} y={ry} width={rw} height={rh}
+                fill="rgba(74,144,226,0.10)" stroke="#4a90e2"
+                strokeWidth={1.5} strokeDasharray="6 4" />
+              <text x={rx + rw / 2} y={ry + rh / 2}
+                textAnchor="middle" dominantBaseline="middle"
+                fontSize={12} fill="#4a90e2"
+                style={{ userSelect: 'none' }}>
+                {fmtLen(wFt, unit)} × {fmtLen(hFt, unit)}
+              </text>
+            </g>
+          )
+        })()}
+
         {/* Ghost line while drawing */}
         {startNode && ghostEnd && (() => {
           const saX = sx(startNode.x), saY = sy(startNode.y)
@@ -1181,12 +1471,16 @@ export default function Canvas() {
             ? getNodeIdsByFloor(currentFloorId)
             : null
           return Object.values(nodes).map(node => {
-            const isStart      = node.id === drawStartId
+            const isStart       = node.id === drawStartId
+            // Area 2A — chain-origin gets a green ring so users can see
+            // the "click here to close" target as soon as 1+ walls exist.
+            const isChainOrigin = activeTool === 'draw' && node.id === drawChainOriginId && node.id !== drawStartId
             const onActiveFloor = !multiFloor || activeNodeIds.has(node.id)
             return (
               <circle key={node.id} cx={sx(node.x)} cy={sy(node.y)}
-                r={isStart ? 7 : 5} fill={isStart ? '#e74c3c' : '#4a90e2'}
-                stroke="#fff" strokeWidth={2}
+                r={isStart || isChainOrigin ? 7 : 5}
+                fill={isStart ? '#e74c3c' : isChainOrigin ? '#27ae60' : '#4a90e2'}
+                stroke="#fff" strokeWidth={isChainOrigin ? 3 : 2}
                 opacity={onActiveFloor ? 1 : 0.15}
                 style={{
                   pointerEvents: onActiveFloor ? 'auto' : 'none',

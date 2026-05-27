@@ -84,6 +84,14 @@ export function useKeyboardShortcuts() {
         closeDropdowns()
         return
       }
+      // Area 2A — Enter ends wall chain in draw tool. Canvas listens for
+      // this window event (see canvas:end-chain in Canvas.jsx) so the
+      // keyboard hook stays decoupled from concrete component state.
+      if (key === 'Enter' && useStore.getState().activeTool === 'draw') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('canvas:end-chain'))
+        return
+      }
       if (key === 'Delete' || key === 'Backspace') {
         e.preventDefault()
         handleDelete()
@@ -104,7 +112,8 @@ export function useKeyboardShortcuts() {
       }
       if (key === 'r' || key === 'R') {
         e.preventDefault()
-        useStore.getState().setTool?.('room')
+        // Area 2B — Shift+R picks the rectangle-room tool.
+        useStore.getState().setTool?.(e.shiftKey ? 'rect_room' : 'room')
         closeDropdowns()
         return
       }

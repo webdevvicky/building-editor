@@ -619,11 +619,17 @@ check('loadProject normalization: nodes already carrying floorIds are preserved'
 // computePlasterQuantities already imported at top (line ~161).
 
 function resetStore() {
+  // loadProject with projectSettings: undefined triggers the new-project
+  // path → DEFAULT_PROJECT_SETTINGS (including columnTypes) gets applied
+  // BUT dimensionMode is stamped to 'clear_internal'. The verify-boq
+  // assertions all expect centerline math, so we explicitly override
+  // back to centerline after loading.
   s().loadProject({
     nodes: {}, walls: {}, rooms: {}, stamps: {},
     columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {},
     projectSettings: undefined, unit: 'inch',
   })
+  s().setDimensionMode('centerline')
 }
 
 function buildSimpleRoom(name, type, swXft, swYft, wFt, hFt) {

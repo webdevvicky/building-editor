@@ -74,6 +74,14 @@ function inferSlabRole(state, floorId) {
   return idx === sorted.length - 1 ? 'ROOF' : 'FLOOR'
 }
 
+// Phase 4 Tier-2 ADD 1: the auto-derived role for a given slab. SUNKEN type
+// is always SUNKEN; otherwise the floor-stack position rule applies. Used by
+// addSlab/autoInitSlabs/resetSlabRoleToAuto so the three paths agree by
+// construction.
+function autoInferRoleForSlab(state, { type, floorId }) {
+  return type === 'SUNKEN' ? 'SUNKEN' : inferSlabRole(state, floorId)
+}
+
 // Reference-equality memo cells (one per cached selector). Single-store
 // assumption — one cell per module is sufficient. See src/topology/cache.js.
 const _concreteMemo    = createMemo()
@@ -90,10 +98,17 @@ export const DEFAULT_COLUMN_TYPES = [
 export const DEFAULT_FLOOR_ID = 'F1'
 
 export const DEFAULT_FLOORS = [
-  { id: DEFAULT_FLOOR_ID, label: 'Floor 1', sequence: 0, plinthHeightFt: 1.5, floorHeightFt: 10, meta: null },
+  { id: DEFAULT_FLOOR_ID, label: 'Floor 1', sequence: 0, plinthHeightFt: 1.5, floorHeightFt: 10, meta: null, underlay: null },
 ]
 
 export const DEFAULT_PROJECT_SETTINGS = {
+  // Area 1 — dimension convention. 'centerline' matches as-drawn geometry
+  // (legacy behavior). 'clear_internal' insets each edge by half-wall-
+  // thickness so finishes match site-measured interior dimensions.
+  // Default 'centerline' is legacy-safe; loadProject opts new projects into
+  // 'clear_internal' explicitly (data.projectSettings == null path).
+  dimensionMode: 'centerline',
+
   mortarRatio: '1:6',
   wastagePercent: 5,
   plasterThicknessMm: { internal: 12, ceiling: 10, external: 15 },  // legacy; superseded by defaultPlasterSystemId
@@ -255,6 +270,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
 
   // ── Gap 8 — Project costs (labor / supervision / GST) ────────────────────
   projectCosts: { ...DEFAULT_PROJECT_COSTS },
+
+  // Area 2D — Smart MEP defaults. When true (default), creating a new room
+  // auto-applies suggestPlumbing/Electrical/Hvac/Fire/Elv for the room type.
+  // When false, the MepDefaultsModal opens for manual selection (legacy flow).
+  autoMepDefaultsEnabled: true,
 }
 
 // Beam endpoint — discriminated union:
@@ -303,6 +323,84 @@ export const createStructuralSlice = (set, get, uid) => ({
   setProjectSettings: (partial) => set(state => ({
     projectSettings: { ...state.projectSettings, ...partial },
   })),
+
+  // Area 1 — dimension convention. Stamps projectSettings.dimensionMode.
+  // Validates against the two allowed values; ignores anything else.
+  setDimensionMode: (mode) => set(state => {
+    if (mode !== 'centerline' && mode !== 'clear_internal') return {}
+    return {
+      projectSettings: { ...state.projectSettings, dimensionMode: mode },
+    }
+  }),
+
+  // ── Underlay actions — per-floor (Fix 3) ─────────────────────────────────
+  // Underlay records live on each floor: projectSettings.floors[i].underlay.
+  // Each floor owns its own asset blob (key = `${projectId}::underlay::${floorId}`)
+  // so switching floors changes which plan is displayed under the canvas.
+  // Every setter takes an optional floorId — when omitted, defaults to
+  // state.currentFloorId so unscoped UI calls just affect the visible floor.
+  //
+  // Reads: consumers fetch via `state.projectSettings.floors.find(f => f.id === floorId).underlay`
+  // (helper `getFloorUnderlay(state, floorId)` exposed below).
+  setUnderlay: (partial, floorId) => set(state => {
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f =>
+      f.id === fid
+        ? { ...f, underlay: { ...(f.underlay ?? {}), ...partial } }
+        : f
+    )
+    return { projectSettings: { ...state.projectSettings, floors } }
+  }),
+  clearUnderlay: (floorId) => set(state => {
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f =>
+      f.id === fid ? { ...f, underlay: null } : f
+    )
+    return { projectSettings: { ...state.projectSettings, floors } }
+  }),
+  setUnderlayCalibration: (calibration, floorId) => set(state => {
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f => {
+      if (f.id !== fid || !f.underlay) return f
+      return { ...f, underlay: { ...f.underlay, calibration } }
+    })
+    return { projectSettings: { ...state.projectSettings, floors } }
+  }),
+  setUnderlayPlacement: (placement, floorId) => set(state => {
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f => {
+      if (f.id !== fid || !f.underlay) return f
+      return { ...f, underlay: { ...f.underlay, placement: { ...(f.underlay.placement ?? {}), ...placement } } }
+    })
+    return { projectSettings: { ...state.projectSettings, floors } }
+  }),
+  setUnderlayOpacity: (opacity, floorId) => set(state => {
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const v = Math.max(0.05, Math.min(1, opacity))
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f => {
+      if (f.id !== fid || !f.underlay) return f
+      return { ...f, underlay: { ...f.underlay, opacity: v } }
+    })
+    return { projectSettings: { ...state.projectSettings, floors } }
+  }),
+  setUnderlayVisible: (visible, floorId) => set(state => {
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const floors = (state.projectSettings.floors ?? DEFAULT_FLOORS).map(f => {
+      if (f.id !== fid || !f.underlay) return f
+      return { ...f, underlay: { ...f.underlay, visible: !!visible } }
+    })
+    return { projectSettings: { ...state.projectSettings, floors } }
+  }),
+
+  // Pure read helper — used by UnderlayLayer / CalibrationModal / Canvas /
+  // LayersPanel so every consumer goes through one accessor. Returns null
+  // when the floor has no underlay.
+  getFloorUnderlay(floorId) {
+    const state = get()
+    const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const floors = state.projectSettings?.floors ?? DEFAULT_FLOORS
+    return floors.find(f => f.id === fid)?.underlay ?? null
+  },
 
   setColumnTypeEntry: (id, fields) => set(state => ({
     projectSettings: {
@@ -403,7 +501,7 @@ export const createStructuralSlice = (set, get, uid) => ({
           ...state.projectSettings,
           floors: [
             ...existing,
-            { id, label: `Floor ${sequence + 1}`, sequence, plinthHeightFt: 0, floorHeightFt: 10, meta: null, ...fields },
+            { id, label: `Floor ${sequence + 1}`, sequence, plinthHeightFt: 0, floorHeightFt: 10, meta: null, underlay: null, ...fields },
           ],
         },
       }
@@ -896,7 +994,11 @@ export const createStructuralSlice = (set, get, uid) => ({
   addSlab: (type, roomIds, thicknessIn, sinkDepthIn = 0, options = {}) => {
     const id = uid()
     const floorId = options.floorId ?? get().currentFloorId ?? DEFAULT_FLOOR_ID
-    const role    = options.role ?? (type === 'SUNKEN' ? 'SUNKEN' : inferSlabRole(get(), floorId))
+    // ADD 1: `options.role` is treated as an explicit override → MANUAL.
+    // Otherwise the auto-inference rule runs → AUTO.
+    const explicitRole = options.role
+    const role         = explicitRole ?? autoInferRoleForSlab(get(), { type, floorId })
+    const roleSource   = explicitRole ? 'MANUAL' : 'AUTO'
     get()._save()
     set(state => ({
       slabs: {
@@ -908,6 +1010,7 @@ export const createStructuralSlice = (set, get, uid) => ({
           floorId,
           classification: role,
           role,
+          roleSource,
           reinforcementSpecId: null,
           meta: null,
         },
@@ -976,6 +1079,7 @@ export const createStructuralSlice = (set, get, uid) => ({
         type: 'MAIN', roomIds: mainRoomIds,
         thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20',
         floorId, classification: mainRole, role: mainRole,
+        roleSource: 'AUTO',
         reinforcementSpecId: null, meta: null,
       }
     }
@@ -988,6 +1092,7 @@ export const createStructuralSlice = (set, get, uid) => ({
         type: 'SUNKEN', roomIds: [roomId],
         thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20',
         floorId, classification: 'SUNKEN', role: 'SUNKEN',
+        roleSource: 'AUTO',
         reinforcementSpecId: null, meta: null,
       }
     }
@@ -996,12 +1101,40 @@ export const createStructuralSlice = (set, get, uid) => ({
   },
 
   setSlabRole: (slabId, role) => {
+    // ADD 1: roleSource flips to MANUAL only when role actually changes.
+    // A no-op call (same role) leaves provenance untouched so a "set to
+    // current value" UI gesture never silently flips an AUTO-inferred slab.
+    const current = get().slabs[slabId]
+    if (!current) return
+    if (current.role === role && current.classification === role) return
     get()._save()
     set(state => {
       const slab = state.slabs[slabId]
       if (!slab) return {}
-      return { slabs: { ...state.slabs, [slabId]: { ...slab, role, classification: role } } }
+      return {
+        slabs: {
+          ...state.slabs,
+          [slabId]: { ...slab, role, classification: role, roleSource: 'MANUAL' },
+        },
+      }
     })
+  },
+
+  // ADD 1: re-run inference and stamp roleSource='AUTO'. Used by the
+  // SlabPanel "Reset to auto" button.
+  resetSlabRoleToAuto: (slabId) => {
+    const state = get()
+    const slab = state.slabs[slabId]
+    if (!slab) return
+    const inferred = autoInferRoleForSlab(state, { type: slab.type, floorId: slab.floorId })
+    if (slab.role === inferred && slab.classification === inferred && slab.roleSource === 'AUTO') return
+    get()._save()
+    set(s => ({
+      slabs: {
+        ...s.slabs,
+        [slabId]: { ...s.slabs[slabId], role: inferred, classification: inferred, roleSource: 'AUTO' },
+      },
+    }))
   },
 
   setSlabReinforcementSpec: (slabId, reinforcementSpecId) => {

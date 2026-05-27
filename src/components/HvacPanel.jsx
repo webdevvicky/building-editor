@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useUnits } from '../hooks/useUnits'
 import { listHvacUnits, getHvacUnit } from '../mep/catalogs/index.js'
+import { resolveRefrigerantPipeOD, humanizeMepSource } from '../mep/resolution.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
@@ -56,6 +57,7 @@ export default function HvacPanel() {
   const deleteHvacUnit     = useStore(s => s.deleteHvacUnit)
   const selectHvacUnit     = useStore(s => s.selectHvacUnit)
   const applyRoomMepDefaults = useStore(s => s.applyRoomMepDefaults)
+  const setHvacPairing     = useStore(s => s.setHvacPairing)
   const undo               = useStore(s => s.undo)
   const suggestFn          = useSuggestFn()
 
@@ -139,8 +141,9 @@ export default function HvacPanel() {
       return d + externalBonus
     }
     const best = candidates.slice().sort((a, b) => scoreFor(a) - scoreFor(b))[0]
-    updateHvacUnit(unit.id,  { pairedOutdoorId: best.id })
-    updateHvacUnit(best.id,  { pairedIndoorId: unit.id })
+    // Phase 4 Tier-2 Item 24: route through setHvacPairing with 'AUTO'
+    // source so the badge correctly distinguishes auto-paired from manual.
+    setHvacPairing(unit.id, best.id, 'AUTO')
     toast.success(`Paired with ${getHvacUnit(best.type)?.label ?? best.type}.`)
   }
 
@@ -207,6 +210,30 @@ export default function HvacPanel() {
         </div>
       </div>
 
+      {/* Phase 4 Tier-2 Item 26 + ADD 2: per-instance refrigerant OD
+          override. Inches. Resolution flows through src/mep/resolution.js. */}
+      {(() => {
+        const resolved = resolveRefrigerantPipeOD(unit, catalog)
+        return (
+          <Field label={`Refrigerant OD (in) — ${humanizeMepSource(resolved.source)}`}>
+            <input
+              type="number"
+              min={0}
+              step={0.125}
+              value={unit.refrigerantPipeOdInOverride ?? ''}
+              placeholder={String(catalog?.refrigerantPipeOdIn ?? 0)}
+              onChange={e => {
+                const v = e.target.value
+                updateHvacUnit(unit.id, {
+                  refrigerantPipeOdInOverride: v === '' ? null : Number(v),
+                })
+              }}
+              onKeyDown={e => e.stopPropagation()}
+            />
+          </Field>
+        )
+      })()}
+
       <Field label="Capacity (tons)">
         <input
           type="number"
@@ -222,54 +249,83 @@ export default function HvacPanel() {
         />
       </Field>
 
-      {(indoor || outdoor) && (
-        <div style={fieldRow}>
-          <div style={labelStyle}>Pairing</div>
-          <div style={{ fontSize: 'var(--text-sm)' }}>
-            {indoor && pairedOutdoor && (
-              <span style={{
-                fontSize: 'var(--text-xs)',
-                padding: '2px var(--space-2)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-primary-bg)',
-                color: 'var(--color-primary)',
-              }}>
-                Outdoor: {getHvacUnit(pairedOutdoor.type)?.label ?? pairedOutdoor.type}
-              </span>
+      {(indoor || outdoor) && (() => {
+        // Phase 4 Tier-2 Item 24: manual pairing picker + AUTO/MANUAL badge.
+        // Candidates = all units of the opposite side on the same floor,
+        // excluding self. Auto-pair button stays available as a shortcut
+        // when no partner is set.
+        const wantOutdoor = indoor
+        const candidates = Object.values(hvacUnits).filter(u => {
+          if (u.id === unit.id) return false
+          if (u.floorId !== unit.floorId) return false
+          return wantOutdoor
+            ? (u.type === 'AC_OUTDOOR_UNIT' || u.type === 'DUCTED_AC_OUTDOOR')
+            : (u.type === 'AC_INDOOR_UNIT'  || u.type === 'DUCTED_AC_INDOOR')
+        })
+        const partner = indoor ? pairedOutdoor : pairedIndoor
+        const sideLabel = wantOutdoor ? 'outdoor' : 'indoor'
+        const source = unit.pairingSource ?? null
+        return (
+          <>
+            <Field label={`Paired ${sideLabel} unit`}>
+              <select
+                value={partner ? partner.id : ''}
+                onChange={e => setHvacPairing(unit.id, e.target.value || null, 'MANUAL')}
+                onKeyDown={e => e.stopPropagation()}
+              >
+                <option value="">— Unpaired —</option>
+                {candidates.map(c => {
+                  const cCatalog = getHvacUnit(c.type)
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {(cCatalog?.label ?? c.type)} ({Math.round(c.x / 12)}', {Math.round(c.y / 12)}')
+                    </option>
+                  )
+                })}
+              </select>
+            </Field>
+            {partner && source && (
+              <div style={fieldRow}>
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  padding: '2px var(--space-2)',
+                  borderRadius: 'var(--radius-sm)',
+                  background: source === 'MANUAL'
+                    ? 'var(--color-warning-bg)'
+                    : 'var(--color-success-bg)',
+                  color: source === 'MANUAL'
+                    ? 'var(--color-warning)'
+                    : 'var(--color-success)',
+                }}>
+                  {source}
+                </span>
+                {source === 'MANUAL' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setHvacPairing(unit.id, null, 'AUTO')}
+                    title="Clear pairing — auto-pair engine can re-link"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
             )}
-            {outdoor && pairedIndoor && (
-              <span style={{
-                fontSize: 'var(--text-xs)',
-                padding: '2px var(--space-2)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-primary-bg)',
-                color: 'var(--color-primary)',
-              }}>
-                Indoor: {getHvacUnit(pairedIndoor.type)?.label ?? pairedIndoor.type}
-              </span>
+            {indoor && !pairedOutdoor && candidates.length > 0 && (
+              <div style={{ marginTop: 'var(--space-2)' }}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAutoPair}
+                  title="Pick nearest outdoor unit automatically"
+                >
+                  Auto-pair with nearest outdoor unit
+                </Button>
+              </div>
             )}
-            {indoor && !pairedOutdoor && (
-              <span style={{ color: 'var(--color-text-muted)' }}>Unpaired</span>
-            )}
-            {outdoor && !pairedIndoor && (
-              <span style={{ color: 'var(--color-text-muted)' }}>Unpaired</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {indoor && !pairedOutdoor && (
-        <div style={{ marginTop: 'var(--space-2)' }}>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleAutoPair}
-            title="Find nearest outdoor unit and link them"
-          >
-            Auto-pair with outdoor unit
-          </Button>
-        </div>
-      )}
+          </>
+        )
+      })()}
 
       {catalog && (
         <div style={{

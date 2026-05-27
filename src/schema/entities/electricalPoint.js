@@ -29,6 +29,9 @@ export const electricalPointSchema = Object.freeze({
     loadW:              Object.freeze({ type: 'number',  required: true,  default: 0, min: 0, unit: 'watts' }),
     circuitId:          Object.freeze({ type: 'string|null', required: true, default: null }),
     mountHeightFt:      Object.freeze({ type: 'number',  required: true,  default: 0, min: 0, unit: 'ft' }),
+    // Phase 4 Tier-2 Item 26 + ADD 2: per-instance wire gauge override (mm²).
+    // null = inherit catalog default. Read via src/mep/resolution.js.
+    wireGaugeMm2Override: Object.freeze({ type: 'number|null', required: true, default: null, min: 0, unit: 'mm2' }),
   }),
   invariants: Object.freeze([
     Object.freeze({

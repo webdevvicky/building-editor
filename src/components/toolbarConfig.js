@@ -16,6 +16,7 @@ import {
   MousePointer2,
   Scissors,
   Hexagon,
+  Square,
   Columns3,
   RectangleHorizontal,
   LayoutGrid,
@@ -42,6 +43,9 @@ import {
   Undo2,
   Redo2,
   Box,
+  Image as ImageIcon,
+  Crosshair,
+  Trash2,
 } from 'lucide-react'
 
 export const TOOL_CLUSTERS = Object.freeze([
@@ -49,10 +53,11 @@ export const TOOL_CLUSTERS = Object.freeze([
     id: 'draw',
     label: 'Draw',
     items: [
-      { type: 'tool', toolId: 'draw',   icon: Pencil,        label: 'Draw walls', shortcut: 'D' },
-      { type: 'tool', toolId: 'select', icon: MousePointer2, label: 'Select',     shortcut: 'S' },
-      { type: 'tool', toolId: 'split',  icon: Scissors,      label: 'Split wall' },
-      { type: 'tool', toolId: 'room',   icon: Hexagon,       label: 'Room',       shortcut: 'R' },
+      { type: 'tool', toolId: 'draw',      icon: Pencil,        label: 'Draw walls',     shortcut: 'D' },
+      { type: 'tool', toolId: 'rect_room', icon: Square,        label: 'Rectangle room', shortcut: 'Shift+R' },
+      { type: 'tool', toolId: 'select',    icon: MousePointer2, label: 'Select',         shortcut: 'S' },
+      { type: 'tool', toolId: 'split',     icon: Scissors,      label: 'Split wall' },
+      { type: 'tool', toolId: 'room',      icon: Hexagon,       label: 'Room',           shortcut: 'R' },
     ],
   },
   {
@@ -109,6 +114,15 @@ export const TOOL_CLUSTERS = Object.freeze([
         items: [
           { type: 'toggle', storeKey: 'showDimensions', icon: Tag,    label: 'Show dimensions' },
           { type: 'toggle', storeKey: 'drawVirtual',    icon: EyeOff, label: 'Draw virtual walls' },
+        ],
+      },
+      {
+        // Phase 4 Tier-2 Step 18 — underlay workflow.
+        title: 'Underlay',
+        items: [
+          { type: 'action', actionId: 'underlay_import',    icon: ImageIcon, label: 'Import PDF / image…' },
+          { type: 'tool',   toolId:   'calibrate_underlay', icon: Crosshair, label: 'Calibrate scale' },
+          { type: 'action', actionId: 'underlay_clear',     icon: Trash2,    label: 'Clear underlay' },
         ],
       },
       {

@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useUnits } from '../hooks/useUnits'
 import { listFixtureTypes, getFixtureType } from '../mep/catalogs/index.js'
+import { resolveFixtureFlowLpm, humanizeMepSource } from '../mep/resolution.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
@@ -161,6 +162,31 @@ export default function PlumbingFixturePanel() {
           {fmtCoord(fixture.x / 12, fixture.y / 12)}
         </div>
       </div>
+
+      {/* Phase 4 Tier-2 Item 26 + ADD 2: per-instance flow override.
+          Resolved via src/mep/resolution.js — UI never inlines the
+          INSTANCE → CATALOG fallback chain. */}
+      {(() => {
+        const resolved = resolveFixtureFlowLpm(fixture, catalog)
+        return (
+          <Field label={`Flow (L/min) — ${humanizeMepSource(resolved.source)}`}>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={fixture.flowLpmOverride ?? ''}
+              placeholder={String(catalog?.flowLpm ?? 0)}
+              onChange={e => {
+                const v = e.target.value
+                updatePlumbingFixture(fixture.id, {
+                  flowLpmOverride: v === '' ? null : Number(v),
+                })
+              }}
+              onKeyDown={e => e.stopPropagation()}
+            />
+          </Field>
+        )
+      })()}
 
       {catalog && (
         <div style={{

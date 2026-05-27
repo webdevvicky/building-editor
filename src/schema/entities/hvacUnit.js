@@ -29,6 +29,13 @@ export const hvacUnitSchema = Object.freeze({
     capacityTons:       Object.freeze({ type: 'number',  required: true,  default: 1, min: 0 }),
     pairedOutdoorId:    Object.freeze({ type: 'ref|null', required: true, default: null, refTarget: 'hvacUnit' }),
     pairedIndoorId:     Object.freeze({ type: 'ref|null', required: true, default: null, refTarget: 'hvacUnit' }),
+    // Phase 4 Tier-2 Item 24: provenance for HVAC pairing. AUTO = set by
+    // auto-pair engine (may be re-derived). MANUAL = engineer chose
+    // explicitly via picker (auto-pair must skip this unit).
+    pairingSource:      Object.freeze({ type: 'string|null', required: true, default: null, oneOf: Object.freeze(['AUTO', 'MANUAL', null]) }),
+    // Phase 4 Tier-2 Item 26 + ADD 2: per-instance refrigerant OD override (inches).
+    // null = inherit catalog default. Read via src/mep/resolution.js.
+    refrigerantPipeOdInOverride: Object.freeze({ type: 'number|null', required: true, default: null, min: 0, unit: 'in' }),
   }),
   invariants: Object.freeze([
     Object.freeze({

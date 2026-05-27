@@ -31,5 +31,8 @@ Thumbs.db
 # Claude Code session files
 .claude/
 
+# Playwright MCP local console captures (dev artifacts; not source)
+.playwright-mcp/
+
 # Local test fixtures
 test-corrupt.json

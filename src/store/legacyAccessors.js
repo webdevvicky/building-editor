@@ -87,6 +87,10 @@ export const LEGACY_ACCESSORS = Object.freeze([
   Object.freeze({ path: 'layerVisibility',  slice: 'view', kind: 'object', killBy: KILL_BY, notes: 'Per-layer visibility map' }),
   Object.freeze({ path: 'currentFloorId',   slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Active floor in floor switcher' }),
   Object.freeze({ path: 'ratesByKey',       slice: 'view', kind: 'object', killBy: KILL_BY, notes: 'BOQ rate inputs — excluded from history' }),
+  Object.freeze({ path: 'selection',        slice: 'view', kind: 'object', killBy: KILL_BY, notes: 'Phase 4 Tier-2 ADD 3 — namespaced cross-canvas selection (electrical circuit, plumbing zone, etc.)' }),
+  Object.freeze({ path: 'boqRevision',      slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Phase 4 Tier-2 ADD 7 — BOQ memo invalidation counter; bumps on every structural mutation' }),
+  Object.freeze({ path: 'ratesRevision',    slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Phase 4 Tier-2 ADD 7 — rates memo invalidation counter; bumps on every setRate call' }),
+  Object.freeze({ path: '_inBatch',         slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Area 2B Correction 6 — _runAtomically batch flag; transient, never persisted' }),
 
   // ── History slice (Arch 2 operation journal) ─────────────────────────
   Object.freeze({ path: 'history',          slice: 'history', kind: 'collection', killBy: KILL_BY, notes: 'Undo ring buffer (50 entries)' }),

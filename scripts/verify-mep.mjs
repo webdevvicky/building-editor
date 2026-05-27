@@ -754,6 +754,8 @@ reset()
   ok('BEDROOM defaults include FAN n=1',             byType.FAN === 1,   `got FAN=${byType.FAN}`)
   ok('BEDROOM defaults include SOCKET_5A n=4',       byType.SOCKET_5A === 4, `got SOCKET_5A=${byType.SOCKET_5A}`)
   ok('BEDROOM defaults include AC_INDOOR_POINT n=1', byType.AC_INDOOR_POINT === 1, `got AC=${byType.AC_INDOOR_POINT}`)
+  // Area 2D — smart-defaults spec adds TV_POINT to BEDROOM.
+  ok('BEDROOM defaults include TV_POINT n=1',        byType.TV_POINT === 1, `got TV=${byType.TV_POINT}`)
 
   const { roomId } = buildRoom('Bed1', 'BEDROOM', 0, 0)
   if (suggestElectricalPointsForRoom) {
@@ -762,9 +764,26 @@ reset()
     ok('suggestor returns at least LIGHT + FAN + SOCKET_5A + AC_INDOOR_POINT',
       types.has('LIGHT') && types.has('FAN') && types.has('SOCKET_5A') && types.has('AC_INDOOR_POINT'),
       `got [${[...types].join(',')}]`)
+    ok('suggestor includes TV_POINT (Area 2D smart-defaults)',
+      types.has('TV_POINT'), `got [${[...types].join(',')}]`)
   } else {
     skip('suggestor returns LIGHT + FAN + SOCKET_5A + AC_INDOOR_POINT', 'suggestElectricalPointsForRoom not yet built')
   }
+
+  // Area 2D — smart-defaults spec audit for KITCHEN + LIVING.
+  const kit = getElectricalDefaultsForRoom('KITCHEN')
+  const kitByType = Object.fromEntries(kit.map(d => [d.type, d.n]))
+  ok('KITCHEN includes EXHAUST_FAN (Area 2D)', kitByType.EXHAUST_FAN === 1,
+     `got EXHAUST_FAN=${kitByType.EXHAUST_FAN}`)
+  ok('KITCHEN preserves SOCKET_15A n=6', kitByType.SOCKET_15A === 6)
+  const lv = getElectricalDefaultsForRoom('LIVING')
+  const lvByType = Object.fromEntries(lv.map(d => [d.type, d.n]))
+  ok('LIVING bumped LIGHT to 4 (Area 2D)', lvByType.LIGHT === 4,
+     `got LIGHT=${lvByType.LIGHT}`)
+  ok('LIVING includes AC_INDOOR_POINT (Area 2D)', lvByType.AC_INDOOR_POINT === 1,
+     `got AC=${lvByType.AC_INDOOR_POINT}`)
+  ok('LIVING preserves TV_POINT n=1', lvByType.TV_POINT === 1)
+  ok('LIVING preserves SOCKET_5A n=6', lvByType.SOCKET_5A === 6)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -2059,6 +2078,100 @@ header('54. Phase 2.6 — strategy registry exposes all four strategies')
     SIZING_STRATEGIES.LOAD_BASED.shipPhase === 'PHASE_2_6')
   ok('GRADIENT_DRAIN shipPhase === PHASE_2_6',
     SIZING_STRATEGIES.GRADIENT_DRAIN.shipPhase === 'PHASE_2_6')
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('55. Phase 4 Tier-2 Item 26 + ADD 2 — MEP per-instance override resolution')
+{
+  const {
+    resolveFixtureFlowLpm,
+    resolveWireGauge,
+    resolveRefrigerantPipeOD,
+    humanizeMepSource,
+  } = await import('../src/mep/resolution.js')
+
+  // Plumbing — flowLpm
+  const fixCatalog = { flowLpm: 12 }
+  const fixNoOverride = { flowLpmOverride: null }
+  const fixWithOverride = { flowLpmOverride: 20 }
+  const r1 = resolveFixtureFlowLpm(fixNoOverride, fixCatalog)
+  ok('resolveFixtureFlowLpm — no override falls back to CATALOG',
+    r1.source === 'CATALOG' && r1.value === 12, `got ${JSON.stringify(r1)}`)
+  const r2 = resolveFixtureFlowLpm(fixWithOverride, fixCatalog)
+  ok('resolveFixtureFlowLpm — override wins (INSTANCE)',
+    r2.source === 'INSTANCE' && r2.value === 20, `got ${JSON.stringify(r2)}`)
+
+  // Electrical — wireGauge
+  const ptCatalog = { wireGaugeMm2: 2.5 }
+  const ptNoOverride = { wireGaugeMm2Override: null }
+  const ptWithOverride = { wireGaugeMm2Override: 4 }
+  const r3 = resolveWireGauge(ptNoOverride, ptCatalog)
+  ok('resolveWireGauge — no override falls back to CATALOG',
+    r3.source === 'CATALOG' && r3.value === 2.5, `got ${JSON.stringify(r3)}`)
+  const r4 = resolveWireGauge(ptWithOverride, ptCatalog)
+  ok('resolveWireGauge — override wins (INSTANCE)',
+    r4.source === 'INSTANCE' && r4.value === 4, `got ${JSON.stringify(r4)}`)
+
+  // HVAC — refrigerantPipeOdIn
+  const uCatalog = { refrigerantPipeOdIn: 0.375 }
+  const uNoOverride = { refrigerantPipeOdInOverride: null }
+  const uWithOverride = { refrigerantPipeOdInOverride: 0.5 }
+  const r5 = resolveRefrigerantPipeOD(uNoOverride, uCatalog)
+  ok('resolveRefrigerantPipeOD — no override falls back to CATALOG',
+    r5.source === 'CATALOG' && r5.value === 0.375, `got ${JSON.stringify(r5)}`)
+  const r6 = resolveRefrigerantPipeOD(uWithOverride, uCatalog)
+  ok('resolveRefrigerantPipeOD — override wins (INSTANCE)',
+    r6.source === 'INSTANCE' && r6.value === 0.5, `got ${JSON.stringify(r6)}`)
+
+  // Defensive — catalog missing the field still returns CATALOG source
+  const r7 = resolveRefrigerantPipeOD({ refrigerantPipeOdInOverride: null }, { /* no field */ })
+  ok('resolveRefrigerantPipeOD — null catalog field falls through to 0',
+    r7.value === 0 && r7.source === 'CATALOG', `got ${JSON.stringify(r7)}`)
+
+  ok('humanizeMepSource maps INSTANCE → "Override"',
+    humanizeMepSource('INSTANCE') === 'Override')
+  ok('humanizeMepSource maps CATALOG → "Catalog default"',
+    humanizeMepSource('CATALOG') === 'Catalog default')
+}
+
+// ─────────────────────────────────────────────────────────────────────
+header('56. Phase 4 Tier-2 Item 24 — HVAC pairing setter + provenance')
+{
+  // Build a clean state with one indoor + one outdoor unit on F1.
+  const state0 = useStore.getState()
+  // Skip if addHvacUnit isn't wired in this build.
+  if (typeof state0.addHvacUnit === 'function') {
+    const indoorId = state0.addHvacUnit('AC_INDOOR_UNIT', 60, 60)
+    const outdoorId = state0.addHvacUnit('AC_OUTDOOR_UNIT', 120, 120)
+    const s1 = useStore.getState()
+    ok('Item 24 — fresh HVAC unit has pairingSource: null',
+      s1.hvacUnits[indoorId].pairingSource === null)
+
+    // Manual pairing
+    s1.setHvacPairing(indoorId, outdoorId, 'MANUAL')
+    const s2 = useStore.getState()
+    ok('Item 24 — setHvacPairing links indoor → outdoor',
+      s2.hvacUnits[indoorId].pairedOutdoorId === outdoorId)
+    ok('Item 24 — setHvacPairing links outdoor → indoor (bidirectional)',
+      s2.hvacUnits[outdoorId].pairedIndoorId === indoorId)
+    ok('Item 24 — pairingSource stamped MANUAL on both ends',
+      s2.hvacUnits[indoorId].pairingSource === 'MANUAL' &&
+      s2.hvacUnits[outdoorId].pairingSource === 'MANUAL')
+
+    // Unpair via setHvacPairing(unitId, null)
+    s2.setHvacPairing(indoorId, null, 'AUTO')
+    const s3 = useStore.getState()
+    ok('Item 24 — setHvacPairing(null) clears both ends',
+      s3.hvacUnits[indoorId].pairedOutdoorId === null &&
+      s3.hvacUnits[outdoorId].pairedIndoorId === null)
+    ok('Item 24 — pairingSource cleared back to null after unpair',
+      s3.hvacUnits[indoorId].pairingSource === null &&
+      s3.hvacUnits[outdoorId].pairingSource === null)
+
+    // Cleanup
+    s3.deleteHvacUnit(indoorId)
+    useStore.getState().deleteHvacUnit(outdoorId)
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────

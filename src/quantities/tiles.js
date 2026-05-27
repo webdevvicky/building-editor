@@ -33,7 +33,14 @@
 // Reads state.rooms / state.walls / projectSettings; perimeter via
 // getRoomPerimeterFt (polygon-based, NOT wallIds).
 
-import { getValidRoomIds, getRoomArea, getRoomPerimeterFt, getLongestPolygonEdgeFt } from '../topology/rooms.js'
+import {
+  getValidRoomIds, getRoomArea, getRoomPerimeterFt, getLongestPolygonEdgeFt,
+  // Area 1 — dimension-mode kernel. All tile geometry now routes through
+  // getRoomGeometry so floor/dado/skirting/kitchen-counter honor the
+  // project's dimension mode. Centerline-mode output stays byte-identical
+  // to today (verify-boq invariant).
+  getRoomGeometry,
+} from '../topology/rooms.js'
 import { getRoomsForWall } from '../topology/walls.js'
 import { buildMeta, ATTRIBUTION_POLICY, isScopedState } from './_metaContract.js'
 import { safeR2 as r2 } from '../lib/numbers.js'
@@ -119,14 +126,18 @@ function _kitchenCounterFt2(state, room, projectSettings) {
     return r2((override.lengthFt ?? 0) * (override.depthFt ?? def.defaultDepthFt))
   }
   const depthFt = def.defaultDepthFt
+  // Route through getRoomGeometry so the half-perimeter / longest-wall
+  // numbers honor dimensionMode. Falls back to bare topology helpers if
+  // the room is malformed.
+  const geom = getRoomGeometry(state, room.id)
   let lengthFt = 0
   if (def.defaultLengthMode === 'half_perimeter') {
-    lengthFt = getRoomPerimeterFt(state, room.id) / 2
+    lengthFt = (geom?.perimeter ?? getRoomPerimeterFt(state, room.id)) / 2
   } else if (def.defaultLengthMode === 'manual') {
     lengthFt = 0   // no entry → no counter
   } else {
     // 'longest_wall' (default)
-    lengthFt = getLongestPolygonEdgeFt(state, room.id)
+    lengthFt = geom?.longestWall ?? getLongestPolygonEdgeFt(state, room.id)
   }
   return r2(lengthFt * depthFt)
 }
@@ -163,8 +174,11 @@ export function computeTileQuantities(state) {
     if (!room) continue
     const dadoFt = _resolveDadoFt(room, state)
     const dadoSource = _resolveDadoSource(room, state)
-    const perimeterFt = getRoomPerimeterFt(state, rid)
-    const floorAreaFt2 = getRoomArea(state, rid)
+    // Use getRoomGeometry for perimeter + floor area. Centerline mode is
+    // byte-identical to the legacy helpers; clear_internal mode shrinks both.
+    const geom = getRoomGeometry(state, rid)
+    const perimeterFt  = geom?.perimeter ?? getRoomPerimeterFt(state, rid)
+    const floorAreaFt2 = geom?.area      ?? getRoomArea(state, rid)
 
     const floorTilesFt2 = room.finishes?.flooring
       ? r2(floorAreaFt2 * floorAllowance)

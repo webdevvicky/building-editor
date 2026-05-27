@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useStore } from '../store'
+import { getBoqLines } from '../boq/lines.js'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
+import { getRoomGeometry, getEffectiveWallLengthFt } from '../topology/index.js'
 import { ROOM_TYPES, ROOM_TYPE_LABELS, ALL_FINISHES } from '../roomPresets'
 import { PLASTER_SYSTEMS } from '../specs/plasterSystems'
 import { listPaintSystems } from '../specs/paintSystems.js'
@@ -25,6 +27,50 @@ function Row({ label, value, sub }) {
         {value}
         {sub && <span style={{ color: 'var(--color-text-muted)', fontWeight: 'var(--weight-regular)', fontSize: 'var(--text-xs)', marginLeft: 'var(--space-1)' }}>{sub}</span>}
       </span>
+    </div>
+  )
+}
+
+// Phase 4 Tier-2 Item 30 + ADD 7: room-scoped BOQ materials breakdown.
+// Memoized on [roomId, boqRevision, ratesRevision] — getBoqLines() is
+// expensive and these counters are the canonical invalidation signals.
+// Categories included are limited to those that emit material qty (cement
+// bags, paint gallons, tile counts, etc.) — pure area lines stay in the
+// existing "Materials needed" section above.
+const ROOM_MATERIAL_CATEGORIES = new Set([
+  'masonry', 'plaster', 'paint_materials', 'ceiling_finish', 'tiles',
+  'joinery', 'joinery_hardware', 'grills',
+])
+function RoomMaterialsBreakdown({ roomId }) {
+  const boqRevision   = useStore(s => s.boqRevision ?? 0)
+  const ratesRevision = useStore(s => s.ratesRevision ?? 0)
+  const [open, setOpen] = useState(false)
+  const lines = useMemo(() => {
+    if (!roomId) return []
+    const state = useStore.getState()
+    const rates = state.ratesByKey ?? {}
+    const all = getBoqLines(state, rates, { roomId })
+    return all.filter(l => l.qty > 0 && ROOM_MATERIAL_CATEGORIES.has(l.category))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, boqRevision, ratesRevision])
+
+  if (lines.length === 0) return null
+  return (
+    <div style={{ marginTop: 'var(--space-2)' }}>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(v => !v)}>
+        {open ? '▾' : '▸'} Material quantities ({lines.length})
+      </Button>
+      {open && (
+        <div style={{ marginTop: 'var(--space-2)' }}>
+          {lines.map(l => (
+            <Row
+              key={`${l.id}::${l.rateKey}`}
+              label={l.label}
+              value={`${l.qty.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit}`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -83,19 +129,29 @@ export default function RoomDetailPanel() {
     ? getOverlappingRoomName(selectedRoomId)
     : null
   const floorArea           = valid ? getRoomArea(selectedRoomId) : 0
+  // Area 1 — dimension-mode display. dual readout shows clear-internal first
+  // (engineers' tape-on-site value), centerline as the secondary reference.
+  const dimensionMode  = projectSettings?.dimensionMode ?? 'centerline'
+  const liveState      = useStore.getState()
+  const roomGeom       = valid ? getRoomGeometry(liveState, selectedRoomId, 'clear_internal') : null
+  const floorAreaClear = roomGeom?.area ?? floorArea
 
-  // Build per-wall details
+  // Build per-wall details. lenFt is the canvas-facing effective length
+  // (matches the on-canvas label). centerlineLenFt is shown as a secondary
+  // value when modes diverge.
   const wallDetails = room.wallIds.map(wid => {
     const w = walls[wid]
     if (!w) return null
     const a = nodes[w.n1], b = nodes[w.n2]
     if (!a || !b) return null
-    const lenFt      = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN * 100) / 100
+    const centerlineLenFt = Math.round(Math.hypot(b.x - a.x, b.y - a.y) / GRID_IN * 100) / 100
+    const effectiveLenFt  = getEffectiveWallLengthFt(liveState, wid, dimensionMode)
+    const lenFt      = effectiveLenFt
     const hFt        = Math.round((w.height ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN * 100) / 100
     const openings   = w.openings || []
     const openingArea = openings.reduce((s, o) => s + (o.width / GRID_IN) * (o.height / GRID_IN), 0)
     const netArea    = Math.round(Math.max(0, lenFt * hFt - openingArea) * 100) / 100
-    return { id: wid, lenFt, hFt, openings, netArea, isVirtual: w.isVirtual ?? false, isPlot: w.isPlot ?? false }
+    return { id: wid, lenFt, centerlineLenFt, hFt, openings, netArea, isVirtual: w.isVirtual ?? false, isPlot: w.isPlot ?? false }
   }).filter(Boolean)
 
   const realWalls    = wallDetails.filter(w => !w.isVirtual)
@@ -663,9 +719,17 @@ export default function RoomDetailPanel() {
 
         <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />
 
-        {/* Measurements */}
+        {/* Measurements — dimensionMode dual readout (Area 1) */}
         <Section title="Area">
-          <Row label="Floor"   value={fmtArea(floorArea)} />
+          {dimensionMode === 'clear_internal' && Math.abs(floorAreaClear - floorArea) > 0.05 ? (
+            <Row
+              label="Floor"
+              value={fmtArea(floorAreaClear)}
+              sub={`clear · ${fmtArea(floorArea)} centerline`}
+            />
+          ) : (
+            <Row label="Floor" value={fmtArea(floorArea)} />
+          )}
           <Row label="Ceiling" value={fmtArea(ceilingArea)} />
           <Row label="Walls"   value={fmtArea(totalWallArea)}
             sub={`${realWalls.length} wall${realWalls.length !== 1 ? 's' : ''}${virtualWalls.length ? ` + ${virtualWalls.length} virtual` : ''}`} />
@@ -728,6 +792,10 @@ export default function RoomDetailPanel() {
             </>
           })()}
         </Section>
+
+        {/* Phase 4 Tier-2 Item 30 + ADD 7: per-room material quantities,
+            memoized on [roomId, boqRevision, ratesRevision]. */}
+        <RoomMaterialsBreakdown roomId={room.id} />
 
         {/* Wall breakdown (collapsible) */}
         <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />

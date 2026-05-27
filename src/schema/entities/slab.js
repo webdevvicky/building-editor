@@ -21,6 +21,7 @@ export const slabSchema = Object.freeze({
     floorId:             Object.freeze({ type: 'ref',         required: true,  default: 'F1' }),
     classification:      Object.freeze({ type: 'string|null', required: true,  default: null }),
     role:                Object.freeze({ type: 'string|null', required: true,  default: null }),
+    roleSource:          Object.freeze({ type: 'string',      required: true,  default: 'AUTO', oneOf: Object.freeze(['AUTO', 'MANUAL']) }),
     reinforcementSpecId: Object.freeze({ type: 'string|null', required: true,  default: null }),
     meta:                Object.freeze({ type: 'object|null', required: true,  default: null }),
   }),

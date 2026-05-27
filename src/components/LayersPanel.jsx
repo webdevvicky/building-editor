@@ -9,6 +9,7 @@ const LAYER_LABELS = {
   columns:    'Columns',
   beams:      'Beams',
   stamps:     'Stamps',
+  slabs:      'Slabs',
   roomFills:  'Room fills',
   roomLabels: 'Room labels',
   nodes:      'Nodes',
@@ -47,7 +48,7 @@ const LAYER_LABELS = {
 const LAYER_GROUPS = [
   {
     title: 'Structural',
-    keys: ['walls', 'columns', 'beams', 'stamps', 'roomFills', 'roomLabels', 'nodes'],
+    keys: ['walls', 'columns', 'beams', 'stamps', 'slabs', 'roomFills', 'roomLabels', 'nodes'],
   },
   {
     title: 'Plumbing',
@@ -101,8 +102,18 @@ const LAYER_GROUPS = [
 
 export default function LayersPanel() {
   const [expanded, setExpanded] = useState(false)
-  const layerVisibility   = useStore(s => s.layerVisibility)
+  const layerVisibility    = useStore(s => s.layerVisibility)
   const setLayerVisibility = useStore(s => s.setLayerVisibility)
+  // Per-floor underlay (Fix 3): controls show the CURRENT floor's underlay
+  // only. ADD 9 still applies — group hidden when the active floor has no
+  // underlay. Setters target the current floor via the floorId parameter.
+  const currentFloorId     = useStore(s => s.currentFloorId)
+  const underlay           = useStore(s => {
+    const fid = s.currentFloorId
+    return s.projectSettings?.floors?.find(f => f.id === fid)?.underlay ?? null
+  })
+  const setUnderlayOpacity = useStore(s => s.setUnderlayOpacity)
+  const setUnderlayVisible = useStore(s => s.setUnderlayVisible)
 
   const allOn = Object.values(layerVisibility).every(Boolean)
 
@@ -140,6 +151,51 @@ export default function LayersPanel() {
 
       {expanded && (
         <div style={{ padding: '0 var(--space-3) var(--space-2)' }}>
+          {/* Underlay group — hidden when current floor has no underlay
+              (ADD 9). Controls target the current floor only (Fix 3). */}
+          {underlay && (
+            <div style={{ marginBottom: 'var(--space-3)' }}>
+              <div style={{
+                fontSize: 'var(--text-xs)',
+                color: 'var(--color-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+                fontWeight: 'var(--weight-semibold)',
+                marginBottom: 'var(--space-1)',
+              }}>
+                Underlay (this floor)
+              </div>
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                cursor: 'pointer', fontSize: 'var(--text-xs)',
+                color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2)',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={underlay.visible !== false}
+                  onChange={e => setUnderlayVisible(e.target.checked, currentFloorId)}
+                />
+                <span>Show floor plan</span>
+              </label>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)',
+              }}>
+                <span>Opacity</span>
+                <input
+                  type="range"
+                  min={0.05} max={1} step={0.05}
+                  value={underlay.opacity ?? 0.35}
+                  onChange={e => setUnderlayOpacity(parseFloat(e.target.value), currentFloorId)}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ width: 28, textAlign: 'right' }}>
+                  {Math.round((underlay.opacity ?? 0.35) * 100)}%
+                </span>
+              </div>
+            </div>
+          )}
+
           {LAYER_GROUPS.map(group => {
             // Per-discipline master toggle (Arch 8 Phase 1).
             // Tri-state: all-on / partial / all-off. Click flips entire group

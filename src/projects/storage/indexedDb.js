@@ -37,7 +37,10 @@
 import { uid } from '../../lib/ids.js'
 
 export const DB_NAME    = 'boq-app'
-export const DB_VERSION = 1
+// Phase 4 Tier-2 ADD 5: bump DB_VERSION when a new object store is added.
+// IDB onupgradeneeded handler in the real adapter dispatches on this.
+// Area 2C Step 8 — bumped to 3 with the addition of the TEMPLATES store.
+export const DB_VERSION = 3
 export const DB_STORES  = Object.freeze({
   PROJECTS:   'projects',
   CHUNKS:     'chunks',
@@ -45,7 +48,27 @@ export const DB_STORES  = Object.freeze({
   SNAPSHOTS:  'snapshots',
   REVISIONS:  'revisions',
   CATALOGS:   'catalogs',
+  // Phase 4 Tier-2 ADD 4: generic binary asset blob store. Keyed by
+  // composite `${projectId}::${assetType}::${assetId}`. Values are
+  // { key, projectId, assetType, mimeType, blob, createdAt }.
+  ASSETS:     'assets',
+  // Phase 4 Tier-2 ADD 5: IDB schema version + future-migration anchor.
+  // Single record at key 'meta'. Read at adapter boot; runForwardMigrations
+  // applies any pending IDB-level migrations before app code touches data.
+  METADATA:   'metadata',
+  // Area 2C Step 8 — project templates. Keyed by template id (uid).
+  // Values: { id, ifcGlobalId, name, kind: 'user'|'factory', createdAt,
+  //           snapshot: <MODEL-ONLY buildSnapshot output — Correction 7> }
+  TEMPLATES:  'templates',
 })
+
+// Phase 4 Tier-2 ADD 5: IDB schema version. Bump together with DB_VERSION
+// when a structural change demands a forward migration. Each entry runs
+// once (in order) when the user's stored version is below the target.
+export const IDB_SCHEMA_VERSION = 1
+export const IDB_MIGRATIONS = Object.freeze([
+  // Future: { from: 1, to: 2, label: '...', migrate: async (storage) => {...} }
+])
 
 // Project chunks — the slices that get serialized independently.
 // Splitting at these boundaries lets autosave write only the slice(s)
