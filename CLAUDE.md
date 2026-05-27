@@ -1,5 +1,107 @@
 # Building Editor — Developer Notes
 
+## Enterprise architecture — Phase 4 (2026-05-26)
+
+Tier 1 UI gaps closed. Every BOQ Gap 1-8 schema slot + every
+projectSettings subtree + every per-entity override is now editable
+in the panels. Data layer and UI layer match.
+
+**3 sub-commits** (`f1440f1`, `8e373dc`, `2cbc80b`); all 23 verify
+scripts stay green throughout (pure UI; no aggregator changes).
+
+### Phase 4 — Tier 1 UI (Arch 7)
+
+**Commit A — Foundation setters + ProjectSettingsPanel** (`f1440f1`)
+- 3 missing setters added to `src/store.js` (mirror existing
+  `setRoomPlasterSystem` pattern):
+  - `setRoomPaintSystem(roomId, sysId)` — null = inherit project default
+  - `setRoomCeilingFinishSystem(roomId, sysId)` — null = inherit
+  - `setOpeningHardware(wallId, openingId, partial)` —
+    partial: `{ hardwareSetId?, hardwareOverrides? }`
+- 9 new sections in `ProjectSettingsPanel.jsx` (appended after the
+  existing staircase defaults block):
+  - **Project Metadata** (Gap 1) — 6 text fields + date picker
+  - **Contingency** (Gap 2) — defaultPercent + per-category
+    overrides table (9 common categories) + displayMode segmented
+  - **Default Paint Systems** (Gap 6) — interior + exterior dropdowns
+    filtered by appliesContext
+  - **Default Ceiling Finish** (Gap 7) — dropdown of
+    CEILING_FINISH_REGISTRY
+  - **Door Hardware Defaults** (Gap 4) — per-subtype dropdowns
+    filtered by HARDWARE_SET_REGISTRY.appliesTo
+  - **Window Hardware Defaults** (Gap 5) — per-subtype dropdowns
+    filtered by WINDOW_HARDWARE_SET_REGISTRY.appliesTo
+  - **Project Costs** (Gap 8) — laborMode/Percent/Lumpsum +
+    supervisionMode/Percent/Lumpsum + overheadPercent + profitPercent +
+    gstPercent + gstAppliesToLabor toggle
+  - **MEP Sizing Strategy** — per-discipline picker (PLUMBING /
+    ELECTRICAL / HVAC / FIRE / ELV / SOLAR) with 4 strategies
+    (CATALOG / HUNTER / LOAD_BASED / GRADIENT_DRAIN). Wires
+    previously-orphaned `setMepSizingStrategy`.
+  - **Auto-Sunken Slab Room Types** — multi-checkbox over
+    ROOM_TYPES (folded from Arch 8 follow-up)
+
+**Commit B — Per-entity overrides** (`8e373dc`)
+- `src/components/RoomDetailPanel.jsx` — 4 new sections inserted
+  between the existing "Tiles & skirting" section and the "Area"
+  section:
+  - **Paint system** (gated on `room.finishes.paint`) — dropdown
+    + "Use project default" + source badge
+  - **Ceiling finish** (gated on `room.finishes.ceilingPlaster`,
+    else hint) — dropdown of `listCeilingFinishSystems()`
+  - **Kitchen counter override** (`room.type === 'KITCHEN'`) —
+    auto-mode hint OR manual length/depth inputs + Clear
+  - **Balcony handrail** (`room.type === 'BALCONY'`) — tri-state
+    (Default / Force on / Force off) + heightFt FtField
+- `src/components/OpeningDetailPanel.jsx` — new Hardware section
+  between Sunshade checkbox and Delete footer:
+  - Resolves current items via `resolveOpeningHardware(state,
+    opening)` — shows source badge + resolved-items preview box
+  - Set picker dropdown filtered by `opening.subtype` (4 set lists)
+  - Collapsible `<details>` "Advanced overrides" — schema is
+    wired; full add/remove UI deferred to follow-on commit
+
+**Commit C — BOQPanel surface** (`2cbc80b`)
+- 4 new BOQ section components in `src/components/boq/`:
+  - `SteelByDiaSection` — procurement rollup (Ø8/10/12/16/20/25/32mm)
+  - `JoineryHardwareBoqSection` — hardware items summed across openings
+  - `PaintMaterialsBoqSection` — gallons per (system × layer)
+  - `CeilingFinishBoqSection` — false-ceiling materials per system
+- 4 sections wired into `BOQPanel.jsx` after `GrillsBoqSection`
+- 3 new header blocks on BOQPanel:
+  - **Scope of work** (collapsible `<details>` below floor area) —
+    floor count, built-up area, plot area, opening counts,
+    room counts by type. Reads from
+    `computeBoqPresentationModel(...).scopeOfWork`.
+  - **Contingency displayMode toggle** (above column headers) —
+    Clean | Detailed segmented control. Writes
+    `projectSettings.contingency.displayMode` — affects Excel +
+    PDF column layout via presentation model.
+  - **Project Cost Summary** (above materials total, only when any
+    component non-zero) — Labor / Supervision / Overhead / Profit /
+    GST / GRAND TOTAL rows. Mirrors Excel Summary block + PDF
+    cover layout exactly.
+- Existing "Total cost" row renamed to "Materials total" (the
+  grand total now lives in the Project Cost Summary block above it).
+
+### Locked rule (Phase 4)
+
+- **Data layer + UI layer must stay in sync.** Every projectSettings
+  subtree shipped in Phase 2 has a corresponding section in
+  ProjectSettingsPanel. Every per-entity override slot has a
+  per-entity panel section. Every BOQ category emitted by lines.js
+  has a BOQPanel section component. New schemas must ship their UI
+  in the same commit (or the immediately-following one).
+
+### Updated verify-script inventory (23 total — unchanged)
+
+Phase 4 ships zero new verify scripts — it's pure UI surface on
+top of the schema + aggregator infrastructure shipped in Phases 1-3.
+All 23 existing scripts continue passing because Phase 4 changes
+don't touch any data-layer contract.
+
+---
+
 ## Enterprise architecture — Phase 3 (2026-05-26)
 
 Compute + validation formalization. Builds on the Phase 1 foundation
