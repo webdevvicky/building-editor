@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN, DEFAULT_WALL_THICK_IN } from '../geometry'
+import { getEffectiveWallLengthFt } from '../topology/index.js'
 import { MATERIAL_LIBRARY } from '../materials'
 import { MASONRY_SYSTEMS } from '../specs/masonrySystems'
 import { toast } from './ui/Toast'
@@ -75,6 +76,13 @@ export default function OpeningPanel() {
 
   const wallHeight = Math.round((wall.height ?? DEFAULT_WALL_HEIGHT_IN) / GRID_IN * 100) / 100
   const wallLen    = getWallLength(selectedWallId)
+  // Effective length (clear-internal mode aware). Centerline stays the
+  // authoritative axis for opening offsets (data semantics unchanged);
+  // effective surfaces what the user sees on the inner face.
+  const dimensionMode = useStore.getState().projectSettings?.dimensionMode ?? 'centerline'
+  const wallLenEff = getEffectiveWallLengthFt(useStore.getState(), selectedWallId, dimensionMode)
+  const showDualWallLen = dimensionMode === 'clear_internal'
+                       && Math.abs(wallLenEff - wallLen) > 0.01
   const openings   = wall.openings || []
 
   const w = Number(width)
@@ -171,7 +179,9 @@ export default function OpeningPanel() {
       </Field>
 
       <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', marginBottom: 'var(--space-3)' }}>
-        Length: {fmtLength(wallLen)}
+        {showDualWallLen
+          ? `Length: ${fmtLength(wallLenEff)} clear · ${fmtLength(wallLen)} centerline`
+          : `Length: ${fmtLength(wallLen)}`}
       </div>
 
       {/* Plot boundary toggle */}

@@ -23,7 +23,7 @@ to halve that. **27 verify scripts now gate every commit** (+3 new:
 | 1 | Math kernel + verify-dimension-mode | `getRoomGeometry(state, roomId, mode)` is the **single geometry entry point** (Correction 9). `EffectiveRoomEdge[]` primitive carries `{wallId, a, b, lengthFt, insetDistanceIn, sourceEdgeIndex}` (Correction 1) — polygons derive from edges. Inset via per-edge half-thickness offset + adjacent-line intersection. Miter cap = `3 × max(adjacentHalfThicknesses)` (Correction 3). Collapsed rooms return zero-area edges with `collapsed:true` + warnings, **never null** (Correction 4). `scripts/verify-dimension-mode.mjs` ships 92 assertions including the **400-config fuzz suite** (Correction 10): 200 random rectangles + 200 random L-shapes covering winding bugs, intersection instability, self-intersections, precision drift. |
 | 2 | `projectSettings.dimensionMode` setting | Default `'centerline'` (legacy-safe). `loadProject` detects `data.projectSettings == null` as a new-project signal → stamps `'clear_internal'`. `setDimensionMode(mode)` action validates the input set. ProjectSettingsPanel "Dimension Convention" section appears at the top. verify-persistence extended for IDB round-trip of the field. |
 | 3 | Aggregator wiring | `plaster.js`, `tiles.js`, `paint.js`, `ceilingFinish.js` all route through `getRoomGeometry`. Inner-face wall area uses **Option A**: per-edge `lengthFt × wallHeightFt − openings` (Correction 1's wallId-keyed edges). External wall outer face unchanged — that's the physical centerline on the exterior. Centerline mode produces byte-identical output to today (verify-boq still 250+ green). |
-| 4 | Canvas display | Wall labels query `getEffectiveWallLengthFt(state, wallId, mode)` (Correction 2 — no centerline−halfThickness approximation; the helper looks up the matching wallId edge for exact length). RoomPanel "Floor" row dual readout: `85.6 ft² (clear) · 100 ft² (centerline)` when modes diverge. Ghost line during draw stays centerline (second endpoint isn't a real node yet). |
+| 4 | Canvas display | Wall labels query `getEffectiveWallLengthFt(state, wallId, mode)` (Correction 2 — no centerline−halfThickness approximation; the helper looks up the matching wallId edge for exact length). RoomPanel "Floor" row dual readout: `85.6 ft² (clear) · 100 ft² (centerline)` when modes diverge. Ghost line during draw stays centerline (second endpoint isn't a real node yet). **Ghost rectangle preview labels (rect_room tool) deduct `DEFAULT_WALL_THICK_IN` from each axis under clear_internal** so the preview matches the room that will be created. **OpeningDetailPanel / OpeningPanel / FoundationPanel show a dual `clear · centerline` wall-length readout** when modes diverge — clamp logic on opening offsets stays centerline-anchored because offset values are stored in centerline-relative inches; only the human-readable surface shows both. |
 
 **Area 2 — Drawing Speed (Steps 5-9):**
 
@@ -242,28 +242,49 @@ Already shipped pre-Tier-2 (audit confirmed in code; updated list stale):
   import `buildSnapshot` without dragging in Toast.jsx (Node ESM can't
   parse JSX).
 
-**Phase C — PDF/image underlay:**
+**Phase C — PDF/image underlay (per-floor + multi-page picker):**
 
 - `pdfjs-dist ^4.10.38` added to dependencies. Dynamic import keeps
   the ~600 KB bundle off the cold path.
-- `src/underlay/pdfRender.js` — PDF page 1 → offscreen canvas →
-  PNG dataUrl. Image files use native FileReader. Both paths converge
-  on a single `{ dataUrl, wPx, hPx, mimeType }` shape.
+- `src/underlay/pdfRender.js` — page-aware. `renderPdfPageToPng(bytes,
+  { onMultiPage, pageNumber })`: single-page PDFs auto-route to page 1;
+  multi-page PDFs invoke `onMultiPage({ numPages, thumbnails, choosePage })`
+  with sub-images (240px max edge) so the caller can prompt for a page;
+  `pageNumber` override forces a specific page. Image files use native
+  FileReader. Both paths converge on `{ dataUrl, wPx, hPx, mimeType,
+  pageNumber?, numPages? }`. Backwards-compat `renderPdfFirstPageToPng`
+  retained for callers that only need page 1.
+- `src/components/PDFPagePickerModal.jsx` — picker UI that listens for
+  the `Toolbar.jsx`-fired event and shows thumbnails; Toolbar wires the
+  `onMultiPage` callback to mount this modal and await `choosePage(n)`.
 - `src/underlay/calibration.js` — `computeInchesPerPixel`,
   `buildCalibration`, `renderDimensionsInches`. Calibration stored in
   IMAGE PIXEL space per ADD 8 (not world coords — decouples from
   canvas viewport).
+- **Per-floor underlay (Fix 3 — corrects an initial scope reduction).**
+  Each floor owns its own underlay record at
+  `projectSettings.floors[i].underlay`. Setters take a `(partial,
+  floorId)` signature: `setUnderlay`, `setUnderlayCalibration`,
+  `setUnderlayPlacement`, `setUnderlayOpacity`, `setUnderlayVisible`.
+  Selector `getFloorUnderlay(floorId)` is the canonical read.
+  Asset key: `${projectId}::underlay::${floorId}`. `loadProject`
+  migrates legacy single `projectSettings.underlay` onto
+  `floors[0].underlay`. The original Phase 5 ship was project-wide;
+  per-floor was the corrective follow-on captured in the user-memory
+  entry `feedback_underlay_scope_violation_lesson.md`.
 - `src/components/UnderlayLayer.jsx` — SVG `<image>` inside Canvas's
-  transform group, between group open and grid rect. Blob lazy-loaded
-  from IDB via module-level cache.
+  transform group, between group open and grid rect. Reads the active
+  floor's underlay; blob lazy-loaded from IDB via module-level cache.
 - `src/components/CalibrationModal.jsx` — **two-click capture** is the
   canonical flow (user clicks two reference points on the canvas with
   `calibrate_underlay` tool active; modal opens prompting for known
   distance). Full-width fallback preserved for users who know "this
-  drawing is X ft wide" without an exact reference segment.
+  drawing is X ft wide" without an exact reference segment. Writes to
+  the current floor's calibration.
 - Visual markers on Canvas: clicked points render as primary-colour
   dots, with a dashed line between them once both are captured.
-- LayersPanel Underlay group hidden when no underlay loaded (ADD 9).
+- LayersPanel Underlay group hidden when no underlay loaded on the
+  current floor (ADD 9).
 - Toolbar `View & Settings → Underlay` group: Import / Calibrate / Clear.
 
 ### 9 architectural additions (locked from review)
@@ -352,9 +373,10 @@ src/underlay/
   calibration.js        — computeInchesPerPixel + buildCalibration +
                           renderDimensionsInches (pure math; image-pixel
                           space per ADD 8)
-  pdfRender.js          — dynamic pdfjs-dist import; PDF page 1 → PNG
-                          dataUrl; image FileReader path; importUnderlayFile
-                          driver
+  pdfRender.js          — dynamic pdfjs-dist import; page-aware (single-
+                          page auto / multi-page picker via onMultiPage
+                          callback with thumbnails); image FileReader
+                          path; importUnderlayFile driver
 src/mep/
   resolution.js         — central MEP override resolution (ADD 2) —
                           resolveFixtureFlowLpm / resolveWireGauge /

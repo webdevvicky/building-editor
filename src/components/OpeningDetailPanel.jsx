@@ -13,6 +13,7 @@
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { GRID_IN } from '../geometry'
+import { getEffectiveWallLengthFt } from '../topology/index.js'
 import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
@@ -58,6 +59,14 @@ export default function OpeningDetailPanel() {
   if (!sel || !wall || !opening) return null
 
   const wallLenFt = getWallLength(sel.wallId) ?? 0
+  // Effective wall length honors projectSettings.dimensionMode. Centerline
+  // is the data-anchor for opening offsets (stored in inches from a node);
+  // effective is what the user actually sees on the inner face. Show both
+  // when modes diverge so users can reconcile placement vs inner-face span.
+  const dimensionMode = projectSettings?.dimensionMode ?? 'centerline'
+  const wallLenEffFt = getEffectiveWallLengthFt(useStore.getState(), sel.wallId, dimensionMode)
+  const showDualWallLen = dimensionMode === 'clear_internal'
+                       && Math.abs(wallLenEffFt - wallLenFt) > 0.01
   const isDoor   = opening.type === 'door'
   const isWindow = opening.type === 'window'
 
@@ -145,7 +154,15 @@ export default function OpeningDetailPanel() {
 
       {/* Offset + quick buttons */}
       <div style={{ marginBottom: 'var(--space-2)' }}>
-        <Field label="Starts at" inline hint={`Wall is ${fmtLength(wallLenFt)} long`}>
+        <Field
+          label="Starts at"
+          inline
+          hint={
+            showDualWallLen
+              ? `Wall is ${fmtLength(wallLenEffFt)} clear · ${fmtLength(wallLenFt)} centerline (offsets measured from centerline)`
+              : `Wall is ${fmtLength(wallLenFt)} long`
+          }
+        >
           <FeetInchesInput
             value={opening.offset / GRID_IN}
             onCommit={ft => updateOpening(sel.wallId, sel.openingId, { offset: ft * GRID_IN })}

@@ -7,6 +7,7 @@
 
 import { useStore } from '../store'
 import { resolveFootingReinforcementSpec, humanizeAssignmentSource } from '../specs/resolution'
+import { getEffectiveWallLengthFt } from '../topology/index.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
 import { Modal } from './ui/Modal.jsx'
@@ -494,6 +495,15 @@ export default function FoundationPanel() {
                 const attached = (f.wallIds || []).includes(w.id)
                 const otherFdn = fdnList.find(of => of.id !== f.id && (of.wallIds || []).includes(w.id))
                 const lenFt = getWallLength(w.id) || 0
+                // Strip-foundation length math IS centerline (the strip is
+                // cast under the wall axis) — that drives BOQ. Surfacing
+                // the clear-internal length alongside helps users pick the
+                // right walls when modes diverge; the centerline value
+                // remains the primary structural number.
+                const dimensionMode = projectSettings?.dimensionMode ?? 'centerline'
+                const lenEffFt = getEffectiveWallLengthFt(useStore.getState(), w.id, dimensionMode)
+                const showDualLen = dimensionMode === 'clear_internal'
+                                 && Math.abs(lenEffFt - lenFt) > 0.01
                 return (
                   <label
                     key={w.id}
@@ -517,6 +527,11 @@ export default function FoundationPanel() {
                     />
                     <span style={{ flex: 1 }}>
                       Wall {w.id.slice(0, 6)} — {Math.round(lenFt * 100) / 100} ft
+                      {showDualLen && (
+                        <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
+                          ({Math.round(lenEffFt * 100) / 100} ft clear)
+                        </span>
+                      )}
                     </span>
                     {otherFdn && !attached && (
                       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)' }}>

@@ -1410,14 +1410,28 @@ export default function Canvas() {
          * below the UI overlays / nodes / columns layers. */}
         <ClashOverlay />
 
-        {/* Area 2B — ghost rectangle while rect_room tool is active */}
+        {/* Area 2B — ghost rectangle while rect_room tool is active.
+            Dim labels respect projectSettings.dimensionMode: in
+            clear_internal we show the inner-face dimensions the user
+            will actually see in the BOQ (centerline shrunk by half-wall
+            on each side; the rect always creates walls of default
+            thickness so the shrinkage is symmetric and well-defined
+            even before the walls exist). */}
         {activeTool === 'rect_room' && rectFirstCorner && cursor && (() => {
           const c1 = rectFirstCorner
           const c2 = cursor
           const xs = [c1.x, c2.x].sort((a, b) => a - b)
           const ys = [c1.y, c2.y].sort((a, b) => a - b)
-          const wFt = Math.abs(c2.x - c1.x) / GRID_IN
-          const hFt = Math.abs(c2.y - c1.y) / GRID_IN
+          const wFtCenter = Math.abs(c2.x - c1.x) / GRID_IN
+          const hFtCenter = Math.abs(c2.y - c1.y) / GRID_IN
+          // Effective interior dim = centerline − 2 × half-thickness, one
+          // perpendicular wall on each end. DEFAULT_WALL_THICK_IN matches
+          // what addRectangleRoom seeds onto the new walls.
+          const insetFt = (DEFAULT_WALL_THICK_IN ?? 9) / 12
+          const effW = dimensionMode === 'clear_internal'
+            ? Math.max(0, wFtCenter - insetFt) : wFtCenter
+          const effH = dimensionMode === 'clear_internal'
+            ? Math.max(0, hFtCenter - insetFt) : hFtCenter
           const sxA = sx(xs[0]), sxB = sx(xs[1])
           const syA = sy(ys[0]), syB = sy(ys[1])
           // SVG: y-flip means syA > syB visually; reorder for <rect>.
@@ -1434,7 +1448,7 @@ export default function Canvas() {
                 textAnchor="middle" dominantBaseline="middle"
                 fontSize={12} fill="#4a90e2"
                 style={{ userSelect: 'none' }}>
-                {fmtLen(wFt, unit)} × {fmtLen(hFt, unit)}
+                {fmtLen(effW, unit)} × {fmtLen(effH, unit)}
               </text>
             </g>
           )
