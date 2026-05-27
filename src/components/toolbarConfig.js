@@ -6,7 +6,19 @@
 // Item kinds:
 //   - 'tool'      → switches activeTool to toolId via setTool(toolId).
 //   - 'toggle'    → flips a boolean store key (storeKey).
+//                   Optional `path` (e.g. 'projectSettings.snap.enabled') —
+//                   when present, the value is read/written via a nested
+//                   path rather than a flat top-level store key. The
+//                   dispatcher in Toolbar.jsx maps known paths to their
+//                   specialized setter.
 //   - 'segmented' → sets a store key to one of N values.
+//                   Optional `path` (same semantics as toggle) — when
+//                   present, the value is read/written via a nested path
+//                   through projectSettings.
+//   - 'indicator' → read-only status display (no click handler). Used for
+//                   surfaces like the snap badge: shows current state with
+//                   an icon + label + optional keyboard-shortcut hint.
+//                   The dispatcher in Toolbar.jsx renders by `indicatorId`.
 //   - 'action'    → one-shot action; handler lives in Toolbar.jsx ACTION_HANDLERS.
 //
 // Adding a new tool = one entry here. No JSX changes needed in Toolbar.jsx.
@@ -46,6 +58,9 @@ import {
   Image as ImageIcon,
   Crosshair,
   Trash2,
+  Grid3X3,
+  Magnet,
+  Frame,
 } from 'lucide-react'
 
 export const TOOL_CLUSTERS = Object.freeze([
@@ -53,11 +68,12 @@ export const TOOL_CLUSTERS = Object.freeze([
     id: 'draw',
     label: 'Draw',
     items: [
-      { type: 'tool', toolId: 'draw',      icon: Pencil,        label: 'Draw walls',     shortcut: 'D' },
-      { type: 'tool', toolId: 'rect_room', icon: Square,        label: 'Rectangle room', shortcut: 'Shift+R' },
-      { type: 'tool', toolId: 'select',    icon: MousePointer2, label: 'Select',         shortcut: 'S' },
-      { type: 'tool', toolId: 'split',     icon: Scissors,      label: 'Split wall' },
-      { type: 'tool', toolId: 'room',      icon: Hexagon,       label: 'Room',           shortcut: 'R' },
+      { type: 'tool', toolId: 'draw',        icon: Pencil,        label: 'Draw walls',     shortcut: 'D' },
+      { type: 'tool', toolId: 'rect_room',   icon: Square,        label: 'Rectangle room', shortcut: 'Shift+R' },
+      { type: 'tool', toolId: 'select',      icon: MousePointer2, label: 'Select',         shortcut: 'S' },
+      { type: 'tool', toolId: 'split',       icon: Scissors,      label: 'Split wall' },
+      { type: 'tool', toolId: 'room',        icon: Hexagon,       label: 'Room',           shortcut: 'R' },
+      { type: 'tool', toolId: 'room_detect', icon: Frame,         label: 'Detect Room',    shortcut: 'Shift+A' },
     ],
   },
   {
@@ -114,6 +130,34 @@ export const TOOL_CLUSTERS = Object.freeze([
         items: [
           { type: 'toggle', storeKey: 'showDimensions', icon: Tag,    label: 'Show dimensions' },
           { type: 'toggle', storeKey: 'drawVirtual',    icon: EyeOff, label: 'Draw virtual walls' },
+        ],
+      },
+      {
+        // Phase A Task 5 — snap quick-controls. Toolbar surfaces ONLY the
+        // pitch segmented + a status indicator. Every other snap setting
+        // (enabled toggle, bypass key, per-target enable, tolerances) lives
+        // in ProjectSettingsPanel → Snap section. F9 toggles snap globally.
+        title: 'Snap',
+        items: [
+          {
+            type:    'segmented',
+            path:    'projectSettings.snap.pitchIn',
+            action:  'setSnapPitch',
+            icon:    Grid3X3,
+            options: [
+              { value: 1,  label: '1"'  },
+              { value: 3,  label: '3"'  },
+              { value: 6,  label: '6"'  },
+              { value: 12, label: '12"' },
+              { value: 24, label: '24"' },
+            ],
+          },
+          {
+            type:        'indicator',
+            indicatorId: 'snap',
+            icon:        Magnet,
+            shortcut:    'F9',
+          },
         ],
       },
       {

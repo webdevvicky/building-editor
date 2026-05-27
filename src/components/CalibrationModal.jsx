@@ -43,9 +43,12 @@ export default function CalibrationModal() {
 
   const toolActive = activeTool === 'calibrate_underlay'
   const haveBothPoints = !!(capture?.p1Px && capture?.p2Px)
-  // Modal opens when the tool is active AND either both points are
-  // captured OR no points are captured (full-width fallback).
-  const open = toolActive && (haveBothPoints || !capture)
+  // Two-click is canonical: the modal opens only AFTER both reference
+  // points have been clicked, OR when the user explicitly opts into the
+  // full-width fallback via the status pill. Before that, the pill
+  // guides the user; the canvas stays clickable underneath.
+  const [fallbackRequested, setFallbackRequested] = useState(false)
+  const open = toolActive && (haveBothPoints || fallbackRequested)
 
   const [lengthFt, setLengthFt] = useState(null)
   const [mode, setMode] = useState('two-click')  // 'two-click' | 'full-width'
@@ -59,16 +62,23 @@ export default function CalibrationModal() {
   }, [open, haveBothPoints, underlay?.calibration?.knownLengthFt])
 
   // Tool switched away (Esc / other tool button) — drop any captured points
-  // so re-entering the tool starts fresh.
+  // and reset the fallback flag so re-entering the tool starts fresh.
   useEffect(() => {
-    if (!toolActive && capture) {
-      setSelection({ calibrationCapture: null })
+    if (!toolActive) {
+      if (capture) setSelection({ calibrationCapture: null })
+      if (fallbackRequested) setFallbackRequested(false)
     }
-  }, [toolActive, capture, setSelection])
+  }, [toolActive, capture, fallbackRequested, setSelection])
 
   function close() {
     setSelection({ calibrationCapture: null })
+    setFallbackRequested(false)
     setTool('select')
+  }
+
+  function requestFullWidthFallback() {
+    if (capture) setSelection({ calibrationCapture: null })
+    setFallbackRequested(true)
   }
 
   function handleApply() {
@@ -77,8 +87,12 @@ export default function CalibrationModal() {
       return
     }
     const known = Number(lengthFt)
-    if (!Number.isFinite(known) || known <= 0) {
-      toast.error('Enter a positive length in feet.')
+    if (lengthFt === null || lengthFt === undefined || !Number.isFinite(known)) {
+      toast.error('Enter a length — e.g. 15\'-0" or 15.5')
+      return
+    }
+    if (known <= 0) {
+      toast.error('Length must be positive.')
       return
     }
     let calibration = null
@@ -97,13 +111,17 @@ export default function CalibrationModal() {
       return
     }
     setUnderlayCalibration(calibration, currentFloorId)
+    setFallbackRequested(false)
     toast.success(`Calibrated — 1 px = ${calibration.inchesPerPixel.toFixed(4)} in`)
     close()
   }
 
-  // Tool active but only ONE point clicked — render a tiny status hint
-  // rather than opening the modal. Lets the user complete the second click.
-  if (toolActive && capture?.p1Px && !capture?.p2Px) {
+  // Tool active but modal not yet open — render a status pill guiding
+  // the user through two-click capture, with an explicit fallback link.
+  // The pill container is pointer-events:none so canvas clicks pass
+  // through; only the actionable button inside re-enables clicks.
+  if (toolActive && !open) {
+    const havePoint1 = !!capture?.p1Px
     return (
       <div style={{
         position: 'fixed',
@@ -117,12 +135,44 @@ export default function CalibrationModal() {
         borderRadius: 'var(--radius-md)',
         boxShadow: 'var(--shadow-md)',
         fontSize: 'var(--text-sm)',
+        pointerEvents: 'none',
+        textAlign: 'center',
+        maxWidth: 480,
       }}>
-        First point captured at ({Math.round(capture.p1Px.x)},{' '}
-        {Math.round(capture.p1Px.y)}) — click the second point. <br/>
-        <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
-          Press Esc to cancel.
-        </span>
+        {havePoint1 ? (
+          <>First point captured at ({Math.round(capture.p1Px.x)},{' '}
+          {Math.round(capture.p1Px.y)}) — click the second point.</>
+        ) : (
+          <>Click two reference points on the plan to calibrate scale.</>
+        )}
+        <div style={{
+          marginTop: 'var(--space-1)',
+          color: 'var(--color-text-muted)',
+          fontSize: 'var(--text-xs)',
+          display: 'flex',
+          gap: 'var(--space-2)',
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}>
+          <button
+            type="button"
+            onClick={requestFullWidthFallback}
+            style={{
+              pointerEvents: 'auto',
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-primary)',
+              cursor: 'pointer',
+              padding: 0,
+              font: 'inherit',
+              textDecoration: 'underline',
+            }}
+          >
+            Use full drawing width instead
+          </button>
+          <span>·</span>
+          <span>Press Esc to cancel.</span>
+        </div>
       </div>
     )
   }
@@ -206,7 +256,7 @@ export default function CalibrationModal() {
       )}
 
       <Field label={mode === 'two-click' ? 'Distance between clicked points' : 'Full drawing width'}>
-        <FeetInchesInput value={lengthFt} onChange={setLengthFt} autoFocus />
+        <FeetInchesInput value={lengthFt} onCommit={setLengthFt} autoFocus />
       </Field>
 
       {underlay.calibration && (

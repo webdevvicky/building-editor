@@ -19,3 +19,33 @@
 .toolbar .ui-btn:focus-visible {
   z-index: 1; /* keep the focus ring above sibling triggers */
 }
+
+/* Phase A Task 5 — toolbar status indicator (snap badge). Read-only.
+   Inline pill inside the toolbar row; primary tint when snap is on. */
+.ui-toolbar__indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.ui-toolbar__indicator[data-snap-on="true"] {
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+}
+.ui-toolbar__indicator kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  font-size: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}

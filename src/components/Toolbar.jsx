@@ -47,6 +47,13 @@ export default function Toolbar() {
   const undo                = useStore(s => s.undo)
   const redo                = useStore(s => s.redo)
   const loadProject         = useStore(s => s.loadProject)
+  // Phase A Task 5 — snap toolbar surface. Subscribe at the top of the
+  // component so hook order stays stable (the indicator branch reads `snap`,
+  // the segmented branch with path='projectSettings.snap.pitchIn' uses
+  // `setSnapSettings` to write the new pitch).
+  const snap                = useStore(s => s.projectSettings?.snap)
+  const setSnapSettings     = useStore(s => s.setSnapSettings)
+  const setProjectSettings  = useStore(s => s.setProjectSettings)
 
   const fileInputRef = useRef(null)
   // Phase 4 Tier-2 Step 18 — separate file input for underlay imports
@@ -219,6 +226,37 @@ export default function Toolbar() {
     redo: future.length === 0,
   }
 
+  // ── Path-based read/write (used by `toggle` and `segmented` items that
+  // carry an optional `path` field instead of a flat top-level storeKey).
+  // Resolves a dotted path against the current store snapshot for reading,
+  // and dispatches to a specialized setter for writing.
+  function readPath(path) {
+    if (!path) return undefined
+    const s = useStore.getState()
+    return path.split('.').reduce((o, k) => (o == null ? o : o[k]), s)
+  }
+
+  function writePath(path, value) {
+    // Phase A — snap pitch is the only path we route today. New paths add
+    // a single switch case here mapping to their specialized setter.
+    if (path === 'projectSettings.snap.pitchIn') {
+      setSnapSettings({ pitchIn: value })
+      return
+    }
+    if (path === 'projectSettings.snap.enabled') {
+      setSnapSettings({ enabled: !!value })
+      return
+    }
+    // Fallback: nest the value under projectSettings.<key> via the generic
+    // setter. This will only be hit if a future config entry adds a new
+    // path without registering its setter — emit a warning so we notice.
+    console.warn(`toolbar path "${path}" — no specialized setter; using setProjectSettings fallback`)
+    const segs = path.split('.')
+    if (segs[0] === 'projectSettings' && segs.length === 2) {
+      setProjectSettings({ [segs[1]]: value })
+    }
+  }
+
   // ── Item dispatch ───────────────────────────────────────────────────────
 
   function renderItem(item, key) {
@@ -235,6 +273,20 @@ export default function Toolbar() {
       )
     }
     if (item.type === 'toggle') {
+      // Path-driven toggle (e.g. projectSettings.snap.enabled) OR legacy
+      // flat-storeKey toggle (showDimensions, drawVirtual).
+      if (item.path) {
+        const checked = !!readPath(item.path)
+        return (
+          <DropdownToggle
+            key={key}
+            icon={item.icon}
+            label={item.label}
+            checked={checked}
+            onToggle={() => writePath(item.path, !checked)}
+          />
+        )
+      }
       const checked = { showDimensions, drawVirtual }[item.storeKey]
       const handler = { showDimensions: toggleShowDimensions, drawVirtual: toggleDrawVirtual }[item.storeKey]
       return (
@@ -248,6 +300,19 @@ export default function Toolbar() {
       )
     }
     if (item.type === 'segmented') {
+      // Path-driven segmented (e.g. projectSettings.snap.pitchIn) OR
+      // legacy flat-storeKey segmented ('unit'). Same options array shape
+      // in both cases.
+      if (item.path) {
+        return (
+          <DropdownSegmented
+            key={key}
+            options={item.options}
+            value={readPath(item.path)}
+            onChange={v => writePath(item.path, v)}
+          />
+        )
+      }
       return (
         <DropdownSegmented
           key={key}
@@ -256,6 +321,29 @@ export default function Toolbar() {
           onChange={setUnit}
         />
       )
+    }
+    if (item.type === 'indicator') {
+      // Read-only status badge. Currently only the snap indicator exists —
+      // it reflects projectSettings.snap.enabled + pitchIn live.
+      if (item.indicatorId === 'snap') {
+        const text = snap?.enabled
+          ? `SNAP ${snap.pitchIn}"`
+          : 'SNAP OFF'
+        const Icon = item.icon
+        return (
+          <div
+            key={key}
+            className="ui-toolbar__indicator"
+            data-snap-on={snap?.enabled ? 'true' : 'false'}
+            title="Toggle snap with F9; configure in Project Settings → Snap"
+          >
+            {Icon && <Icon size={14} strokeWidth={2} />}
+            <span>{text}</span>
+            {item.shortcut && <kbd>{item.shortcut}</kbd>}
+          </div>
+        )
+      }
+      return null
     }
     if (item.type === 'action') {
       return (

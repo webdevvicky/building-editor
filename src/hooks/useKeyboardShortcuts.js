@@ -117,6 +117,14 @@ export function useKeyboardShortcuts() {
         closeDropdowns()
         return
       }
+      // Phase R1 — Shift+A picks the room_detect tool. Bare A is reserved
+      // (intentional future-territory; not bound here).
+      if ((key === 'a' || key === 'A') && e.shiftKey) {
+        e.preventDefault()
+        useStore.getState().setTool?.('room_detect')
+        closeDropdowns()
+        return
+      }
       if (key === 'p' || key === 'P') {
         e.preventDefault()
         useStore.getState().setTool?.('plumbing')
@@ -144,6 +152,21 @@ export function useKeyboardShortcuts() {
       if (key === 'l' || key === 'L') {
         e.preventDefault()
         useStore.getState().setTool?.('elv')
+        closeDropdowns()
+        return
+      }
+      // Phase A Task 5 — F9 toggles snap globally. Canvas component
+      // listens for the `snap:toggle` window event and performs the
+      // actual store flip (kept there because Canvas owns its own
+      // bypass-key state too). We just dispatch and then schedule a
+      // toast read the next tick so it reflects the new value.
+      if (key === 'F9') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('snap:toggle'))
+        setTimeout(() => {
+          const onNow = !!useStore.getState().projectSettings?.snap?.enabled
+          toast.info(`Snap ${onNow ? 'on' : 'off'}`)
+        }, 0)
         closeDropdowns()
         return
       }

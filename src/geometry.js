@@ -22,17 +22,13 @@ export function w2s(worldX, worldY, pan, zoom) {
   }
 }
 
-// Screen pixels → world inches (Y-up), grid-snapped
-export function screenToWorld(clientX, clientY, svgRect, pan, zoom) {
-  const sx = (clientX - svgRect.left - pan.x) / zoom
-  const sy = (clientY - svgRect.top  - pan.y) / zoom
-  return {
-    x: snapIn( sx / PX_PER_INCH),
-    y: snapIn(-sy / PX_PER_INCH),  // Y-flip: screen-down = world-up
-  }
-}
-
-// Screen pixels → world inches, no snap (for split tool, stamp drag)
+// Screen pixels → world inches, no snap (raw).
+// Snap math moved to src/snap/ — the unified resolver wraps this primitive
+// and dispatches per-tool through SNAP_TARGETS + TOOL_SNAP_POLICY. Tools
+// that need a snapped click call `resolveSnap` from `src/snap`; tools that
+// need pixel accuracy (split, stamp drag, calibrate) call this directly.
+// The previous `screenToWorld` (grid-snapped) helper has been removed —
+// its job is now `resolveSnap(state, screenXY, ctx)` with `policy=[GRID]`.
 export function screenToWorldRaw(clientX, clientY, svgRect, pan, zoom) {
   return {
     x:  (clientX - svgRect.left - pan.x) / zoom / PX_PER_INCH,

@@ -23,6 +23,7 @@ import {
   DEFAULT_WINDOW_HARDWARE_DEFAULTS,
 } from './specs/hardware/hardwareSets'
 import { DEFAULT_PROJECT_COSTS } from './boq/projectCosts'
+import { buildDefaultTargetSettings } from './snap/targets.js'
 import { STANDARD_BAR_LENGTH_M } from './specs/reinforcementSpecs'
 import { getColumnAreaFt2 } from './lib/columnShapes'
 import { createMemo } from './topology/cache.js'
@@ -275,6 +276,19 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // auto-applies suggestPlumbing/Electrical/Hvac/Fire/Elv for the room type.
   // When false, the MepDefaultsModal opens for manual selection (legacy flow).
   autoMepDefaultsEnabled: true,
+
+  // ── Snap architecture (Phase A) ──────────────────────────────────────────
+  // Unified snap config. Defaults reproduce today's behavior byte-identically:
+  // pitchIn=12 (legacy GRID_IN), NODE+WALL_ENDPOINT+GRID on, WALL_NEAREST on
+  // (replicates MEP today), WALL_SEGMENT on (replicates Split today),
+  // WALL_MIDPOINT off (opt-in). bypassKey='Alt' is AutoCAD convention.
+  snap: {
+    enabled:       true,
+    pitchIn:       12,
+    pitchPresets:  [1, 3, 6, 12, 24],
+    bypassKey:     'Alt',                          // 'Alt' | 'Shift' | 'Ctrl' | 'None'
+    targets:       buildDefaultTargetSettings(),   // pulled from SNAP_TARGETS registry
+  },
 }
 
 // Beam endpoint — discriminated union:
@@ -323,6 +337,36 @@ export const createStructuralSlice = (set, get, uid) => ({
   setProjectSettings: (partial) => set(state => ({
     projectSettings: { ...state.projectSettings, ...partial },
   })),
+
+  // ── Snap settings (Phase A) ─────────────────────────────────────────────
+  // Deep-merges `partial` into projectSettings.snap. `targets` is a special
+  // case: nested-merge per target id (so toggling NODE.enabled doesn't
+  // wipe NODE.toleranceIn or sibling targets).
+  setSnapSettings: (partial) => set(state => {
+    const prev = state.projectSettings.snap ?? DEFAULT_PROJECT_SETTINGS.snap
+    let nextTargets = prev.targets
+    if (partial && partial.targets) {
+      nextTargets = { ...(prev.targets ?? {}) }
+      for (const [id, cfg] of Object.entries(partial.targets)) {
+        nextTargets[id] = { ...(prev.targets?.[id] ?? {}), ...(cfg ?? {}) }
+      }
+    }
+    return {
+      projectSettings: {
+        ...state.projectSettings,
+        snap: { ...prev, ...(partial ?? {}), targets: nextTargets },
+      },
+    }
+  }),
+  toggleSnapEnabled: () => set(state => {
+    const prev = state.projectSettings.snap ?? DEFAULT_PROJECT_SETTINGS.snap
+    return {
+      projectSettings: {
+        ...state.projectSettings,
+        snap: { ...prev, enabled: !prev.enabled },
+      },
+    }
+  }),
 
   // Area 1 — dimension convention. Stamps projectSettings.dimensionMode.
   // Validates against the two allowed values; ignores anything else.

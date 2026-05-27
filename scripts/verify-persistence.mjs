@@ -60,6 +60,21 @@ const sampleData = {
     projectMeta: { projectTitle: 'Hello' },
     // Area 1 — round-trip the dimensionMode field via IDB.
     dimensionMode: 'clear_internal',
+    // Phase A (Snap Architecture) — round-trip the snap subtree via IDB.
+    snap: {
+      enabled:      false,
+      pitchIn:      3,
+      pitchPresets: [1, 3, 6, 12, 24],
+      bypassKey:    'Shift',
+      targets: {
+        NODE:          { enabled: true,  toleranceIn: 5 },
+        WALL_ENDPOINT: { enabled: true,  toleranceIn: 4 },
+        WALL_MIDPOINT: { enabled: true,  toleranceIn: 6 },
+        WALL_NEAREST:  { enabled: true,  toleranceIn: 36 },
+        WALL_SEGMENT:  { enabled: true,  toleranceIn: 12 },
+        GRID:          { enabled: true },
+      },
+    },
   },
 }
 const saved = await p.saveCurrent(rec1.id, sampleData)
@@ -72,6 +87,20 @@ check('openProject reassembles projectSettings',
       opened.projectSettings?.projectMeta?.projectTitle === 'Hello')
 check('openProject preserves dimensionMode',
       opened.projectSettings?.dimensionMode === 'clear_internal')
+// Phase A snap subtree round-trip
+check('openProject preserves snap.enabled (false)',
+      opened.projectSettings?.snap?.enabled === false)
+check('openProject preserves snap.pitchIn (3in)',
+      opened.projectSettings?.snap?.pitchIn === 3)
+check('openProject preserves snap.bypassKey (Shift)',
+      opened.projectSettings?.snap?.bypassKey === 'Shift')
+check('openProject preserves snap.targets.NODE.toleranceIn (5)',
+      opened.projectSettings?.snap?.targets?.NODE?.toleranceIn === 5)
+check('openProject preserves snap.targets.WALL_MIDPOINT.enabled (true)',
+      opened.projectSettings?.snap?.targets?.WALL_MIDPOINT?.enabled === true)
+check('openProject preserves snap.pitchPresets array',
+      Array.isArray(opened.projectSettings?.snap?.pitchPresets) &&
+      opened.projectSettings.snap.pitchPresets.length === 5)
 check('openProject reassembles ratesByKey',
       opened.ratesByKey?.flooring === 100)
 check('openProject reassembles unit', opened.unit === 'inch')

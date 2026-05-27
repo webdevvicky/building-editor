@@ -6,6 +6,7 @@ import { Modal } from './ui/Modal.jsx'
 import { Button } from './ui/Button.jsx'
 import { Field } from './ui/Field.jsx'
 import FeetInchesInput from './ui/FeetInchesInput.jsx'
+import InchesInput from './ui/InchesInput.jsx'
 import { DEFAULT_PRECISION, formatFeetInches } from '../lib/units.js'
 import { FULL_SENTINEL, _fullHeightFt } from '../quantities/tiles.js'
 // Phase 4 Commit A — catalogs + setters for the 9 new sections.
@@ -164,6 +165,9 @@ export default function ProjectSettingsPanel() {
   const setMepSizingStrategy       = useStore(s => s.setMepSizingStrategy)
   // Area 1 — dimension convention setter (Option C).
   const setDimensionMode           = useStore(s => s.setDimensionMode)
+  // Phase A Task 5 — snap settings UI host.
+  const setSnapSettings            = useStore(s => s.setSnapSettings)
+  const toggleSnapEnabled          = useStore(s => s.toggleSnapEnabled)
   // The full-height sentinel resolution needs to read state.projectSettings
   // (floors + slabSettings) on every render — _fullHeightFt does that.
 
@@ -282,6 +286,89 @@ export default function ProjectSettingsPanel() {
         room (matches site tape; Indian construction convention). Affects
         floor area, perimeter, tile, paint, and ceiling quantities. New
         projects default to clear internal.
+      </div>
+
+      <div style={divider} />
+
+      {/* 0b. Snap (Phase A Task 5) — host every snap setting except the
+          quick-access pitch segmented + indicator that live in the toolbar. */}
+      <div style={sectionHead}>Snap</div>
+      <div style={hintText}>
+        Controls how clicks snap to existing geometry while drawing. Press
+        F9 to quickly toggle snap on/off. Hold the bypass key for
+        pixel-accurate placement.
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Snap enabled</span>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)' }}>
+          <input
+            type="checkbox"
+            checked={projectSettings?.snap?.enabled !== false}
+            onChange={() => toggleSnapEnabled()}
+            onKeyDown={e => e.stopPropagation()}
+          />
+          <span>Enable</span>
+        </label>
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Pitch</span>
+        <select
+          style={selectStyle}
+          value={projectSettings?.snap?.pitchIn ?? 12}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setSnapSettings({ pitchIn: Number(e.target.value) })}
+        >
+          {(projectSettings?.snap?.pitchPresets ?? [1, 3, 6, 12, 24]).map(p => (
+            <option key={p} value={p}>{p}"</option>
+          ))}
+        </select>
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Custom pitch (inches)</span>
+        <InchesInput
+          value={projectSettings?.snap?.pitchIn ?? 12}
+          onCommit={v => setSnapSettings({ pitchIn: Number(v) })}
+          min={0.25}
+          max={120}
+        />
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Bypass key</span>
+        <select
+          style={selectStyle}
+          value={projectSettings?.snap?.bypassKey ?? 'Alt'}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setSnapSettings({ bypassKey: e.target.value })}
+        >
+          <option value="Alt">Alt (hold to disable snap)</option>
+          <option value="Shift">Shift</option>
+          <option value="Ctrl">Ctrl</option>
+          <option value="None">None (no bypass key)</option>
+        </select>
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Snap to wall endpoints</span>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)' }}>
+          <input
+            type="checkbox"
+            checked={projectSettings?.snap?.targets?.WALL_ENDPOINT?.enabled !== false}
+            onChange={e => setSnapSettings({ targets: { WALL_ENDPOINT: { enabled: e.target.checked } } })}
+            onKeyDown={e => e.stopPropagation()}
+          />
+          <span>Enable</span>
+        </label>
+      </div>
+      <div style={fieldRow}>
+        <span style={lbl}>Snap to wall midpoints</span>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)' }}>
+          <input
+            type="checkbox"
+            checked={!!projectSettings?.snap?.targets?.WALL_MIDPOINT?.enabled}
+            onChange={e => setSnapSettings({ targets: { WALL_MIDPOINT: { enabled: e.target.checked } } })}
+            onKeyDown={e => e.stopPropagation()}
+          />
+          <span>Enable</span>
+        </label>
       </div>
 
       <div style={divider} />

@@ -26,6 +26,10 @@ import {
   getActiveFloorWalls,
 } from './topology/floor.js'
 import {
+  findFaceContainingEdge,
+  isFaceCoveredByRoom,
+} from './topology/faces.js'
+import {
   OPENING_SUBTYPE, SUBTYPE_SOURCE,
   VENTILATOR_MAX_HEIGHT_IN, VENTILATOR_MAX_WIDTH_IN,
 } from './constants/joinery.js'
@@ -440,6 +444,70 @@ export const useStore = create((set, get) => ({
         .at(-1)
       if (!created) return { error: 'save-room-failed' }
       return { roomId: created.id, wallIds }
+    })
+  },
+
+  // ── Phase R1 — interactive face detection → Room ────────────────────────
+  //
+  // detectFaceFromWallClick: pure pass-through to topology. No mutation.
+  // Used by Canvas's room_detect tool for hover preview + click handler.
+  // Returns Face | null.
+  detectFaceFromWallClick(wallId, clickPoint) {
+    return findFaceContainingEdge(get(), wallId, clickPoint)
+  },
+
+  // createRoomFromFace: atomically convert a detected face into a Room.
+  // Routes through pendingWallIds → saveRoom so the existing overlap
+  // check, history snapshot, integrity, finishes presets, naming, and
+  // IFC GUID generation all stay consistent. Stamps provenance meta
+  // (createdFrom='face-detect', detectedAt=ISO timestamp).
+  //
+  // Returns:
+  //   { roomId, wallIds }                — created
+  //   { roomId, alreadyExists: true }    — face already covered by a Room
+  //   { error: 'no-face' }               — face was null
+  //   { error: 'overlap', conflictName } — saveRoom overlap rejection
+  //   { error: 'save-room-failed' }      — saveRoom returned non-ok
+  createRoomFromFace(face, opts = {}) {
+    if (!face || !Array.isArray(face.wallIdsInOrder)) return { error: 'no-face' }
+    return get()._runAtomically(() => {
+      // Idempotency: if a Room already covers this exact wall set, return it.
+      const existingRoomId = isFaceCoveredByRoom(get(), face.wallIds)
+      if (existingRoomId) return { roomId: existingRoomId, alreadyExists: true }
+
+      const type = ROOM_PRESETS[opts.type] ? opts.type : 'OTHER'
+      const desiredName = (opts.name && String(opts.name).trim())
+                          || _autoRectRoomName(get().rooms)
+
+      // Stage the face's wallIds in walk order for saveRoom.
+      set({ pendingWallIds: [...face.wallIdsInOrder] })
+      const result = get().saveRoom(desiredName, type)
+      if (result?.error) return result
+
+      // Recover the new room id (most-recent room on the face's floor
+      // with the desired name).
+      const fid = face.floorId ?? get().currentFloorId ?? DEFAULT_FLOOR_ID
+      const created = Object.values(get().rooms)
+        .filter(r => (r.floorId ?? DEFAULT_FLOOR_ID) === fid && r.name === desiredName)
+        .at(-1)
+      if (!created) return { error: 'save-room-failed' }
+
+      // Stamp provenance meta (schema slot — no UI consumption in R1).
+      set(s => ({
+        rooms: {
+          ...s.rooms,
+          [created.id]: {
+            ...s.rooms[created.id],
+            meta: {
+              ...(s.rooms[created.id].meta ?? {}),
+              createdFrom: 'face-detect',
+              detectedAt:  new Date().toISOString(),
+            },
+          },
+        },
+      }))
+
+      return { roomId: created.id, wallIds: [...face.wallIdsInOrder] }
     })
   },
 
@@ -1365,12 +1433,32 @@ export const useStore = create((set, get) => ({
         const dimensionMode = _isNewProject
           ? 'clear_internal'
           : (psRest.dimensionMode ?? DEFAULT_PROJECT_SETTINGS.dimensionMode)
+        // Snap architecture (Phase A). Schema-fill missing fields from
+        // DEFAULT_PROJECT_SETTINGS.snap; deep-merge targets so a partial
+        // saved subtree picks up newer target defaults.
+        const snap = (() => {
+          const def = DEFAULT_PROJECT_SETTINGS.snap
+          const got = psRest.snap
+          if (!got) return def
+          const targets = { ...def.targets }
+          for (const id of Object.keys(targets)) {
+            if (got.targets?.[id]) targets[id] = { ...targets[id], ...got.targets[id] }
+          }
+          return {
+            enabled:      got.enabled      ?? def.enabled,
+            pitchIn:      got.pitchIn      ?? def.pitchIn,
+            pitchPresets: got.pitchPresets ?? def.pitchPresets,
+            bypassKey:    got.bypassKey    ?? def.bypassKey,
+            targets,
+          }
+        })()
         return {
           ...psRest,
           columnTypes: migratedColumnTypes,
           rccSpecs, defaultPlasterSystemId, defaultExternalPlasterSystemId, floors,
           tileDefaults, kitchenCounter, grills,
           dimensionMode,
+          snap,
         }
       })(),
       columns:     migratedColumns,

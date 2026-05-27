@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import {
-  w2s, screenToWorld, screenToWorldRaw, snapIn,
+  w2s, screenToWorldRaw, snapIn,
   PX_PER_INCH, GRID_IN, DEFAULT_WALL_THICK_IN,
   closestPointOnSegment,
 } from '../geometry'
+import { resolveSnap, getTargetDescriptor, findNearestCandidate } from '../snap'
+import { isFaceCoveredByRoom } from '../topology/faces.js'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
-import { getNearestWallToPoint, getEffectiveWallLengthFt } from '../topology/index.js'
+import { getEffectiveWallLengthFt } from '../topology/index.js'
 // Area 2B — rect-room tool atomically creates walls + room + auto-MEP.
 import { suggestPlumbingFixturesForRoom } from '../mep/plumbing/suggestions.js'
 import { suggestElectricalPointsForRoom } from '../mep/electrical/suggestions.js'
@@ -127,6 +129,7 @@ const TOOL_CURSOR = {
   split:         'crosshair',
   select:        'default',
   room:          'default',
+  room_detect:   'pointer',
   stairs:        'crosshair',
   lift:          'crosshair',
   sump:          'crosshair',
@@ -150,6 +153,26 @@ function getColPos(col, nodes) {
 }
 
 const STAMP_TOOLS = new Set(['stairs', 'lift', 'sump', 'overhead_tank', 'septic_tank'])
+
+// Given a wallId and a projected point already on (or very near) the wall,
+// return the parametric position t in [0, 1]. Used by MEP placement to
+// derive wallT after the snap resolver yields a WALL_NEAREST winner.
+// Resolver returns the projected point but not the parametric position
+// (sortKey-only contract); recomputing it here is O(1) and keeps the
+// resolver's candidate shape minimal.
+function _wallTFromPoint(state, wallId, px, py) {
+  const w = state?.walls?.[wallId]
+  const a = w && state.nodes?.[w.n1]
+  const b = w && state.nodes?.[w.n2]
+  if (!a || !b) return null
+  const dx = b.x - a.x, dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return 0
+  let t = ((px - a.x) * dx + (py - a.y) * dy) / len2
+  if (t < 0) t = 0
+  else if (t > 1) t = 1
+  return t
+}
 
 export default function Canvas() {
   const nodes          = useStore(s => s.nodes)
@@ -205,6 +228,7 @@ export default function Canvas() {
     splitWall, togglePendingWall, cancelAction,
     addStamp, deleteStamp, selectStamp, moveStamp,
     toggleWallMultiSelect, selectRoom,
+    detectFaceFromWallClick, createRoomFromFace,
     undo, redo,
   } = useStore()
 
@@ -232,8 +256,15 @@ export default function Canvas() {
   const panStartRef  = useRef(null)
   const [spaceDown,    setSpaceDown]    = useState(false)
   const [shiftDown,    setShiftDown]    = useState(false)
-  const [cursor,       setCursor]       = useState(null)   // world inches (Y-up)
+  // Snap-bypass modifier (Alt by default; configurable via
+  // projectSettings.snap.bypassKey). When held, resolveSnap returns
+  // raw world coords with no snapping.
+  const [bypassDown,   setBypassDown]   = useState(false)
+  const [cursor,       setCursor]       = useState(null)   // { x, y, kind, label, raw }
   const [hoveredWallId, setHoveredWallId] = useState(null)
+  // Phase R1 — room_detect tool hover preview. Updated on mousemove
+  // while activeTool === 'room_detect'; null otherwise.
+  const [hoveredFace,  setHoveredFace]  = useState(null)
   const [lockedLength, setLockedLength] = useState('')
   const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY } in world inches
   const [beamFromColId, setBeamFromColId] = useState(null)      // first column selected for beam
@@ -305,10 +336,21 @@ export default function Canvas() {
   }, [])
 
   // Keyboard shortcuts
+  // bypassKey is the configurable snap-bypass modifier; defaults to 'Alt'.
+  // 'None' disables bypass entirely. Effect re-binds when the setting changes.
+  const bypassKey = projectSettings?.snap?.bypassKey ?? 'Alt'
   useEffect(() => {
+    function matchesBypass(e) {
+      if (bypassKey === 'None') return false
+      if (bypassKey === 'Alt')   return e.key === 'Alt'   || e.altKey
+      if (bypassKey === 'Shift') return e.key === 'Shift' || e.shiftKey
+      if (bypassKey === 'Ctrl')  return e.key === 'Control' || e.ctrlKey || e.metaKey
+      return false
+    }
     function onKeyDown(e) {
       if (e.code === 'Space' && !e.target.closest('input')) { e.preventDefault(); setSpaceDown(true) }
       if (e.key === 'Shift') setShiftDown(true)
+      if (matchesBypass(e)) setBypassDown(true)
       if (e.key === 'Escape') { cancelAction(); setBeamFromColId(null); setBeamLevelPicker(null); return }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return }
@@ -321,11 +363,24 @@ export default function Canvas() {
     function onKeyUp(e) {
       if (e.code === 'Space') setSpaceDown(false)
       if (e.key === 'Shift')  setShiftDown(false)
+      // Clear bypass when the bound key (or any modifier that would have
+      // triggered it) is released.
+      if (bypassKey === 'Alt'   && e.key === 'Alt')     setBypassDown(false)
+      if (bypassKey === 'Shift' && e.key === 'Shift')   setBypassDown(false)
+      if (bypassKey === 'Ctrl'  && (e.key === 'Control' || e.key === 'Meta')) setBypassDown(false)
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup',   onKeyUp)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp) }
-  }, [selectedWallId, selectedStampId, selectedColumnId])
+  }, [selectedWallId, selectedStampId, selectedColumnId, bypassKey])
+
+  // F9 toggle for projectSettings.snap.enabled — dispatched from
+  // useKeyboardShortcuts (or any other source) via window event.
+  useEffect(() => {
+    function onToggle() { useStore.getState().toggleSnapEnabled?.() }
+    window.addEventListener('snap:toggle', onToggle)
+    return () => window.removeEventListener('snap:toggle', onToggle)
+  }, [])
 
   useEffect(() => { if (!drawStartId) setLockedLength('') }, [drawStartId])
 
@@ -352,6 +407,11 @@ export default function Canvas() {
     if (activeTool !== 'rect_room') setRectFirstCorner(null)
   }, [activeTool])
 
+  // Phase R1 — clear room-detect hover preview when leaving the tool.
+  useEffect(() => {
+    if (activeTool !== 'room_detect') setHoveredFace(null)
+  }, [activeTool])
+
   const startNode    = drawStartId ? nodes[drawStartId] : null
   // lockedLength may be '' (free draw) or a number-as-string ('10.5') or a
   // number — FeetInchesInput commits numbers, the legacy clear button
@@ -368,6 +428,25 @@ export default function Canvas() {
 
   function getRect() { return svgRef.current.getBoundingClientRect() }
 
+  // Unified snap dispatch — every drawing tool's click goes through this.
+  // Returns the full resolveSnap result so callers can branch on
+  // result.targetKind / sourceId where needed (column NODE attract,
+  // MEP wall-locked placement). Pulls state lazily to keep call sites short.
+  function runSnap(e) {
+    return resolveSnap(
+      useStore.getState(),
+      { clientX: e.clientX, clientY: e.clientY },
+      {
+        toolId:    activeTool,
+        pan,
+        zoom,
+        svgRect:   getRect(),
+        settings:  projectSettings?.snap,
+        modifiers: { bypass: bypassDown },
+      },
+    )
+  }
+
   function handleMouseDown(e) {
     if (e.button === 2 || e.button === 1 || (e.button === 0 && spaceDown)) {
       e.preventDefault()
@@ -380,19 +459,51 @@ export default function Canvas() {
   function handleMouseMove(e) {
     if (isPanningRef.current) return
     if (draggingStamp) {
+      // Stamp drag uses pre-existing offset semantics — intentionally raw,
+      // not routed through resolveSnap.
       const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), panRef.current, zoomRef.current)
       moveStamp(draggingStamp.stampId, snapIn(x - draggingStamp.offX), snapIn(y - draggingStamp.offY))
       return
     }
     if (!svgRef.current) return
-    setCursor(screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom))
+    // Live cursor display goes through the unified resolver so the snap
+    // dot + label reflect what a click would target.
+    const result = runSnap(e)
+    const desc   = getTargetDescriptor(result.targetKind)
+    const label  = result.raw
+      ? (bypassDown ? 'Free' : null)
+      : (desc?.displayLabel?.(result, projectSettings?.snap, { pitchIn: projectSettings?.snap?.pitchIn }) ?? null)
+    setCursor({
+      x:    result.worldXY.x,
+      y:    result.worldXY.y,
+      kind: result.targetKind,
+      label,
+      raw:  result.raw,
+    })
+
+    // Phase R1 — room_detect hover preview. Find the nearest wall within
+    // 24in of the raw cursor; resolve the face on the cursor's side of
+    // that wall. O(1) on cache hits.
+    if (activeTool === 'room_detect') {
+      const raw = screenToWorldRaw(e.clientX, e.clientY, getRect(), panRef.current, zoomRef.current)
+      const state = useStore.getState()
+      const nearest = findNearestCandidate(state, 'wallSegment', raw.x, raw.y)
+      if (nearest && nearest.distanceIn <= 24) {
+        const face = detectFaceFromWallClick(nearest.entity.id, raw)
+        setHoveredFace(face)
+      } else if (hoveredFace) {
+        setHoveredFace(null)
+      }
+    }
   }
 
   function handleMouseUp(e) {
     if (draggingStamp) { setDraggingStamp(null); return }
   }
 
-  function handleMouseLeave() { setCursor(null); setHoveredWallId(null); setDraggingStamp(null) }
+  function handleMouseLeave() {
+    setCursor(null); setHoveredWallId(null); setDraggingStamp(null); setHoveredFace(null)
+  }
 
   function handleColumnClick(e, colId) {
     const shouldCapture = activeTool === 'column' || activeTool === 'select' || activeTool === 'beam'
@@ -446,16 +557,21 @@ export default function Canvas() {
     }
 
     if (activeTool === 'column') {
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-      const nearNode = Object.values(nodes).find(n =>
-        Math.hypot(n.x - x, n.y - y) < 24
-      )
-      const ctId = projectSettings.columnTypes[0]?.id ?? 'C1'
-      if (nearNode) {
-        addColumn(nearNode.x, nearNode.y, ctId, nearNode.id)
-      } else {
-        addColumn(x, y, ctId, null)
+      // Column placement: resolver's column policy attracts to NODE within
+      // 24in (the legacy nearNode radius preserved as a per-tool override),
+      // else falls through to GRID. When the winner is NODE, we attach the
+      // column to that node's id so future moves stay coupled.
+      const result = runSnap(e)
+      const ctId   = projectSettings.columnTypes[0]?.id ?? 'C1'
+      if (result.targetKind === 'NODE' && result.sourceId) {
+        const node = useStore.getState().nodes?.[result.sourceId]
+        if (node) {
+          addColumn(node.x, node.y, ctId, node.id)
+          return
+        }
       }
+      const { x, y } = result.worldXY
+      addColumn(x, y, ctId, null)
       return
     }
     if (activeTool === 'beam') {
@@ -465,151 +581,55 @@ export default function Canvas() {
     }
 
     if (STAMP_TOOLS.has(activeTool)) {
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      // Stamp tools (sump / OHT / septic / stairs / lift) policy = GRID only.
+      const { x, y } = runSnap(e).worldXY
       addStamp(activeTool, x, y)
       setTool('select')
       return
     }
 
-    if (activeTool === 'plumbing') {
-      // Phase 1: snap to nearest wall on the current floor and drop the
-      // default fixture. Engines subagent owns roomId resolution / routing.
-      // Floating type-picker is Phase 1.x polish; for now the user changes
-      // the type from PlumbingFixturePanel after placement.
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-      const state = useStore.getState()
-      // Floor-scoped candidate set so we don't snap to walls on another floor.
-      const candidateIds = typeof state.getWallIdsByFloor === 'function'
-        ? state.getWallIdsByFloor(currentFloorId)
-        : null
-      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
-      // 36in (3ft) snap radius — beyond that we place a free fixture.
-      const SNAP_IN = 36
-      let wallId = null, wallT = null, px = x, py = y
-      if (near && near.distance <= SNAP_IN) {
-        wallId = near.wallId
-        wallT  = near.t
-        px = near.projected.x
-        py = near.projected.y
+    // ── MEP placement (plumbing / electrical / hvac / fire / elv) ─────────
+    // Each tool's policy is `['WALL_NEAREST']` with the registry's 36in
+    // default tolerance. When the resolver returns a WALL_NEAREST winner,
+    // we attach the fixture to that wall and derive wallT from the
+    // projected point; otherwise we place free at the raw click.
+    if (activeTool === 'plumbing' || activeTool === 'electrical'
+        || activeTool === 'hvac'   || activeTool === 'fire'
+        || activeTool === 'elv') {
+      const result = runSnap(e)
+      const { x, y } = result.worldXY
+      let wallId = null, wallT = null
+      if (result.targetKind === 'WALL_NEAREST' && result.sourceId) {
+        wallId = result.sourceId
+        wallT  = _wallTFromPoint(useStore.getState(), wallId, x, y)
       }
-      const id = useStore.getState().addPlumbingFixture(
-        DEFAULT_PLUMBING_FIXTURE_TYPE, px, py, wallId, wallT,
-      )
-      useStore.getState().selectPlumbingFixture(id)
-      return
-    }
-
-    if (activeTool === 'electrical') {
-      // Phase 1: snap to nearest wall on the current floor and drop the
-      // default point. Engines subagent owns roomId resolution / routing.
-      // Floating type-picker is Phase 1.x polish; for now the user changes
-      // the type from ElectricalPointPanel after placement.
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-      const state = useStore.getState()
-      // Floor-scoped candidate set so we don't snap to walls on another floor.
-      const candidateIds = typeof state.getWallIdsByFloor === 'function'
-        ? state.getWallIdsByFloor(currentFloorId)
-        : null
-      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
-      // 36in (3ft) snap radius — beyond that we place a free point.
-      const SNAP_IN = 36
-      let wallId = null, wallT = null, px = x, py = y
-      if (near && near.distance <= SNAP_IN) {
-        wallId = near.wallId
-        wallT  = near.t
-        px = near.projected.x
-        py = near.projected.y
+      const store = useStore.getState()
+      if (activeTool === 'plumbing') {
+        const id = store.addPlumbingFixture(DEFAULT_PLUMBING_FIXTURE_TYPE, x, y, wallId, wallT)
+        store.selectPlumbingFixture(id)
+      } else if (activeTool === 'electrical') {
+        const id = store.addElectricalPoint(DEFAULT_ELECTRICAL_POINT_TYPE, x, y, wallId, wallT)
+        store.selectElectricalPoint(id)
+      } else if (activeTool === 'hvac') {
+        const id = store.addHvacUnit(DEFAULT_HVAC_UNIT_TYPE, x, y, wallId, wallT)
+        store.selectHvacUnit(id)
+      } else if (activeTool === 'fire') {
+        const id = store.addFireDevice(DEFAULT_FIRE_DEVICE_TYPE, x, y, wallId, wallT)
+        store.selectFireDevice(id)
+      } else {
+        const id = store.addElvDevice(DEFAULT_ELV_DEVICE_TYPE, x, y, wallId, wallT)
+        store.selectElvDevice(id)
       }
-      const id = useStore.getState().addElectricalPoint(
-        DEFAULT_ELECTRICAL_POINT_TYPE, px, py, wallId, wallT,
-      )
-      useStore.getState().selectElectricalPoint(id)
-      return
-    }
-
-    if (activeTool === 'hvac') {
-      // Phase 1: snap to nearest wall on the current floor and drop the
-      // default unit. Engines subagent owns roomId resolution / routing.
-      // Floating type-picker is Phase 1.x polish; for now the user changes
-      // the type from HvacPanel after placement.
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-      const state = useStore.getState()
-      const candidateIds = typeof state.getWallIdsByFloor === 'function'
-        ? state.getWallIdsByFloor(currentFloorId)
-        : null
-      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
-      const SNAP_IN = 36
-      let wallId = null, wallT = null, px = x, py = y
-      if (near && near.distance <= SNAP_IN) {
-        wallId = near.wallId
-        wallT  = near.t
-        px = near.projected.x
-        py = near.projected.y
-      }
-      const id = useStore.getState().addHvacUnit(
-        DEFAULT_HVAC_UNIT_TYPE, px, py, wallId, wallT,
-      )
-      useStore.getState().selectHvacUnit(id)
-      return
-    }
-
-    if (activeTool === 'fire') {
-      // Phase 1: snap to nearest wall on the current floor and drop the
-      // default device. Engines subagent owns roomId resolution / routing.
-      // Floating type-picker is Phase 1.x polish; for now the user changes
-      // the type from FirePanel after placement.
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-      const state = useStore.getState()
-      const candidateIds = typeof state.getWallIdsByFloor === 'function'
-        ? state.getWallIdsByFloor(currentFloorId)
-        : null
-      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
-      const SNAP_IN = 36
-      let wallId = null, wallT = null, px = x, py = y
-      if (near && near.distance <= SNAP_IN) {
-        wallId = near.wallId
-        wallT  = near.t
-        px = near.projected.x
-        py = near.projected.y
-      }
-      const id = useStore.getState().addFireDevice(
-        DEFAULT_FIRE_DEVICE_TYPE, px, py, wallId, wallT,
-      )
-      useStore.getState().selectFireDevice(id)
-      return
-    }
-
-    if (activeTool === 'elv') {
-      // Phase 1: snap to nearest wall on the current floor and drop the
-      // default device. Engines subagent owns roomId resolution / routing.
-      // Floating type-picker is Phase 1.x polish; for now the user changes
-      // the type from ElvPanel after placement.
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
-      const state = useStore.getState()
-      const candidateIds = typeof state.getWallIdsByFloor === 'function'
-        ? state.getWallIdsByFloor(currentFloorId)
-        : null
-      const near = getNearestWallToPoint(state, { x, y }, candidateIds)
-      const SNAP_IN = 36
-      let wallId = null, wallT = null, px = x, py = y
-      if (near && near.distance <= SNAP_IN) {
-        wallId = near.wallId
-        wallT  = near.t
-        px = near.projected.x
-        py = near.projected.y
-      }
-      const id = useStore.getState().addElvDevice(
-        DEFAULT_ELV_DEVICE_TYPE, px, py, wallId, wallT,
-      )
-      useStore.getState().selectElvDevice(id)
       return
     }
 
     if (activeTool === 'select') { selectWall(null); selectStamp(null); selectColumn(null); return }
 
     // Area 2B — rectangle-room tool. Two-click flow; atomic on second click.
+    // rect_room policy = NODE / WALL_ENDPOINT / GRID so corners snap to
+    // existing graph nodes when nearby.
     if (activeTool === 'rect_room') {
-      const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+      const { x, y } = runSnap(e).worldXY
       if (!rectFirstCorner) {
         setRectFirstCorner({ x, y })
         return
@@ -659,7 +679,10 @@ export default function Canvas() {
 
     if (activeTool !== 'draw') return
 
-    const { x, y } = screenToWorld(e.clientX, e.clientY, getRect(), pan, zoom)
+    // draw policy = NODE / WALL_ENDPOINT / WALL_MIDPOINT / GRID. The ortho
+    // (apply90 / applyLockedLength) logic below operates on the resolved
+    // world point — unchanged.
+    const { x, y } = runSnap(e).worldXY
     if (!drawStartId) {
       const id = getOrCreateNode(x, y)
       setDrawStart(id)
@@ -692,6 +715,13 @@ export default function Canvas() {
     }
     if (activeTool === 'split') {
       e.stopPropagation()
+      // Split targets the SPECIFIC wall the user clicked (passed as `wallId`
+      // to the hit-target handler), not the nearest wall. The resolver's
+      // WALL_SEGMENT target picks the closest wall globally, which is wrong
+      // for split — if the click is closer to a neighbour, WALL_SEGMENT
+      // would route the cut there. Inline closestPointOnSegment is the
+      // correct primitive: project onto THIS wall only. Intentional
+      // exception to the "no snap math outside src/snap/" rule.
       const wall = walls[wallId]
       const a = nodes[wall.n1], b = nodes[wall.n2]
       const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), pan, zoom)
@@ -700,6 +730,33 @@ export default function Canvas() {
       return
     }
     if (activeTool === 'room') { e.stopPropagation(); togglePendingWall(wallId) }
+
+    if (activeTool === 'room_detect') {
+      e.stopPropagation()
+      const raw = screenToWorldRaw(e.clientX, e.clientY, getRect(), pan, zoom)
+      const face = detectFaceFromWallClick(wallId, raw)
+      if (!face) {
+        toast.info('No enclosing room from this wall — wall may be on an open chain')
+        return
+      }
+      const existing = isFaceCoveredByRoom(useStore.getState(), face.wallIds)
+      if (existing) {
+        selectRoom(existing)
+        toast.info('Room already exists — selected')
+        return
+      }
+      const result = createRoomFromFace(face)
+      if (result?.error === 'overlap') {
+        toast.warning(`Cannot create — overlaps existing room "${result.conflictName}"`)
+      } else if (result?.alreadyExists) {
+        selectRoom(result.roomId)
+      } else if (result?.roomId) {
+        selectRoom(result.roomId)
+        toast.success('Room created from detected face')
+      } else {
+        toast.error('Could not create room')
+      }
+    }
   }
 
   function handleStampClick(e, stampId) {
@@ -716,7 +773,7 @@ export default function Canvas() {
   }
 
   const svgCursor     = isPanning || spaceDown ? 'grab' : (TOOL_CURSOR[activeTool] || 'default')
-  const wallHitCursor = ['select', 'split', 'room'].includes(activeTool) ? 'pointer' : 'default'
+  const wallHitCursor = ['select', 'split', 'room', 'room_detect'].includes(activeTool) ? 'pointer' : 'default'
   const zoomPct       = Math.round(zoom * 100)
 
   // Phase 1.9 — per-floor visibility. Single-floor projects auto-match (everything tagged 'F1').
@@ -934,6 +991,31 @@ export default function Canvas() {
 
         {/* Grid */}
         <rect x="-10000" y="-10000" width="30000" height="30000" fill="url(#grid)"/>
+
+        {/* Snap-target overlay — renders the descriptor's renderOverlay
+            output for the live cursor when the resolver picked a non-GRID
+            target. Always above the grid, below user-drawn content. */}
+        <g data-layer="snap-targets" style={{ pointerEvents: 'none' }}>
+          {cursor && cursor.kind && cursor.kind !== 'GRID' && (() => {
+            const desc = getTargetDescriptor(cursor.kind)
+            if (!desc?.renderOverlay) return null
+            const overlay = desc.renderOverlay({ point: { x: cursor.x, y: cursor.y } }, { sx, sy })
+            if (!overlay) return null
+            const cx = sx(overlay.worldX), cy = sy(overlay.worldY), r = overlay.radiusPx
+            if (overlay.kind === 'ring')
+              return <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--color-primary)" strokeWidth={2}/>
+            if (overlay.kind === 'diamond')
+              return <rect x={cx - r} y={cy - r} width={r * 2} height={r * 2}
+                           transform={`rotate(45 ${cx} ${cy})`}
+                           fill="none" stroke="var(--color-primary)" strokeWidth={2}/>
+            if (overlay.kind === 'cross')
+              return <g>
+                <line x1={cx - r} y1={cy} x2={cx + r} y2={cy} stroke="var(--color-primary)" strokeWidth={2}/>
+                <line x1={cx} y1={cy - r} x2={cx} y2={cy + r} stroke="var(--color-primary)" strokeWidth={2}/>
+              </g>
+            return null
+          })()}
+        </g>
 
         {layerVisibility.roomFills && (<>
         {/* Room fills */}
@@ -1417,6 +1499,35 @@ export default function Canvas() {
             on each side; the rect always creates walls of default
             thickness so the shrinkage is symmetric and well-defined
             even before the walls exist). */}
+        {/* Phase R1 — room_detect hover preview. Renders a translucent
+            polygon overlay tracing the smallest enclosing face on the
+            cursor's side of the nearest wall. Primary tint when the face
+            is uncovered; warning tint when a Room already exists.
+            Click commits via handleWallClick's room_detect branch. */}
+        {activeTool === 'room_detect' && hoveredFace && (() => {
+          const pts = hoveredFace.polygon.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')
+          const existingRoomId = isFaceCoveredByRoom(useStore.getState(), hoveredFace.wallIds)
+          const isExisting = !!existingRoomId
+          const fillColor   = isExisting ? 'var(--color-warning-bg)' : 'var(--color-primary-bg)'
+          const strokeColor = isExisting ? 'var(--color-warning)'    : 'var(--color-primary)'
+          const cxScreen = sx(hoveredFace.centroid.x)
+          const cyScreen = sy(hoveredFace.centroid.y)
+          const areaFt2  = hoveredFace.signedAreaFt2.toFixed(1)
+          return (
+            <g data-layer="face-detect-preview" style={{ pointerEvents: 'none' }}>
+              <polygon points={pts}
+                fill={fillColor} fillOpacity={0.35}
+                stroke={strokeColor} strokeWidth={2} strokeDasharray="6 4"/>
+              <text x={cxScreen} y={cyScreen}
+                textAnchor="middle" dominantBaseline="middle"
+                fontSize={12} fill={strokeColor}
+                style={{ userSelect: 'none', fontFamily: 'var(--font-mono)' }}>
+                {isExisting ? 'Already a room' : `${areaFt2} ft²`}
+              </text>
+            </g>
+          )
+        })()}
+
         {activeTool === 'rect_room' && rectFirstCorner && cursor && (() => {
           const c1 = rectFirstCorner
           const c2 = cursor
@@ -1673,6 +1784,27 @@ export default function Canvas() {
         {ghostEnd && (
           <circle cx={sx(ghostEnd.x)} cy={sy(ghostEnd.y)} r={4}
             fill="#4a90e2" opacity={0.5} style={{ pointerEvents: 'none' }}/>
+        )}
+
+        {/* Snap-target label — sits ~12px right of the resolved cursor
+            position, identifies the winning target (Node / Endpoint /
+            Wall / Grid 12" / Free). Hidden when label is null. */}
+        {cursor?.label && (
+          <foreignObject x={sx(cursor.x) + 10} y={sy(cursor.y) - 22}
+                         width={80} height={20}
+                         style={{ pointerEvents: 'none' }}>
+            <div style={{
+              display: 'inline-block',
+              padding: '2px 6px',
+              borderRadius: 4,
+              background: 'var(--color-primary-bg)',
+              color: 'var(--color-text)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 'var(--text-xs)',
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+            }}>{cursor.label}</div>
+          </foreignObject>
         )}
 
         {layerVisibility.roomLabels && (<>

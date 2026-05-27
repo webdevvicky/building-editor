@@ -11,6 +11,7 @@
 
 import { useStore } from '../src/store.js'
 import { verifyIntegrity } from '../src/schema/integrity.js'
+import { findUncoveredFaces, _resetFaceCaches } from '../src/topology/faces.js'
 
 const s = useStore.getState
 const FT = 12
@@ -149,6 +150,52 @@ reset()
   // Single undo reverses BOTH rooms.
   s().undo()
   ok('single undo clears both rooms', Object.keys(s().rooms).length === 0)
+}
+
+// ── 7. Phase A — Sub-foot pitch (snap.pitchIn=3) atomicity ──────────────
+header('7. Atomic rect-room create with sub-foot pitch (3in)')
+reset()
+{
+  // Phase A allows sub-foot grid pitches. The rect-room math accepts
+  // arbitrary world-inch coords; assert that creating a 6"×6" room (sub-foot)
+  // is still atomic in one history frame, and that integrity holds.
+  s().setSnapSettings({ pitchIn: 3 })
+  ok('snap.pitchIn settable to 3',
+     s().projectSettings.snap.pitchIn === 3)
+
+  const before = s().history.length
+  // Corners on a 3in grid: (3, 3) to (18, 18) — a 15"×15" sub-foot room.
+  const result = s().addRectangleRoom(3, 3, 18, 18, { type: 'OTHER' })
+  ok('addRectangleRoom returns roomId at sub-foot pitch',
+     !!result?.roomId)
+  ok('exactly 4 nodes after sub-foot create',
+     Object.keys(s().nodes).length === 4)
+  ok('exactly 4 walls after sub-foot create',
+     Object.keys(s().walls).length === 4)
+  ok('exactly 1 room after sub-foot create',
+     Object.keys(s().rooms).length === 1)
+  ok('still one history frame at sub-foot pitch',
+     s().history.length === before + 1)
+  ok('verifyIntegrity passes after sub-foot create',
+     verifyIntegrity(s()).valid)
+
+  s().undo()
+  ok('single undo reverts the sub-foot batch',
+     Object.keys(s().nodes).length === 0 &&
+     Object.keys(s().walls).length === 0 &&
+     Object.keys(s().rooms).length === 0)
+}
+
+// ── 8. Phase R1 — addRectangleRoom leaves no uncovered face ─────────────
+header('8. addRectangleRoom leaves findUncoveredFaces empty')
+reset()
+{
+  _resetFaceCaches()
+  s().addRectangleRoom(0, 0, 10 * FT, 10 * FT, { type: 'OTHER' })
+  _resetFaceCaches()   // ensure re-enumeration after Room creation
+  const uncovered = findUncoveredFaces(s(), s().currentFloorId)
+  ok('findUncoveredFaces returns empty after addRectangleRoom',
+     uncovered.length === 0, `got ${uncovered.length}`)
 }
 
 // ── Summary ───────────────────────────────────────────────────────────

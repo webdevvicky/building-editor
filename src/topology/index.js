@@ -90,3 +90,9 @@ export {
   getWetRoomIds, getWetWallIds, getWetWalls,
   getWetExternalWalls, getWetPartitions, getWetRoomsForWall,
 } from './wet.js'
+
+// Faces (Phase R1 — interactive room detection)
+export {
+  enumerateFloorFaces, findFaceContainingEdge, findFaceContainingPoint,
+  isFaceCoveredByRoom, findUncoveredFaces, _resetFaceCaches,
+} from './faces.js'

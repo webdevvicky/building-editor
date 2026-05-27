@@ -32,21 +32,35 @@ function _formatForDisplay(value, unit, precision) {
   return `${Math.round(value * 100) / 100}`
 }
 
-export default function FeetInchesInput({
-  value,
-  onCommit,
-  min = -Infinity,
-  max = Infinity,
-  precision = '1/2',
-  disabled = false,
-  placeholder = '',
-  autoFocus = false,
-  onKeyDown,
-}) {
+export default function FeetInchesInput(props) {
+  const {
+    value,
+    onCommit,
+    min = -Infinity,
+    max = Infinity,
+    precision = '1/2',
+    disabled = false,
+    placeholder = '',
+    autoFocus = false,
+    onKeyDown,
+  } = props
   const { unit } = useUnits()
   const [raw, setRaw] = useState(() => _formatForDisplay(value, unit, precision))
   const focusedRef = useRef(false)
   const inputRef = useRef(null)
+
+  // React silently swallows unknown props on user components. This guard
+  // surfaces the integration mistake that caused BE-Bug-002 (CalibrationModal
+  // passed onChange instead of onCommit).
+  useEffect(() => {
+    if (import.meta.env.DEV && 'onChange' in props) {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[FeetInchesInput] onChange is not supported. Use onCommit(ft) — fired on blur/Enter. See component contract.'
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Re-format when external value (or unit) changes — but ONLY when not
   // focused, so we don't clobber the user's in-progress typing.

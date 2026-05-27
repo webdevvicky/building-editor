@@ -2,9 +2,264 @@
 
 ## Codebase Overview
 
-Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus 27 verify scripts that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
+Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus 29 verify scripts that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
+
+## Phase R1 — Auto Room Detection, interactive (2026-05-27)
+
+Interactive face-detection tool that converts a closed wall loop into a
+Room entity with one click. Phase R2 (auto-suggest after wall mutation)
+is a separate planning round — explicitly NOT in R1. **29 verify
+scripts now gate every commit** (+1: `verify-room-detection`, 59
+assertions including the load-bearing BOQ canary).
+
+### What landed
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | `src/topology/faces.js` (NEW) | Planar-graph face enumeration via next-CCW-edge traversal (rotational system; standard combinatorial-embedding algorithm). Pure, Node-testable, no React/DOM. Reuses `getFloorWallPerimeterGraph` from `src/topology/adjacency.js` as the input graph; filters out plot walls (interior rooms only). |
+| 2 | Canonical face shape | Per adjustment 5. Every face has nodeOrder rotated so the lexicographically-smallest nodeId is at index 0, CCW winding (outer-face rejected by negative signed-area sign), wallIdsInOrder parallel to nodeOrder, wallIds (canonical) sorted ascending for Set comparison. Equivalent faces serialize identically; memo cell stable; Set comparisons reliable. |
+| 3 | Degenerate rejection | Per adjustment 6. Reject any face with `Math.abs(signedAreaFt2) < 0.5` (sliver) or repeated nodeIds in nodeOrder (self-touching). Both checks run BEFORE adding the face to output. |
+| 4 | Hover-preview cache | Per adjustment 8. Per-floor `Map<wallId:directedKey, face>` lives alongside the per-floor face table cell. Invalidated TOGETHER with the face table — when `state.walls`/`state.nodes` reference changes, both are cleared in the same call. `findFaceContainingEdge` runs at 60 Hz during room_detect hover; cache makes it O(1) per repeated hover. |
+| 5 | `state.detectFaceFromWallClick(wallId, clickPoint)` | Pure pass-through to `findFaceContainingEdge`. Used by Canvas for hover preview + click handler. |
+| 6 | `state.createRoomFromFace(face, opts)` | Atomic conversion. Routes through `pendingWallIds → saveRoom → _runAtomically`, so the existing overlap check, history snapshot, integrity, finishes presets, naming, and IFC GUID generation all stay consistent. Stamps provenance meta `createdFrom: 'face-detect'` + `detectedAt: ISO`. |
+| 7 | Provenance meta on auto-detected rooms | Per adjustment 7. Schema slot only in R1 — no UI consumption yet. Useful for future debugging and stale-room workflows. |
+| 8 | Canvas `room_detect` tool | Hover preview: nearest wall within 24in resolves the face on the cursor's side via raw-cursor cross product. Live polygon overlay (primary tint when uncovered, warning tint when already a room) + area label. Click on wall: creates room (or selects existing). Click out of range: no-op. Toolbar entry in Draw cluster after `room`. |
+| 9 | `Shift+A` shortcut | `useKeyboardShortcuts.js`. Bare `A` is reserved future territory; Shift+A groups with the "auto" semantics of the tool. |
+| 10 | TOOL_SNAP_POLICY entry | `room_detect: [{ id: 'WALL_SEGMENT', toleranceIn: 24 }]` — 2-foot hover-detection radius. Side-of-wall disambiguation uses the RAW cursor (not the snapped projection), so the resolver only supplies the wall identity. |
+| 11 | `verify-room-detection.mjs` (NEW) | 59 assertions across bootstrap purity grep + Sections A–E. Section E is the BOQ canary: rect_room-created and createRoomFromFace-created states on the same wall topology produce **byte-identical BOQ output** (verified at 38/38 lines matching). |
+
+### Locked rules (Phase R1)
+
+- **`src/topology/faces.js` is PURE + Node-testable.** No React, no
+  DOM, no Zustand dispatches. Mirrors the snap module's purity
+  discipline; `verify-room-detection.mjs` bootstrap grep-checks the
+  file.
+- **All Room creation routes through `saveRoom`.** New code MUST
+  NOT mutate `state.rooms` directly. `createRoomFromFace` sets
+  `pendingWallIds` and calls `saveRoom` under `_runAtomically` so
+  overlap checks, history, integrity, finishes presets, naming,
+  IFC GUID all stay consistent with the rest of the codebase.
+- **Phase A snap is a prerequisite.** Without Phase A's endpoint
+  snap, freehand-drawn walls wouldn't share `node.id`s reliably
+  and the wall graph would have disconnected components. Phase R1
+  assumes Phase A defaults are active.
+- **Topology never creates entities by itself.** Room entities
+  are always user-authored — either explicit click in
+  `room_detect` mode, or explicit acceptance of a Phase R2
+  suggestion. No silent auto-creation under any flag.
+- **Courtyard / nested-room handling: Option A (refuse).** When a
+  detected face's polygon would overlap an existing Room, the
+  `saveRoom` overlap rejection fires. The face is not created.
+  See "Deferred" section for the polygon-with-holes follow-on.
+- **Algorithm: planar face enumeration via next-CCW-edge
+  traversal** (rotational system; standard combinatorial-embedding
+  technique). Named in `src/topology/faces.js` header. No library,
+  no training-data guess.
+- **Canonical face equivalence is the load-bearing assumption** for
+  `isFaceCoveredByRoom` Set comparison and for the memo invalidation
+  contract. Equivalent faces (same wall set, regardless of which
+  wall happens to be the entry point) MUST serialize to the same
+  `wallIds` array — guaranteed by rotation + CCW canonicalization.
+- **Hover-preview cache invalidates TOGETHER with the face-table
+  memo.** Per-floor cell holds both `{ faces, byEdgeSide, hoverCache }`;
+  when `state.walls`/`state.nodes` changes, the cell is replaced
+  wholesale, including a fresh empty `hoverCache`. Documented in
+  `faces.js` header.
+
+### Phase R2 — deferred (separate planning round)
+
+After R1 ships and is validated on a real F1 flat, R2 will add:
+- `_scheduleAutoDetect()` helper invoked post-`_save()` to compute
+  `findUncoveredFacesOnCurrentFloor` off the click hot path.
+- Chain-draw suspend/resume window-event signaling so suggestions
+  don't fire mid-stroke.
+- Non-blocking toast UI ("New room detected: 12.5'×10' (125 ft²) —
+  Create [↵]") via existing `toast.action` API.
+- `verify-room-detection.mjs` Section F: auto-suggest contract +
+  regression seatbelt.
+
+### Verify-script inventory (29 total)
+
+```
+Phase 1-6 + A (28): unchanged
+Phase R1 (+1):
+  verify-room-detection — bootstrap purity grep (6) + Section A
+    algorithm correctness (18) + Section B canonical normalization (5) +
+    Section C idempotency + memo invalidation + hover cache (6) +
+    Section D multi-floor isolation (7) + Section E BOQ canary +
+    provenance + integrity (12) = 59 assertions
+```
+
+## Phase A — Snap Architecture (2026-05-27)
+
+Unified snap resolver replacing the old hardcoded 1ft grid + scattered
+inline snap logic. `src/snap/` owns every screen→world coord
+conversion for tools that place geometry; `src/geometry.js` keeps the
+pixel-accurate `screenToWorldRaw` primitive for tools that bypass
+(calibrate, split, stamp drag). **28 verify scripts now gate every
+commit** (+1 new: `verify-snap`, 1520 assertions across 7 sections +
+bootstrap purity grep).
+
+### Module map
+
+```
+src/snap/
+  targets.js      — SNAP_TARGETS frozen registry (6 entries: NODE,
+                    WALL_ENDPOINT, WALL_MIDPOINT, WALL_NEAREST,
+                    WALL_SEGMENT, GRID). Each descriptor declares
+                    { id, label, tier, defaultSettings, prepare?,
+                    query, displayLabel, renderOverlay? }.
+  toolPolicy.js   — TOOL_SNAP_POLICY frozen registry. Per-tool ordered
+                    list of target ids (or {id, toleranceIn}
+                    overrides). Tools absent from the registry resolve
+                    to raw / free placement (no snap).
+  candidates.js   — Spatial-index seam. findCandidates(state, type,
+                    x, y, radiusIn) and findNearestCandidate(...).
+                    Initial impl: O(N) linear scan. Future spatial
+                    index (R-tree / grid hash) plugs in here without
+                    touching targets.
+  resolver.js     — resolveSnap(state, screenXY, ctx) → { worldXY,
+                    targetKind, sourceId, raw, _debug? }. Single entry
+                    point. DEV-only _debug telemetry.
+  index.js        — barrel.
+projectSettings.snap = {
+  enabled, pitchIn (default 12),
+  pitchPresets: [1, 3, 6, 12, 24],
+  bypassKey: 'Alt' (default; 'Alt' | 'Shift' | 'Ctrl' | 'None'),
+  targets: {  NODE / WALL_ENDPOINT / WALL_MIDPOINT / WALL_NEAREST /
+              WALL_SEGMENT / GRID: { enabled, toleranceIn? }  },
+}
+```
+
+### Locked rules (Phase A)
+
+- **`src/snap/` modules are PURE + Node-testable.** No React, no JSX,
+  no DOM, no Zustand dispatches. `renderOverlay` returns a render
+  thunk that Canvas interprets — the resolver never executes it.
+  `verify-snap.mjs` bootstrap section grep-checks all four files.
+- **Single screen→world entry point.** Every drawing tool's click
+  routes through `resolveSnap`. The old `screenToWorld` (snapped)
+  helper has been removed from `geometry.js`. Tools that bypass snap
+  use `screenToWorldRaw` directly: split (targets a specific wall),
+  stamp drag (drag-offset capture), calibrate_underlay (raw image
+  pixels).
+- **Tier-based comparator** (load-bearing): the candidate comparator
+  is `tier asc → distance asc → policyIndex asc → sortKey lex asc`.
+  Tier 0 = real targets that compete on distance. Tier 1 = catch-all
+  fallback (GRID only). A tier-0 candidate ALWAYS beats a tier-1
+  candidate regardless of distance — this expresses "policy says try
+  wall first, fall back to grid" without callers inspecting
+  distances. All four keys are fully deterministic from policy +
+  candidate identity, preserving cross-machine / cross-browser
+  reproducibility. **Section G of `verify-snap.mjs` fuzz-tests
+  determinism against shuffled candidate orderings — 100/100
+  identical winners required.**
+- **NODE vs WALL_ENDPOINT — DO NOT deduplicate.** NODE is any
+  reusable graph node; WALL_ENDPOINT carries wall-owned endpoint
+  semantics. Coincident today, distinct in intent. Future targets
+  may attach behavior to "endpoint" that doesn't apply to free
+  nodes. Documented in `src/snap/targets.js` header.
+- **GRID emits candidate telemetry uniformly.** GRID's `query()`
+  populates the standard `{ point, sourceId, distanceIn }` shape just
+  like every other target. `_debug.candidates` includes GRID entries
+  with real distances. No silent target.
+- **Per-tool tolerance overrides live in TOOL_SNAP_POLICY** (not in
+  projectSettings). Use `{ id: 'NODE', toleranceIn: 24 }` syntax
+  in policy entries. Today's column tool uses this for its 24in
+  node-attract radius. User-facing tolerance overrides are deferred
+  to Phase C.
+- **Defaults reproduce today byte-identically.** Section A of
+  `verify-snap.mjs` fuzz-tests 100 random `(toolId, clientXY)`
+  triples across 14 tools on a clean canvas; resolver output matches
+  legacy `screenToWorld` byte-for-byte. **1400/1400 match
+  required.** `verify-boq` byte-equality (250+ assertions on a
+  deterministic fixture) is the downstream canary.
+- **MEP placement falls through to GRID when no wall is within
+  range.** Policy `[WALL_NEAREST, GRID]`. Today's MEP code
+  pre-snapped via `screenToWorld` before walking walls; with no
+  walls in range, the snapped output stuck. The GRID fallback
+  preserves byte-identical behavior on empty / wall-free canvases.
+- **Modifier bypass via `projectSettings.snap.bypassKey`** (default
+  `'Alt'`). Hold the configured key → resolver short-circuits to
+  raw / free placement. Canvas tracks `bypassDown` via the same
+  keyboard `useEffect` that owns `shiftDown` / `spaceDown`.
+- **F9 toggles snap** via window event `'snap:toggle'`. The
+  useKeyboardShortcuts hook dispatches; Canvas listens and calls
+  `toggleSnapEnabled()`. Mirrors the `boq:toggle` decoupled
+  pattern.
+
+### Phase B compatibility audit — contract notes locked
+
+Phase B adds **UNDERLAY_FEATURE** (PDF dark-pixel / edge-detection
+target). Phase A's registry is the seam — Phase B is a pure registry
+addition + new `prepare` / `query` implementation + extending
+`TOOL_SNAP_POLICY` arrays. Zero Phase A files touched.
+
+Contract decisions for Phase B (documented here so the implementer
+doesn't re-derive them):
+
+- **UNDERLAY_FEATURE registers as `tier: 0`.** A detected wall edge
+  in the underlay represents real architectural geometry the user is
+  tracing — semantically equivalent to NODE / WALL_ENDPOINT, not to
+  the GRID catch-all. Within tier 0, distance + policyIndex resolve
+  ties: typical policy for `draw` becomes `[NODE, WALL_ENDPOINT,
+  WALL_MIDPOINT, UNDERLAY_FEATURE, GRID]` so existing drawn entities
+  beat PDF edges (via policyIndex), and PDF edges beat the grid
+  fallback (via tier).
+- **`query()` MUST be synchronous.** The resolver runs at cursor-move
+  rate (60 fps). Async edge-detection work goes in optional
+  `prepare(state, signal)`, which the resolver invokes but never
+  awaits. `query` reads a cache populated by `prepare`. Cache miss →
+  `query` returns `null` → resolver falls through gracefully (typical
+  policy lands on GRID via tier-1 fallback).
+- **`prepare()` re-entrance contract.** A new `prepare` invocation
+  for a target aborts the prior controller before starting. Targets
+  MUST honor `signal.aborted` and discard partial work. The resolver
+  maintains a `Map<targetId, AbortController>` for this — see
+  `src/snap/resolver.js::_prepareControllers`. Verified by Section F8.
+- **`sourceId` is polymorphic from day one.** `string | { kind, …payload }
+  | null`. UNDERLAY_FEATURE uses the object form, e.g.
+  `{ kind: 'UNDERLAY_PIXEL', pxX, pxY, edgeStrength }`. Canvas
+  branches on `targetKind`, never on `sourceId`'s shape.
+- **`displayLabel` + `renderOverlay` are per-target.** Canvas
+  dispatches via `getTargetDescriptor(targetKind).displayLabel(...)`
+  and `.renderOverlay(...)` — no `switch(targetKind)` anywhere.
+  Verified by Section F7 grep-check on `src/snap/` and `Canvas.jsx`.
+- **`defaultSettings` shape is open per target.** Phase A's targets
+  need `{ enabled, toleranceIn? }`. UNDERLAY_FEATURE will add
+  `{ enabled, toleranceIn, sensitivity, sampleRadiusPx, polarity }`
+  — Phase A schema is untouched. `loadProject` schema-fill in
+  `src/store.js` walks every registry entry's `defaultSettings` and
+  deep-merges, so adding a new target's defaults requires no store
+  changes.
+- **Multi-floor seam.** UNDERLAY_FEATURE's `prepare(state)` reads
+  `getFloorUnderlay(state)` for the current floor only. Cache is
+  keyed by `${floorId}:${storageKey}`. Phase A's resolver passes
+  `state` through; no change needed.
+- **Distance metric is uniform inches.** UNDERLAY_FEATURE's
+  edge-detection metric = perpendicular pixel distance ×
+  `inchesPerPixel`. Reduces to inches like every other target.
+- **Section F regression seatbelt.** `verify-snap.mjs` Section F
+  registers an in-test `UNDERLAY_FEATURE_STUB` and exercises the
+  complete contract (F1 zero-files-touched, F2 prepare-not-awaited,
+  F3 cache miss falls through, F4 polymorphic sourceId round-trip,
+  F5 displayLabel flow-through, F6 renderOverlay flow-through, F7
+  no `switch(kind)` grep, F8 prepare re-entrance + abort). Any
+  future Phase A refactor that breaks the seam fails this section
+  before Phase B reaches users.
+
+### Verify-script inventory (28 total)
+
+```
+Phase 1-6 (27): unchanged
+Phase A   (+1):
+  verify-snap   ← bootstrap purity grep (16) + Section A byte-equality
+                  fuzz (1400) + B (26) + C (4) + D (9) + E (39) +
+                  F1-F8 contract seatbelt (23) + G determinism (3)
+                  = 1520 assertions
+```
 
 ## Phase 6 — Dimension Convention + Drawing Speed (2026-05-27)
 
@@ -1884,9 +2139,40 @@ Collapsible BOQ sidebar + **Topology Layer (Steps 0–9)** + **MEP Phase 0
 Load-Based Sizing** + **Phase 4 Enterprise Architecture (Phases 1–4)** +
 **Phase 5 Tier-2 sweep + IDB autosave + PDF/image Underlay** +
 **Phase 6 Dimension Convention (Option C) + Drawing Speed (chain draw +
-rect-room atomic create + smart MEP defaults + project templates)**
-complete on `main` (latest 2026-05-27). See **Phase 6** section at the
+rect-room atomic create + smart MEP defaults + project templates)** +
+**Phase A Snap Architecture (unified resolver + per-tool policy +
+priority tiers + Alt bypass + F9 toggle + per-project pitch)** +
+**Phase R1 Auto Room Detection — interactive (planar face enumeration +
+canonical normalization + hover-preview cache + Shift+A tool +
+createRoomFromFace with provenance meta)**
+complete on `main` (latest 2026-05-27). See **Phase R1** section at the
 top of this file for the most recent landing.
+
+**Phase R1 — Auto Room Detection, interactive (2026-05-27) —
+COMPLETE.** Verify results at merge: `verify-room-detection`
+59/59 assertions across Bootstrap purity grep + Section A (algorithm
+correctness) + Section B (canonical normalization: lex-smallest first,
+CCW, wallIds sorted) + Section C (idempotency + memo + hover cache
+invalidation) + Section D (multi-floor isolation) + Section E (**BOQ
+canary IDENTICAL**: rect_room-created and createRoomFromFace-created
+states on the same wall topology produce byte-identical BOQ output
+across 38 lines). All 29 verify scripts green including
+`verify-boq`. Phase R2 (auto-suggest after wall mutation) is a
+separate planning round.
+
+**Phase A — Snap Architecture (2026-05-27) — COMPLETE.** Verify
+results at merge: `verify-snap` 1520/1520 (Section A byte-equality
+1400/1400 across 100 fuzz triples × 14 tools, Section F Phase B
+forward-compat 23/23 across F1–F8 contract sub-assertions, Section G
+deterministic tie-break 3/3 across 100 shuffled-input runs).
+All 28 verify scripts green including the load-bearing `verify-boq`
+canary — zero quantity drift from defaults reproducing today's
+behavior. Two contract refinements landed during integration and are
+documented in `src/snap/resolver.js` header + the locked-rules block
+above: (a) priority `tier` field on target descriptors so GRID is a
+tier-1 fallback rather than a tier-0 competitor, (b) MEP policies
+extended with `'GRID'` fallback to preserve byte-identical
+empty-canvas behavior.
 
 Topology layer (commits step-0 → step-9) is the canonical read-only
 spatial-relationship surface for downstream discipline engines
@@ -2933,6 +3219,89 @@ can't break in responsive states. Resize listener re-evaluates the gate.
 ---
 
 ## Known issues / Phase 2 backlog
+
+### Resolved by Phase R1 — Auto Room Detection (2026-05-27)
+
+- **Room entities could only be created via Shift+R rectangle tool**
+  or by manually clicking each enclosing wall in the legacy `room`
+  tool then committing — high friction once you've drawn a flat
+  freehand. Walls drawn with the regular wall-draw tool (or imported
+  via future DXF) form closed loops at the graph level but spawned
+  no Room entity. Resolved by the `room_detect` tool: click any
+  wall in a closed loop → smallest enclosing face computed on the
+  cursor's side via planar face enumeration → Room created via
+  `createRoomFromFace` (atomic, routed through canonical
+  `saveRoom`). BOQ output is byte-identical to equivalent
+  rect_room-created rooms on the same wall topology (verified by
+  Section E canary). Shift+A activates the tool. Provenance meta
+  stamps `createdFrom: 'face-detect'` for future debugging /
+  stale-room workflows.
+
+### Deferred — Phase R+N Courtyard / nested-room support
+
+When a detected face is fully contained inside another (e.g., a
+courtyard inside an outer perimeter), Phase R1's overlap check
+refuses to create the inner room — `doRoomsOverlap` flags
+containment as overlap, mirroring Phase 1's existing semantics.
+Real architectural courtyards in residential BOQ are rare enough
+that they deserve dedicated schema treatment:
+- Polygon-with-holes representation (outer + inner-loop arrays).
+- Winding-aware area math (signed-area subtraction for net
+  floor area).
+- BOQ subtraction logic across every aggregator that consumes
+  room area / room polygon (flooring, ceiling, plaster, tiles,
+  paint, etc.).
+
+Defer until a real residential project demands it. Track here
+when surfaced.
+
+### Resolved by Phase A — Snap Architecture (2026-05-27)
+
+- **Calibrate scale modal opened immediately on tool activation** instead
+  of waiting for two canvas clicks. Root cause: the modal's `open`
+  predicate was `toolActive && (haveBothPoints || !capture)` — the
+  `!capture` clause fired the modal the moment the tool was activated
+  (capture is null until the first click), blocking the canvas before
+  the user could click their two reference points. Fixed by gating
+  the modal on `haveBothPoints || fallbackRequested` and extending the
+  status pill to cover the pre-click state with a "Use full drawing
+  width instead" affordance for the fallback path. Container is
+  `pointer-events: none` so canvas clicks pass through; only the
+  fallback button is interactive. (Earlier in this session.)
+
+- **FeetInchesInput rejected valid feet-inches input in the calibration
+  modal.** Repro: enter `15'-0"` → Apply → toast "Enter a positive
+  length in feet." Root cause: `CalibrationModal.jsx` passed
+  `onChange={setLengthFt}` to a component whose commit prop is
+  `onCommit`. React silently swallowed the unknown prop, `setLengthFt`
+  was never called, `lengthFt` stayed null, `Number(null) === 0`
+  failed the positive-length guard. The parser itself was correct
+  (handled `15'-0"`, `15' 0"`, `15'0"`, `15`, `15.5`, `15'-6"`,
+  `15'-6 1/2"`, `180"` all correctly — proven via 25 existing
+  `verify-units` parseFeetInches assertions). Fixed by prop rename
+  `onChange → onCommit`. Added a dev-mode guard in
+  `FeetInchesInput.jsx` that `console.error`-s if any future consumer
+  passes `onChange` (gated on `import.meta.env.DEV`; tree-shaken in
+  prod). Audit confirmed the 13 other consumers all used `onCommit`
+  correctly. (Earlier in this session.)
+
+- **`GRID_IN = 12` hardcoded as a magic number with no per-project
+  override and no per-tool bypass** — blocked all sub-foot tracing of
+  PDF underlays. Real architectural drawings carry walls and openings
+  at arbitrary positions (9", 4½", 11'-7½", door offsets of 2'-7",
+  etc.); every click rounded to the nearest 12" cell. The only escape
+  hatches were `screenToWorldRaw` (used by Calibrate, Split, Stamp
+  drag) and property-panel typing after the fact. Resolved by the
+  unified snap resolver itself: `projectSettings.snap.pitchIn` is
+  user-configurable (1/3/6/12/24in presets plus custom), Alt-bypass
+  for pixel-accurate placement, F9 toggles snap globally, per-target
+  enable for endpoint / midpoint / etc., and `TOOL_SNAP_POLICY`
+  drives per-tool behavior through a single resolver call site. The
+  14 inline `screenToWorld` / 5 inline MEP-wall-snap blocks / 1 inline
+  split-segment-snap in Canvas.jsx all collapsed into
+  `resolveSnap(state, screenXY, ctx)`. See Phase A section above.
+
+### Open
 
 - **Undo/redo can restore room-overlap state** that bypassed save-time prevention.
   Repro: Create Room 1 → Delete Room 1 → Create Room A in same space → Undo the delete.
