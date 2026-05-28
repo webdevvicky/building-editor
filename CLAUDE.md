@@ -2,9 +2,303 @@
 
 ## Codebase Overview
 
-Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus 30 verify scripts that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
+Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus **32 verify scripts** that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
+
+## Phase D — Face-Aware Draw Reference (2026-05-28)
+
+Wall authoring now matches Indian / RERA tracing convention. The
+user's clicked points are interpreted per `drawReference` and converted
+to centerline geometry at the authoring boundary — canonical storage
+stays centerline. Drag a 10×10 ft room in `inside_face` mode and the
+resulting carpet IS 10×10 (not 9.25×9.25). **32 verify scripts now gate
+every commit** (+1: `verify-draw-reference`, 80 assertions across
+Sections A–N including 3 edge cases).
+
+### What landed
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | `projectSettings.drawReference` | `'inside_face' \| 'centerline' \| 'outside_face'`. Default **`'inside_face'`** (RERA-aligned default — room labels are clear-inside). loadProject injects the default on any project lacking the field; the setting governs FUTURE draws only — stored geometry is untouched. |
+| 2 | `src/draw/faceToCenterline.js` (NEW) | `convertFacePointsToCenterline(points, perPointSnapRef, opts)` — single entry point. Dispatches to `_offsetClosedPolygon` (closed) or `_offsetOpenPolyline` (open). `isFaceChainClosed(points, toleranceIn)` runs on the FACE buffer per the closure-in-face-space rule. Pure. |
+| 3 | Kernel extension — `_offsetVertex` | Extracted shared per-corner logic (intersect + parallel-fallback + miter cap) from `_offsetClosedPolygon`. Both closed + open kernels now call it for interior vertices. Single geometric source of truth. |
+| 4 | Kernel extension — `_offsetOpenPolyline` | Open-polyline offset. Interior vertices use `_offsetVertex`; endpoints perpendicular-project along their adjacent edge. Winding inferred from implicit-closure signed area (N≥3) or left-of-direction (N=2). |
+| 5 | Kernel extension — `opts.pinnedIndices` | `_offsetClosedPolygon` accepts a Set of pinned vertex indices. Pinned vertices skip the line-intersection step and emit the original point unchanged. Used by face-aware draw's snap-to-existing-centerline path. |
+| 6 | Snap-target `snapRef` classification | Each `SNAP_TARGETS` descriptor declares `snapRef: 'centerline' \| 'face'`. NODE / WALL_ENDPOINT / WALL_MIDPOINT / WALL_NEAREST / WALL_JUNCTION / WALL_SEGMENT → `centerline`. GRID + raw / no-snap → `face`. `getSnapRef(targetKind)` is the registry-driven lookup. |
+| 7 | `addRectangleRoom` opts | `opts.drawReference ?? projectSettings.drawReference ?? 'inside_face'`. Converts the 4 face corners → 4 centerline corners via the kernel before creating nodes. Collapsed conversion → refuse + `face_conversion_collapsed` validationEvent + toast.error, commits nothing. |
+| 8 | Canvas chain draw — buffer-then-commit | New `drawChainBuffer` local state for face/outside modes: clicks accumulate as `{point, snapRef}`; closure-to-origin is detected on the FACE buffer BEFORE conversion. On Enter / double-click / face-space closure, `_runAtomically` wraps face → centerline conversion + all node/wall creation in one history frame. Centerline mode keeps the existing per-click commit (zero behavior change for that setting). |
+| 9 | Canvas mode badge | Top-left pill during `draw` / `rect_room` tools. Color-coded: inside_face green, outside_face orange, centerline neutral. Mirrors the chain-draw hint banner's positioning. |
+| 10 | Ghost rect label rewrite | The legacy `Canvas.jsx:1785-1788` dimensionMode-driven deduction was removed. Label now shows the dragged dimension VERBATIM — it IS the active draw reference. dimensionMode's role becomes purely display-of-existing-geometry. |
+| 11 | Toolbar segmented control | Draw cluster restructured to `groups[]` with a new "Drawing to: [Inside / Center / Outside]" segmented control. Routes through `writePath('projectSettings.drawReference', value)` → `setDrawReference(mode)`. |
+| 12 | `_walkEdgesWithWallIds` Phase-W fix | Now prefers `room.nodeOrder` over `walkPolygonNodeOrder + parent-wall endpoints`, with a fallback expanded-segment lookup walking each parent wall's ordered junction chain. Fixes carpet calculation for rooms with T-junctioned wall membership (Section F of verify-building-area: 5×5 room with both perimeter walls T-junctioned at partition boundaries → carpet correctly reports 18.06 ft²). |
+| 13 | `verify-draw-reference.mjs` (NEW) | 80 assertions across Bootstrap + A round-trip kernel inversion + B/C/D rect_room mode matrix + E/F chain closed+open + G mixed snapped/unsnapped chain + G.snap registry classification + H ghost label matrix + I loadProject default + J settings round-trip + K mid-workflow mode switch + L acute-angle open chain + M zig-zag alternating reflex/convex + N closure-in-face-space ordering. |
+
+### Locked rules (Phase D)
+
+- **Canonical wall storage stays CENTERLINE.** Drawing tools convert
+  user-clicked face geometry to centerline at the authoring boundary;
+  nothing downstream (topology / BOQ / exports / Phase W / MEP) knows
+  or cares about drawReference. Storage shape is unchanged.
+- **Closure detection runs on the FACE buffer, BEFORE conversion**
+  (load-bearing ordering). Near-thickness centerline offsets would
+  otherwise prevent closure detection and silently drop the user's
+  closing intent. Documented in `src/draw/faceToCenterline.js` header
+  under the `CLOSURE-IN-FACE-SPACE` heading.
+- **Snap-overrides-mode at the click vertex.** A face-mode click that
+  resolves to an existing centerline target (NODE / WALL_ENDPOINT /
+  etc. — anything `snapRef === 'centerline'`) is PINNED in the
+  offset kernel. The new wall's centerline node joins the existing
+  centerline node exactly. Topology join correctness beats geometric
+  perfection at the joint — the small notch from adjacent face-mode
+  edges is the honest representation of a mixed-reference chain.
+- **Per-vertex snapRef from the registry.** `getSnapRef(targetKind)`
+  in `src/snap/targets.js` is the single classification authority.
+  Adding a new snap target = one `snapRef:` field on its descriptor.
+- **Single offset kernel, three semantic uses.** Same
+  `_offsetClosedPolygon` / `_offsetOpenPolyline` powers:
+  (1) clear-internal inset (`direction: 'inward'`),
+  (2) built-up offset (`direction: 'outward'`),
+  (3) face → centerline draw conversion (`'outward'` for inside_face,
+  `'inward'` for outside_face). DRY by construction — there is no
+  parallel offset routine anywhere in the codebase.
+- **Collapsed conversion → refuse + validationEvent + toast.error,
+  commit nothing.** Never partial / clamp / silent fallback. Applies
+  to `addRectangleRoom` and chain commit. Rule reason: a clamped
+  result is a wrong result with no signal; the user must see that
+  their geometry was rejected so they can re-author.
+- **Buffer-then-commit chain is mode-conditional.** `drawReference !==
+  'centerline'` buffers clicks; `'centerline'` mode preserves the
+  existing per-click commit flow byte-identically. This is the
+  zero-regression guarantee for users on the legacy setting.
+- **Toggle mid-trace = discard buffer.** Switching `drawReference`
+  while a chain is in flight discards the buffer and restarts state.
+  Semantically the chain was "begun in mode X"; switching mid-stroke
+  is ambiguous. Documented in the `useEffect([drawReference])` hook
+  in Canvas.jsx.
+- **dimensionMode and drawReference are orthogonal.** dimensionMode
+  controls labels on EXISTING rendered geometry (wall length labels,
+  panel readouts, finish quantities). drawReference controls what
+  FUTURE clicks MEAN. The ghost rect label now follows drawReference
+  (matches the drag, not dimensionMode).
+- **Indian / RERA tracing convention is the default.**
+  `'inside_face'` is the DEFAULT_PROJECT_SETTINGS value for both new
+  and old projects (greenfield rule; setting governs future draws).
+  Room labels in real plans are clear-inside dimensions; the default
+  should match what a user dragging an architect's room labels
+  expects.
+
+### Verify-script inventory (32 total — +1 verify-draw-reference)
+
+```
+verify-draw-reference — Bootstrap purity grep + Section A round-trip
+  kernel inversion (rectangle + L-shape at machine precision) +
+  B/C/D rect_room across (inside_face / outside_face / centerline) +
+  E closed-chain kernel + F open-chain endpoint perpendicular projection +
+  G mixed snapped/unsnapped chain (pinned vertex preserves topology join) +
+  G.snap registry-driven snapRef classification (9 target kinds) +
+  H ghost rect label across drawReference matrix +
+  I loadProject default injection (greenfield) +
+  J settings round-trip + invalid-value rejection +
+  K mid-workflow mode switch (outside_face 30×30 plot → 900 ft²
+    built-up, flip → inside_face 10×10 room → 100 ft² carpet, integrity holds) +
+  L acute-angle open chain (miter cap fires, endpoints perpendicular-
+    project, no NaN, no silent failure) +
+  M zig-zag alternating reflex/convex (no self-intersection, no
+    collapse) +
+  N closure-in-face-space ordering (proves face-space dist 2.83in
+    closes but post-conversion dist 9.19in does not — 3.2× factor) =
+  80 assertions.
+```
+
+### Module map — Phase D additions
+
+```
+src/draw/faceToCenterline.js (NEW) — convertFacePointsToCenterline +
+  isFaceChainClosed. Pure. Closure-in-face-space rule documented.
+src/topology/rooms.js  — _offsetVertex (extracted shared helper),
+  _offsetOpenPolyline (NEW sibling kernel), _offsetClosedPolygon
+  opts.pinnedIndices support, _walkEdgesWithWallIds Phase-W-aware
+  rewrite (prefers room.nodeOrder + fallback expanded-segment lookup).
+src/topology/index.js  — re-exports _offsetClosedPolygon,
+  _offsetOpenPolyline, polygonSignedAreaIn2.
+src/topology/segmentClassify.js — {mode: 'physical' | 'topological'}
+  parameter, two memo cells. Default 'physical' preserves all callers.
+src/snap/targets.js    — snapRef classification per SNAP_TARGETS
+  descriptor + getSnapRef(targetKind) helper.
+src/snap/index.js      — exports getSnapRef.
+src/structuralSlice.js — DEFAULT_PROJECT_SETTINGS.drawReference =
+  'inside_face'; setDrawReference(mode) with 3-value validation.
+src/store.js           — loadProject injects drawReference default;
+  addRectangleRoom honors opts.drawReference + refuses on collapse.
+src/components/Canvas.jsx — drawChainBuffer local state;
+  _commitFaceChain helper; canvas mode badge; face-mode polyline
+  preview; ghost-rect label rewritten to show drag verbatim.
+src/components/Toolbar.jsx — writePath routes
+  projectSettings.drawReference → setDrawReference.
+src/components/toolbarConfig.js — Draw cluster restructured to
+  groups[] with new "Drawing to" segmented control.
+scripts/verify-draw-reference.mjs (NEW) — 80 assertions.
+```
+
+## Phase BA — Building-Area Metrics: Carpet + Built-up (2026-05-28)
+
+BOQ scope-of-work now reports carpet AND built-up correctly. The
+former "Built-up" row was a mislabeled centerline-polygon sum (off
+by ~half-thickness per axis). **31 verify scripts now gate every
+commit** (+1: `verify-building-area`, 51 assertions across Sections
+A–M including the F1-realistic L-shape with T-junction at corner +
+dumbbell mixed-thickness + two-disconnected-blocks additive cases).
+
+### What landed
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | `src/topology/buildingArea.js` (NEW) | `findExternalBoundaryLoops` + `computeBuiltUpAreaSft` + `computeCarpetAreaSft`. Pure. Per-floor memoization keyed on `(rooms, walls, nodes, projectSettings)` refs. |
+| 2 | Angular-continuation loop walker | Same next-CCW rotational-system pattern as `faces.js::_enumerateUncached`. Sort each node's external-incident neighbors by `atan2(dy, dx)`; given incoming directed edge `(a→b)`, next edge at `b` is the entry IMMEDIATELY PRECEDING `(b→a)` in the CCW-sorted list. Works at any node degree — handles T-junctions on external walls, L-shape concave corners, courtyard / disconnected blocks. |
+| 3 | Building-side orientation | For each external edge, the unique room referencing it (count = 1 from `classifySegment`) has a canonical CCW `nodeOrder`; whichever direction matches the consecutive pair in nodeOrder is the direction with the room (= building interior) on the left. Walks start only in that direction. Outer perimeters end up CCW (positive signed area = additive footprint), courtyard perimeters end up CW (negative signed area = subtractive hole), disconnected blocks both walk CCW (additive). Aggregation is signed-area sum — never largest-loop-as-outer. |
+| 4 | Carpet area | `computeCarpetAreaSft(state, floorId?)` sums `getRoomGeometry(state, id, 'clear_internal').area` over `getValidRoomIds`. Always uses `clear_internal` regardless of `projectSettings.dimensionMode` — carpet is an absolute architectural metric, not a display choice. |
+| 5 | Built-up area | `computeBuiltUpAreaSft(state, floorId?)` walks external loops and offsets each outward by per-edge halfThickness via `_offsetClosedPolygon` (`direction: 'outward'`). Naturally captures un-roomed enclosed space that's room-adjacent (the loop is defined by the building outline, not the room set). Incomplete external boundary → `complete: false` + warning, no silent wrong number. |
+| 6 | Store delegates | `getTotalCarpetAreaSft(floorId?)`, `getTotalBuiltUpAreaSft(floorId?)`, `getBuiltUpAreaInfo(floorId?)` (full payload including `complete` + `warnings`). |
+| 7 | BOQ scope-of-work | `_scopeOfWork.js` emits `totalCarpetAreaSft` + `totalBuiltUpAreaSft` (now the TRUE built-up) + `builtUpComplete`. BOQPanel removed the misleading "Floor area" header row; scope-of-work block shows "Carpet: X Sft" + "Built-up: Y Sft" with `(incomplete)` hint when boundary fails to close. |
+| 8 | `verify-building-area.mjs` (NEW) | 51 assertions across Bootstrap + Sections A–M. |
+
+### Locked rules (Phase BA)
+
+- **Built-up loop walker uses ANGULAR CONTINUATION, never degree-2
+  assumption.** Real F1 plans have L-shaped/stepped footprints AND
+  Phase W T-junctions where partitions meet external walls — external
+  boundary nodes routinely have degree 3+. "Pick the edge that isn't
+  where we came from" is undefined with multiple choices; naive
+  walking silently cuts corners or wanders into the interior. The
+  next-CCW rotational rule (same pattern as `faces.js`) resolves at
+  any degree.
+- **Loop orientation comes from the room's CCW nodeOrder.** Each
+  external edge's "building-on-left direction" is fixed by the
+  consecutive pair in the unique referencing room's nodeOrder. Walks
+  start only from building-on-left directed edges. This guarantees
+  outer-perimeter walks are CCW (positive) and courtyard walks are
+  CW (negative) — signed-area sum produces correct built-up for
+  arbitrary topology (rectangle, L, U, courtyard, disconnected blocks).
+- **Sign drives aggregation, not loop size.** Disconnected building
+  blocks both walk CCW (additive); courtyard inner loops walk CW
+  (subtractive). Never use a largest-loop-is-outer heuristic.
+- **`getTotalFloorArea` is retained for excavation byte-equality.**
+  `quantities/excavation.js:45` reads it as `buildingFootprintFt2`
+  for bulk excavation. Switching to true built-up would shift the
+  excavation numbers and break verify-boq byte-equality; tracked as
+  `BE-Excavation-001` in the backlog.
+- **`computeCarpetAreaSft` is dimensionMode-independent.** Always
+  computes via `'clear_internal'` regardless of project display
+  preference. Carpet is the strict inside-face floor area — an
+  absolute metric, not a display choice.
+- **The `_walkEdgesWithWallIds` Phase-W fix is load-bearing.** Carpet
+  for any room with T-junctioned wall membership returned 0 before
+  this fix (the function ignored `room.nodeOrder` and re-walked via
+  parent-wall endpoints, which fail when junctions split the chain).
+  See Section F of verify-building-area for the regression seatbelt.
+- **Built-up captures un-roomed enclosed space when it's room-adjacent.**
+  The loop traces the building OUTLINE, not the room set. Corridors
+  and ducts that aren't Room entities but ARE bordered by external
+  walls referenced by adjacent rooms appear naturally inside the
+  outer loop. The only blindspot: a fully-isolated outer perimeter
+  with zero rooms (the walker has no `EXTERNAL` edges to walk →
+  built-up = 0). Documented as the third assertion in Section F.
+
+### Verify-script inventory (Phase BA)
+
+```
+verify-building-area — Bootstrap purity grep + Section A carpet
+  rectangle + B built-up rectangle + C L-shape (4 convex + 1 concave,
+  net +4 convex satisfies Euler) + D courtyard (subtractive via signed
+  area) + E mixed-thickness external walls + F untraced enclosed space
+  (5×5 room inside 10×10 perimeter — carpet = 18.06 ft², built-up =
+  33.06 ft², documents UNREFERENCED-edge invisibility) + G incomplete
+  external boundary + H virtual external boundary (open verandah:
+  halfThickness 0, built-up follows the virtual line) + I T-junction
+  on external wall (Phase W expanded segments both contribute) +
+  J multi-floor isolation + K F1-realistic L-shape with T-junction at
+  corner (angular walker followed outer boundary) + L dumbbell mixed-
+  thickness (corner-selection + loop-inversion stress) +
+  M two disconnected blocks (signed-area additive) = 51 assertions.
+```
+
+## Bug A + B fixes (2026-05-28)
+
+Two correctness bugs found during real F1 plan tracing. Both now
+covered by verify-script regression seatbelts.
+
+### Bug A — Virtual walls block face-closure for room detection
+
+**Root cause**: `getFloorWallPerimeterGraph` excluded virtual walls
+from the graph entirely (`if (w.isVirtual) continue` at the top of
+the floor-walls loop). Face enumeration consumed the already-filtered
+graph, so faces that run along a virtual wall could never close —
+auto-detect failed silently. Manually-created rooms with a virtual
+wall in `room.wallIds` worked fine because `walkPolygonNodeOrder`
+doesn't filter virtual walls. Asymmetry between the auto-detect path
+and the manual-save path.
+
+**Fix**: Added `opts.mode: 'physical' | 'topological'` to
+`getFloorWallPerimeterGraph`, default `'physical'` (preserves every
+existing caller). Face enumeration opts into `'topological'` so
+virtual walls participate. Separate memo cells per mode prevent
+cross-poisoning. Plot walls remain face-ineligible. Quantity
+aggregators (plaster / paint / tiles / etc.) already filter `isVirtual`
+locally, so virtual-wall faces never leak into BOQ totals.
+
+**Verify**: `verify-room-detection` Section F (virtual-wall room
+detection, BOQ equals 3-physical-wall reference for area-driven lines,
+no quantity leakage), `verify-mep` Bug A regression seatbelt (physical
+default still excludes virtual walls).
+
+### Bug B — `deleteWall` leaves stale orphaned rooms
+
+**Root cause**: When `deleteWall` removed a wall, it stripped the
+wallId from every `room.wallIds[]` and recomputed `room.nodeOrder`
+via `recomputeRoomNodeOrder`, but if the loop could no longer close
+the function returned `[]` and the room was left in `state.rooms`
+with empty `nodeOrder` + partial `wallIds`. The room was
+structurally invalid (excluded from BOQ totals) but visually present
+on the canvas, and `saveRoom`'s overlap check skipped invalid rooms
+— so a redraw-then-redetect would create a NEW room overlapping the
+stale one. Duplicate room labels; mysterious "Invalid" room.
+
+**Fix**: `deleteWall` now auto-purges orphaned rooms inside the same
+`_save` snapshot. Each affected room is re-validated via
+`isRoomStructurallyValid` post-strip; invalid rooms are removed
+from `state.rooms` with a `room_orphaned_by_wall_delete`
+`validationEvent` (severity warning, category topology,
+`meta.deletedWallId`). Action returns
+`{ ok, purgedRoomIds, purgedRoomNames }` so UI callers can upgrade
+their wall-delete toast to persistent (`duration: null`) when rooms
+were purged. `selectedRoomId` clears when its target was purged.
+Single Undo restores wall + rooms atomically.
+
+`recomputeRoomNodeOrder`'s empty-return contract is now documented:
+`[]` means "closure broken"; `deleteWall` is the sole interpreter
+that acts on it as a purge signal. Other consumers must not silently
+store `[]` and leave the room visible.
+
+**Verify**: `verify-wall-topology` Section I (deleteWall room cascade
+— wall removed, room purged, validationEvent emitted, integrity
+valid, undo restores both atomically) + Section J (shared-wall
+multi-room delete — deleting a wall in only roomA purges ONLY
+roomA; roomB survives; deleting the shared wall purges both).
+`verify-room-detection` Section G (delete-then-redraw canary —
+exactly one room after redraw + re-detect, BOQ byte-identical to
+baseline).
+
+### Backlog entries recorded
+
+- **BE-Cleanup-001** — `deleteWall` doesn't strip `foundation.wallIds[]`
+  on delete; foundation cleanup should mirror the room-cleanup pattern.
+- **BE-Cleanup-002** — `deleteWall` orphans MEP fixtures with `wallId`
+  refs; per-discipline cascade should mirror the room pattern.
+- **BE-Excavation-001** — `excavation.js::buildingFootprintFt2` still
+  sums centerline room areas (true built-up now available via
+  `getTotalBuiltUpAreaSft` from Phase BA, but switching would break
+  verify-boq byte-equality; deferred until rebaseline accommodated).
 
 ## Phase W — Wall Topology Integrity (2026-05-27)
 
@@ -2356,9 +2650,20 @@ createRoomFromFace with provenance meta)** +
 **Phase W Wall Topology Integrity (T-junction primitive + walls stable
 across topological touches + explicit Split full propagation + Manual
 Join tool + deleteWall junction handling + per-segment classification +
-INV-W1-W10)**
-complete on `main` (latest 2026-05-27). See **Phase W** section at the
-top of this file for the most recent landing.
+INV-W1-W10)** +
+**Bug A + B fixes (virtual walls in face detection via topological-mode
+graph + deleteWall room cascade with atomic purge + persistent
+toast)** +
+**Phase BA Building-Area Metrics (carpet via clear_internal kernel +
+true built-up via angular-continuation external-loop walker +
+signed-area aggregation for courtyards/disconnected blocks + scope-of-
+work Carpet/Built-up rows)** +
+**Phase D Face-Aware Draw Reference (inside_face default per RERA +
+buffer-then-commit chain draw + closure-in-face-space ordering +
+snap-overrides-mode pinned vertices + Drawing-to toolbar segmented
+control + canvas mode badge)**
+complete on `main` (latest 2026-05-28). See **Phase D** + **Phase BA**
+sections at the top of this file for the most recent landings.
 
 **Phase W — Wall Topology Integrity (2026-05-27) — COMPLETE.** Verify
 results at merge: `verify-wall-topology` 127/127 assertions across
@@ -2503,18 +2808,22 @@ Training data for these versions is outdated.
 
 Run individually:
 ```
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs         # single-floor BOQ checks
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-multifloor.mjs  # multi-floor scope + topology guard
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-topology.mjs    # topology-layer relationship checks
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-mep.mjs         # 257+ MEP assertions across 5 disciplines + clash + sizing + Phase-5 overrides + pairing
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-persistence.mjs # IDB layer + manager.js + migration shim + chunked autosave
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-underlay.mjs       # calibration math + state setter round-trip + asset blob storage
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-dimension-mode.mjs # Phase 6 — math kernel + 400-config fuzz + aggregator wiring
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-rect-room.mjs      # Phase 6 — atomic rect-room create + node-snap + re-entrancy
-node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-templates.mjs      # Phase 6 — MODEL-ONLY snapshot + FK rewrite via integrity + IDB
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs              # single-floor BOQ checks
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-multifloor.mjs       # multi-floor scope + topology guard
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-topology.mjs         # topology-layer relationship checks
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-mep.mjs              # MEP assertions across 5 disciplines + clash + sizing + Bug A physical/topological mode
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-persistence.mjs      # IDB layer + manager.js + migration shim + chunked autosave
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-underlay.mjs         # calibration math + state setter round-trip + asset blob storage
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-dimension-mode.mjs   # Phase 6 — math kernel + 400-config fuzz; byte-equality seatbelt for kernel refactors
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-rect-room.mjs        # Phase 6 — atomic rect-room create (centerline mode locked)
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-templates.mjs        # Phase 6 — MODEL-ONLY snapshot + FK rewrite via integrity + IDB
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-wall-topology.mjs    # Phase W + Bug B sections I/J (deleteWall room cascade + shared-wall multi-room)
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-room-detection.mjs   # Phase R1 + Bug A Section F (virtual-wall faces) + Bug B Section G (delete-then-redraw)
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-building-area.mjs    # Phase BA — carpet + true built-up across 13 sections incl. F1-realistic L+T-junction + dumbbell + disconnected blocks
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-draw-reference.mjs   # Phase D — face-aware draw, 80 assertions incl. round-trip kernel, mixed snap/face chain, acute/zig-zag/closure-in-face-space
 ```
 
-Run all 27 in one go (POSIX shell):
+Run all 32 in one go (POSIX shell):
 ```
 for s in scripts/verify-*.mjs; do
   if node --experimental-loader ./scripts/resolver-hook.mjs "$s" > /tmp/v.log 2>&1; then
@@ -2525,10 +2834,14 @@ for s in scripts/verify-*.mjs; do
 done
 ```
 
-All 27 must pass green before any commit. Phase 6 adds three scripts —
-`verify-dimension-mode.mjs` (92 assertions inc. 400-config fuzz),
-`verify-rect-room.mjs` (26 assertions inc. atomic-undo), and
-`verify-templates.mjs` (55 assertions inc. FK-rewrite sync check).
+All 32 must pass green before any commit. Phase BA adds
+`verify-building-area.mjs` (51 assertions across 13 sections); Phase D
+adds `verify-draw-reference.mjs` (80 assertions across 14 sections
+including 3 edge cases: acute-angle open chain, zig-zag alternating
+reflex/convex, closure-in-face-space ordering proof). The byte-equality
+seatbelt for any change to the offset kernel is
+`verify-dimension-mode` (95/95) + `verify-building-area` (51/51) —
+both must stay green on every kernel refactor.
 
 ## Planned Features (do not implement yet)
 - DXF import (Phase 2.1) — parse AutoCAD floor plans into walls/rooms
