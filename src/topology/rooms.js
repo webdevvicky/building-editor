@@ -320,7 +320,8 @@ export function getShaftPolygons(state, floorId) {
 // Centerline mode returns the same shape with insetDistanceIn=0 so consumers
 // can use the same primitive regardless of mode (no per-mode branches).
 
-function _polygonSignedAreaIn2(pts) {
+// Exported for buildingArea.js — same shoelace, shared kernel.
+export function polygonSignedAreaIn2(pts) {
   let a = 0
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length
@@ -328,6 +329,7 @@ function _polygonSignedAreaIn2(pts) {
   }
   return a / 2
 }
+const _polygonSignedAreaIn2 = polygonSignedAreaIn2
 
 function _halfThicknessForWall(wall) {
   if (!wall) return 0
@@ -348,8 +350,21 @@ function _intersectLines(p1, d1, p2, d2) {
 // Walks a room's centerline polygon and returns the wallId of each edge in
 // node order. Returns null if the polygon doesn't close, a node is missing,
 // or any edge can't be matched to a wallId.
+//
+// Phase W (2026-05-28 fix): prefers room.nodeOrder (authoritative,
+// T-junction-aware — populated from face enumeration). For T-junctioned
+// rooms, walkPolygonNodeOrder via parent wallIds fails because a parent
+// wall's (n1, n2) extends beyond the segment the room actually uses.
+// nodeOrder threads the T-junction nodes correctly; we just need to
+// match each consecutive (a, b) pair back to whichever parent wallId
+// has that segment in its expanded edge list.
 function _walkEdgesWithWallIds(state, room) {
-  const nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  let nodeOrder = (Array.isArray(room.nodeOrder) && room.nodeOrder.length >= 3)
+    ? room.nodeOrder
+    : null
+  if (!nodeOrder) {
+    nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  }
   if (!nodeOrder || nodeOrder.length < 3) return null
   const pts = nodeOrder.map(id => state.nodes[id])
   if (pts.some(p => !p)) return null
@@ -358,14 +373,309 @@ function _walkEdgesWithWallIds(state, room) {
   for (let i = 0; i < N; i++) {
     const aId = nodeOrder[i]
     const bId = nodeOrder[(i + 1) % N]
-    const wid = room.wallIds.find(id => {
+    // Match this segment to a parent wallId in room.wallIds. Two paths:
+    //   (1) Parent wall's (n1, n2) endpoints directly match — pre-Phase-W
+    //       and untouched rooms.
+    //   (2) The segment is an INTERIOR segment of a parent wall whose
+    //       junctions include the relevant nodes. Phase W: we walk the
+    //       wall's parametric direction from n1 toward n2, allowing
+    //       junction nodes as intermediate stops, and accept if a, b
+    //       appear as a consecutive pair.
+    let wid = room.wallIds.find(id => {
       const w = state.walls[id]
       return w && ((w.n1 === aId && w.n2 === bId) || (w.n1 === bId && w.n2 === aId))
     })
+    if (!wid) {
+      // Phase W expanded-segment lookup: find the parent wall whose
+      // expanded segments include the (a→b) pair.
+      wid = room.wallIds.find(id => {
+        const w = state.walls[id]
+        if (!w) return false
+        const a = state.nodes[w.n1], b = state.nodes[w.n2]
+        if (!a || !b) return false
+        const dx = b.x - a.x, dy = b.y - a.y
+        const len2 = dx*dx + dy*dy
+        if (len2 === 0) return false
+        const junctions = w.junctions ?? []
+        // Build ordered chain n1 → junctions sorted by t → n2.
+        const tFor = (nid) => {
+          const p = state.nodes[nid]
+          if (!p) return null
+          return ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+        }
+        const ordered = [w.n1, ...junctions
+          .map(jid => ({ jid, t: tFor(jid) }))
+          .filter(e => e.t != null)
+          .sort((p, q) => p.t - q.t)
+          .map(e => e.jid),
+          w.n2]
+        for (let k = 0; k < ordered.length - 1; k++) {
+          const u = ordered[k], v = ordered[k + 1]
+          if ((u === aId && v === bId) || (u === bId && v === aId)) return true
+        }
+        return false
+      })
+    }
     if (!wid) return null
     edgeWallIds.push(wid)
   }
   return { nodeOrder, pts, edgeWallIds, N }
+}
+
+// ── Shared offset-vertex helper (used by both closed + open kernels) ──
+//
+// Given the geometry of the two edges meeting at a corner and the
+// original vertex, returns the offset-vertex position via:
+//   1. line-intersection of the two offset edge lines, OR
+//   2. parallel-fallback (shift along the shared perpendicular) if the
+//      offset lines are collinear, OR
+//   3. miter-cap (scale the offset-from-original by 3 × max(halves)) if
+//      the line-intersection lands too far from the original corner.
+//
+// Pure. Returns { point: {x,y}, warning?: {code, cornerIndex, ...} }.
+// cornerIndex is passed through unmodified for the caller to label the
+// warning entry it appends to its own collected list.
+function _offsetVertex(prev, cur, originalVertex, cornerIndex) {
+  const intersection = _intersectLines(prev.offsetOrigin, prev.dir, cur.offsetOrigin, cur.dir)
+  if (intersection === null) {
+    // Parallel offset lines — collinear consecutive edges (post-splitWall
+    // sub-walls). Shift the shared vertex by max(half) along the (shared)
+    // perpendicular.
+    const maxHalf = Math.max(prev.halfIn, cur.halfIn)
+    return {
+      point: {
+        x: originalVertex.x + cur.perp.x * maxHalf,
+        y: originalVertex.y + cur.perp.y * maxHalf,
+      },
+    }
+  }
+  // Miter cap (Correction 3): cap = 3 × max(adjacentHalfThicknesses).
+  const maxHalf = Math.max(prev.halfIn, cur.halfIn)
+  const capIn = MITER_CAP_MULTIPLIER * maxHalf
+  if (capIn > 0) {
+    const dxC = intersection.x - originalVertex.x
+    const dyC = intersection.y - originalVertex.y
+    const dist = Math.hypot(dxC, dyC)
+    if (dist > capIn) {
+      const k = capIn / dist
+      return {
+        point: { x: originalVertex.x + dxC * k, y: originalVertex.y + dyC * k },
+        warning: {
+          code:              'MITER_CAPPED',
+          cornerIndex,
+          originalDistanceIn: r2(dist),
+          cappedDistanceIn:   r2(capIn),
+        },
+      }
+    }
+  }
+  return { point: intersection }
+}
+
+// Build per-edge offset geometry for the closed-polygon case. Edges
+// are sequential pairs (i, (i+1)%N). isCCW determined from signed area.
+function _buildClosedEdgeGeom(pts, halfThicknessPerEdge, perpSign) {
+  const N = pts.length
+  const signedArea = _polygonSignedAreaIn2(pts)
+  const isCCW = signedArea > 0
+  const edgeGeom = new Array(N)
+  for (let i = 0; i < N; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % N]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len = Math.hypot(dx, dy)
+    if (len === 0) { edgeGeom[i] = null; continue }
+    const dux = dx / len, duy = dy / len
+    const px = (isCCW ? -duy :  duy) * perpSign
+    const py = (isCCW ?  dux : -dux) * perpSign
+    const halfIn = halfThicknessPerEdge[i] ?? 0
+    edgeGeom[i] = {
+      a, b,
+      dir:          { x: dux, y: duy },
+      perp:         { x: px,  y: py  },
+      halfIn,
+      offsetOrigin: { x: a.x + px * halfIn, y: a.y + py * halfIn },
+    }
+  }
+  return { edgeGeom, isCCW, signedArea }
+}
+
+/**
+ * Offset a closed polygon's edges by per-edge halfThickness, returning
+ * the new vertex array + per-corner diagnostics.
+ *
+ * SINGLE GEOMETRIC KERNEL for both:
+ *   - `direction: 'inward'`  — used by _computeInsetEdgesForRoom for
+ *     clear-internal room polygons (clear_internal dimension mode).
+ *     The inward perpendicular at each edge points toward the polygon
+ *     interior; for a CCW polygon that's the +90° (left) rotation of
+ *     the edge direction; for a CW polygon it's -90° (right).
+ *   - `direction: 'outward'` — used by buildingArea.js for the
+ *     external-wall loop offset → outer-face building polygon. The
+ *     outward perpendicular is the OPPOSITE of inward; for a CCW
+ *     polygon it's the -90° (right) rotation; for a CW polygon (a
+ *     courtyard hole walked clockwise) it's the +90° (left) rotation.
+ *
+ * Per-corner geometry: shared with _offsetOpenPolyline via _offsetVertex
+ * — intersect consecutive offset lines, fall back to parallel shift if
+ * collinear, cap at 3 × max(halves) if line-intersection is too far.
+ *
+ * Returns:
+ *   {
+ *     newVerts:       {x,y}[N],
+ *     halfIn:         number[N],   // applied halfThickness per edge
+ *     warnings:       [{code, cornerIndex?, ...}]
+ *   }
+ *
+ * Pure. Does not consult state; the caller resolves halfThickness per
+ * edge ahead of time. Length-zero edges are tolerated (the
+ * corresponding vertex passes through unchanged).
+ *
+ * `opts.pinnedIndices` (Set<number>, default empty) — face-aware draw
+ * reuse: vertices whose index is pinned skip the intersect/cap step and
+ * emit the ORIGINAL vertex position unchanged. Used when the user
+ * snapped that vertex to an existing centerline node mid-chain; the
+ * topology join correctness beats geometric perfection at the joint
+ * (the small notch from un-offset adjacent edges is acceptable).
+ */
+export function _offsetClosedPolygon(pts, halfThicknessPerEdge, opts = {}) {
+  const direction = opts.direction ?? 'inward'
+  if (direction !== 'inward' && direction !== 'outward') {
+    throw new Error(`_offsetClosedPolygon: invalid direction "${direction}"`)
+  }
+  const N = pts.length
+  if (N < 3) {
+    return { newVerts: pts.slice(), halfIn: halfThicknessPerEdge.slice(), warnings: [] }
+  }
+  if (halfThicknessPerEdge.length !== N) {
+    throw new Error(`_offsetClosedPolygon: halfThicknessPerEdge length ${halfThicknessPerEdge.length} ≠ pts length ${N}`)
+  }
+  const pinnedIndices = opts.pinnedIndices ?? null
+  const perpSign = (direction === 'inward') ? +1 : -1
+
+  const { edgeGeom } = _buildClosedEdgeGeom(pts, halfThicknessPerEdge, perpSign)
+
+  const newVerts = new Array(N)
+  const warnings = []
+  for (let i = 0; i < N; i++) {
+    if (pinnedIndices && pinnedIndices.has(i)) {
+      newVerts[i] = { x: pts[i].x, y: pts[i].y }
+      continue
+    }
+    const prev = edgeGeom[(i - 1 + N) % N]
+    const cur  = edgeGeom[i]
+    if (!prev || !cur) { newVerts[i] = pts[i]; continue }
+    const res = _offsetVertex(prev, cur, pts[i], i)
+    newVerts[i] = res.point
+    if (res.warning) warnings.push(res.warning)
+  }
+
+  const halfIn = edgeGeom.map(g => g?.halfIn ?? 0)
+  return { newVerts, halfIn, warnings }
+}
+
+/**
+ * Offset an OPEN polyline's edges by per-edge halfThickness.
+ *
+ * Polyline of N points has N−1 edges. Interior vertices (index 1..N−2)
+ * share their offset-corner math with the closed kernel via the
+ * `_offsetVertex` helper. Endpoint vertices (0 and N−1) have only ONE
+ * adjacent edge each and project perpendicular along that edge by
+ * halfThickness (no intersection to compute).
+ *
+ * Winding inference for the perpendicular SIDE:
+ *   - N >= 3: implicit-closure signed area (treat the polyline as if
+ *     a final edge from N−1 back to 0 closed the loop). Positive →
+ *     CCW interior on the left; negative → CW interior on the right.
+ *     The kernel's `direction` then selects inward/outward relative to
+ *     that implicit interior.
+ *   - N == 2: ambiguous (no winding); the convention is "interior is
+ *     on the LEFT of the directed edge 0→1." Single-wall face-mode
+ *     draws are unusual; we document and accept this.
+ *
+ * Pure. Same return shape as _offsetClosedPolygon. `opts.pinnedIndices`
+ * supported on the same terms — pinned vertices return the original
+ * point unchanged. `opts.direction ∈ {'inward', 'outward'}` defaults
+ * to 'inward'.
+ */
+export function _offsetOpenPolyline(pts, halfThicknessPerEdge, opts = {}) {
+  const direction = opts.direction ?? 'inward'
+  if (direction !== 'inward' && direction !== 'outward') {
+    throw new Error(`_offsetOpenPolyline: invalid direction "${direction}"`)
+  }
+  const N = pts.length
+  if (N < 2) {
+    return { newVerts: pts.slice(), halfIn: halfThicknessPerEdge.slice(), warnings: [] }
+  }
+  if (halfThicknessPerEdge.length !== N - 1) {
+    throw new Error(`_offsetOpenPolyline: halfThicknessPerEdge length ${halfThicknessPerEdge.length} ≠ pts length − 1 (${N - 1})`)
+  }
+  const pinnedIndices = opts.pinnedIndices ?? null
+  const perpSign = (direction === 'inward') ? +1 : -1
+
+  // Infer winding from implicit closure (N>=3) or left-of-direction (N==2).
+  let isCCW
+  if (N >= 3) {
+    isCCW = _polygonSignedAreaIn2(pts) > 0   // signed area treats pts as closed
+  } else {
+    // Single-edge polyline: convention is interior on LEFT of direction 0→1.
+    // That's the +90° rotation of the edge direction — equivalent to CCW.
+    isCCW = true
+  }
+
+  // Build per-edge geometry for N−1 edges.
+  const edgeGeom = new Array(N - 1)
+  for (let i = 0; i < N - 1; i++) {
+    const a = pts[i]
+    const b = pts[i + 1]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len = Math.hypot(dx, dy)
+    if (len === 0) { edgeGeom[i] = null; continue }
+    const dux = dx / len, duy = dy / len
+    const px = (isCCW ? -duy :  duy) * perpSign
+    const py = (isCCW ?  dux : -dux) * perpSign
+    const halfIn = halfThicknessPerEdge[i] ?? 0
+    edgeGeom[i] = {
+      a, b,
+      dir:          { x: dux, y: duy },
+      perp:         { x: px,  y: py  },
+      halfIn,
+      offsetOrigin: { x: a.x + px * halfIn, y: a.y + py * halfIn },
+    }
+  }
+
+  const newVerts = new Array(N)
+  const warnings = []
+  for (let i = 0; i < N; i++) {
+    if (pinnedIndices && pinnedIndices.has(i)) {
+      newVerts[i] = { x: pts[i].x, y: pts[i].y }
+      continue
+    }
+    if (i === 0) {
+      // Endpoint: perpendicular projection along edge[0] only.
+      const e = edgeGeom[0]
+      if (!e) { newVerts[i] = pts[i]; continue }
+      newVerts[i] = { x: pts[i].x + e.perp.x * e.halfIn, y: pts[i].y + e.perp.y * e.halfIn }
+      continue
+    }
+    if (i === N - 1) {
+      // Endpoint: perpendicular projection along edge[N-2] only.
+      const e = edgeGeom[N - 2]
+      if (!e) { newVerts[i] = pts[i]; continue }
+      newVerts[i] = { x: pts[i].x + e.perp.x * e.halfIn, y: pts[i].y + e.perp.y * e.halfIn }
+      continue
+    }
+    // Interior vertex: shared corner kernel.
+    const prev = edgeGeom[i - 1]
+    const cur  = edgeGeom[i]
+    if (!prev || !cur) { newVerts[i] = pts[i]; continue }
+    const res = _offsetVertex(prev, cur, pts[i], i)
+    newVerts[i] = res.point
+    if (res.warning) warnings.push(res.warning)
+  }
+
+  const halfIn = edgeGeom.map(g => g?.halfIn ?? 0)
+  return { newVerts, halfIn, warnings }
 }
 
 function _computeInsetEdgesForRoom(state, room) {
@@ -373,79 +683,11 @@ function _computeInsetEdgesForRoom(state, room) {
   if (!walked) return null
   const { pts, edgeWallIds, N } = walked
 
-  // Winding determines inward perpendicular direction.
-  // Y-up math convention: CCW (positive signed area) → inward = rotate +90°
-  //   (i.e. (dx, dy) → (-dy, dx)).
-  // CW → inward = rotate -90° → (dy, -dx).
-  const signedArea = _polygonSignedAreaIn2(pts)
-  const isCCW = signedArea > 0
+  // Per-edge halfThickness resolved from the wall flags.
+  const halfThicknessPerEdge = edgeWallIds.map(wid => _halfThicknessForWall(state.walls[wid]))
 
-  // Per-edge geometry: direction unit vector + inward perp + halfThickness +
-  // offset-line origin (a vertex translated by inward * halfThickness).
-  const edgeGeom = []
-  for (let i = 0; i < N; i++) {
-    const a = pts[i]
-    const b = pts[(i + 1) % N]
-    const dx = b.x - a.x, dy = b.y - a.y
-    const len = Math.hypot(dx, dy)
-    if (len === 0) {
-      // Degenerate edge — keep the slot so per-corner indexing stays correct.
-      edgeGeom.push(null)
-      continue
-    }
-    const dux = dx / len, duy = dy / len
-    const inX = isCCW ? -duy :  duy
-    const inY = isCCW ?  dux : -dux
-    const wall = state.walls[edgeWallIds[i]]
-    const halfIn = _halfThicknessForWall(wall)
-    edgeGeom.push({
-      a, b,
-      dir:           { x: dux, y: duy },
-      inward:        { x: inX, y: inY },
-      halfIn,
-      offsetOrigin:  { x: a.x + inX * halfIn, y: a.y + inY * halfIn },
-    })
-  }
-
-  // Compute new vertex i = intersection of offset(edge i-1) with offset(edge i).
-  const newVerts = new Array(N)
-  const warnings = []
-  for (let i = 0; i < N; i++) {
-    const prev = edgeGeom[(i - 1 + N) % N]
-    const cur  = edgeGeom[i]
-    if (!prev || !cur) { newVerts[i] = pts[i]; continue }
-    const intersection = _intersectLines(prev.offsetOrigin, prev.dir, cur.offsetOrigin, cur.dir)
-    if (intersection === null) {
-      // Parallel offset lines — collinear consecutive edges (post-splitWall).
-      // Shift the shared vertex by max(half) along the (shared) inward perp.
-      const maxHalf = Math.max(prev.halfIn, cur.halfIn)
-      newVerts[i] = {
-        x: pts[i].x + cur.inward.x * maxHalf,
-        y: pts[i].y + cur.inward.y * maxHalf,
-      }
-      continue
-    }
-    // Miter cap (Correction 3): cap = 3 × max(adjacentHalfThicknesses).
-    const maxHalf = Math.max(prev.halfIn, cur.halfIn)
-    const capIn = MITER_CAP_MULTIPLIER * maxHalf
-    if (capIn > 0) {
-      const orig = pts[i]
-      const dxC = intersection.x - orig.x, dyC = intersection.y - orig.y
-      const dist = Math.hypot(dxC, dyC)
-      if (dist > capIn) {
-        const k = capIn / dist
-        newVerts[i] = { x: orig.x + dxC * k, y: orig.y + dyC * k }
-        warnings.push({
-          code: 'MITER_CAPPED',
-          cornerIndex: i,
-          originalDistanceIn: r2(dist),
-          cappedDistanceIn:   r2(capIn),
-        })
-        continue
-      }
-    }
-    newVerts[i] = intersection
-  }
+  // Single geometric kernel — direction: inward.
+  const { newVerts, warnings } = _offsetClosedPolygon(pts, halfThicknessPerEdge, { direction: 'inward' })
 
   // Build the EffectiveRoomEdge[] from new vertices, preserving wallId map.
   const edges = []
@@ -453,27 +695,27 @@ function _computeInsetEdgesForRoom(state, room) {
     const a = newVerts[i]
     const b = newVerts[(i + 1) % N]
     const lenIn = Math.hypot(b.x - a.x, b.y - a.y)
-    const halfIn = edgeGeom[i]?.halfIn ?? 0
     edges.push({
       wallId:          edgeWallIds[i],
       a:               { x: a.x, y: a.y },
       b:               { x: b.x, y: b.y },
       lengthFt:        r2(lenIn / GRID_IN),
-      insetDistanceIn: r2(halfIn),
+      insetDistanceIn: r2(halfThicknessPerEdge[i]),
       sourceEdgeIndex: i,
     })
   }
 
   // Collapse detection: winding flipped OR new area near zero.
   // Threshold: 1 in² is well below any real room.
+  const originalSigned = _polygonSignedAreaIn2(pts)
   const newArea = _polygonSignedAreaIn2(newVerts)
-  const flipped = Math.sign(newArea) !== Math.sign(signedArea) && signedArea !== 0
+  const flipped = Math.sign(newArea) !== Math.sign(originalSigned) && originalSigned !== 0
   const tiny    = Math.abs(newArea) < 1
   const collapsed = flipped || tiny
   if (collapsed) {
     warnings.push({
       code: 'INSET_COLLAPSED',
-      originalAreaIn2: r2(signedArea),
+      originalAreaIn2: r2(originalSigned),
       insetAreaIn2:    r2(newArea),
     })
   }

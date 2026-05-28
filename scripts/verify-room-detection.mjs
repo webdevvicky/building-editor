@@ -53,6 +53,11 @@ function reset() {
     columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {},
     projectSettings: undefined, unit: 'inch',
   })
+  // Section E (BOQ canary) compares rect_room vs face-detect output on
+  // identical centerline topology. Lock centerline so the new
+  // 'inside_face' default doesn't shift rect_room corners. The
+  // face-aware draw layer is covered by verify-draw-reference.
+  s().setDrawReference('centerline')
 }
 
 // ── Helper — addWall by raw coords (creates nodes via getOrCreateNode).

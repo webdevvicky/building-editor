@@ -247,6 +247,10 @@ export default function Toolbar() {
       setSnapSettings({ enabled: !!value })
       return
     }
+    if (path === 'projectSettings.drawReference') {
+      useStore.getState().setDrawReference?.(value)
+      return
+    }
     // Fallback: nest the value under projectSettings.<key> via the generic
     // setter. This will only be hit if a future config entry adds a new
     // path without registering its setter — emit a warning so we notice.

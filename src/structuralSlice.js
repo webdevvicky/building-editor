@@ -109,6 +109,12 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // Default 'centerline' is legacy-safe; loadProject opts new projects into
   // 'clear_internal' explicitly (data.projectSettings == null path).
   dimensionMode: 'centerline',
+  // Face-aware draw reference. 'inside_face' is the default new-project
+  // value (RERA-aligned tracing convention: architect plans label rooms
+  // by clear inside dimension). loadProject injects this on every project
+  // lacking the field — greenfield, no migration; the setting governs
+  // FUTURE draws only.
+  drawReference: 'inside_face',
 
   mortarRatio: '1:6',
   wastagePercent: 5,
@@ -374,6 +380,22 @@ export const createStructuralSlice = (set, get, uid) => ({
     if (mode !== 'centerline' && mode !== 'clear_internal') return {}
     return {
       projectSettings: { ...state.projectSettings, dimensionMode: mode },
+    }
+  }),
+
+  // Face-aware draw reference (2026-05-28). Governs how the user's
+  // clicks are interpreted when authoring NEW walls / rectangle rooms:
+  //   'inside_face'  — clicks are inside-face corners (RERA-default
+  //                    convention; tracing tool default for room labels).
+  //   'centerline'   — clicks are wall centerlines (legacy behavior).
+  //   'outside_face' — clicks are outside-face corners (plot perimeter).
+  // The setting only affects FUTURE draws — existing centerline storage
+  // is canonical and unchanged. See src/draw/faceToCenterline.js for
+  // the conversion + closure-in-face-space ordering rule.
+  setDrawReference: (mode) => set(state => {
+    if (mode !== 'inside_face' && mode !== 'centerline' && mode !== 'outside_face') return {}
+    return {
+      projectSettings: { ...state.projectSettings, drawReference: mode },
     }
   }),
 

@@ -21,10 +21,21 @@
 import { getFloorWallPerimeterGraph } from './adjacency.js'
 
 // Per-floor cache of "edge → count of rooms whose nodeOrder includes it."
-const _segmentCountsByFloor = new Map()
+//
+// Two separate maps per mode — same pattern as adjacency.js Bug-A fix.
+// Physical and topological callers must not poison each other's cells.
+// Plaster Pass 2 (physical-only, default) and built-up loop tracing
+// (topological, needs virtual walls visible) interleave in the same
+// session; without per-mode isolation, whichever runs first wins.
+const _segmentCountsPhysical    = new Map()
+const _segmentCountsTopological = new Map()
 
-function _buildSegmentCountsForFloor(state, floorId) {
-  const graph = getFloorWallPerimeterGraph(state, floorId)
+function _cellsForMode(mode) {
+  return mode === 'topological' ? _segmentCountsTopological : _segmentCountsPhysical
+}
+
+function _buildSegmentCountsForFloor(state, floorId, mode) {
+  const graph = getFloorWallPerimeterGraph(state, floorId, { mode })
   const counts = {}
 
   // Initialize counter for every expanded edge on this floor.
@@ -49,9 +60,9 @@ function _buildSegmentCountsForFloor(state, floorId) {
   return counts
 }
 
-function _getSegmentCounts(state, floorId) {
-  const cellKey = floorId
-  const cell = _segmentCountsByFloor.get(cellKey)
+function _getSegmentCounts(state, floorId, mode) {
+  const cells = _cellsForMode(mode)
+  const cell = cells.get(floorId)
   // Memo invalidates when any of (rooms, walls, nodes) reference changes.
   if (
     cell &&
@@ -61,8 +72,8 @@ function _getSegmentCounts(state, floorId) {
   ) {
     return cell.counts
   }
-  const counts = _buildSegmentCountsForFloor(state, floorId)
-  _segmentCountsByFloor.set(cellKey, {
+  const counts = _buildSegmentCountsForFloor(state, floorId, mode)
+  cells.set(floorId, {
     rooms: state.rooms, walls: state.walls, nodes: state.nodes, counts,
   })
   return counts
@@ -79,10 +90,23 @@ function _getSegmentCounts(state, floorId) {
  * Returns 'PARTITION' if the count is ≥ 2.
  * Returns 'UNREFERENCED' if no room references it (e.g., a wall not
  * yet bound to any room — typical during draw before saveRoom).
+ *
+ * Mode (built-up support, 2026-05-28):
+ *   'physical'    — graph excludes virtual walls (default). Plaster
+ *                   Pass 2 and any other consumer that classifies by
+ *                   physical adjacency.
+ *   'topological' — graph includes virtual walls. Built-up boundary
+ *                   tracing uses this so a virtual edge bounding an
+ *                   open verandah is reported alongside physical
+ *                   externals.
  */
-export function classifySegment(state, floorId, edgeKey) {
+export function classifySegment(state, floorId, edgeKey, opts = {}) {
+  const mode = opts.mode ?? 'physical'
+  if (mode !== 'physical' && mode !== 'topological') {
+    throw new Error(`classifySegment: invalid mode "${mode}"`)
+  }
   const fid = floorId ?? state.currentFloorId ?? 'F1'
-  const counts = _getSegmentCounts(state, fid)
+  const counts = _getSegmentCounts(state, fid, mode)
   const c = counts[edgeKey] ?? 0
   if (c === 0) return 'UNREFERENCED'
   if (c === 1) return 'EXTERNAL'
@@ -96,10 +120,14 @@ export function classifySegment(state, floorId, edgeKey) {
  * Yields: { edgeKey, wallId, segmentIndex, fromNodeId, toNodeId,
  *           lengthIn, lengthFt, classification }
  */
-export function* iterateSegmentsWithClassification(state, floorId) {
+export function* iterateSegmentsWithClassification(state, floorId, opts = {}) {
+  const mode = opts.mode ?? 'physical'
+  if (mode !== 'physical' && mode !== 'topological') {
+    throw new Error(`iterateSegmentsWithClassification: invalid mode "${mode}"`)
+  }
   const fid = floorId ?? state.currentFloorId ?? 'F1'
-  const graph = getFloorWallPerimeterGraph(state, fid)
-  const counts = _getSegmentCounts(state, fid)
+  const graph = getFloorWallPerimeterGraph(state, fid, { mode })
+  const counts = _getSegmentCounts(state, fid, mode)
   for (const edge of Object.values(graph.edges)) {
     const c = counts[edge.id] ?? 0
     const classification = c === 0 ? 'UNREFERENCED' : c === 1 ? 'EXTERNAL' : 'PARTITION'
@@ -109,5 +137,6 @@ export function* iterateSegmentsWithClassification(state, floorId) {
 
 // Test seam — verify scripts use this to reset between sections.
 export function _resetSegmentClassifyCaches() {
-  _segmentCountsByFloor.clear()
+  _segmentCountsPhysical.clear()
+  _segmentCountsTopological.clear()
 }

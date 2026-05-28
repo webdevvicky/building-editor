@@ -3565,6 +3565,8 @@ when surfaced.
 
 - **BE-Cleanup-002 — `deleteWall` orphans MEP fixtures with `wallId` refs.** Plumbing fixtures, electrical points, HVAC indoor units, fire devices, and ELV devices that pin themselves to a specific wall via `wallId` are left dangling when that wall is deleted. `splitWall` already rebases MEP fixtures by `wallT` (see `structuralSlice.js:902-927`); `deleteWall` does no equivalent cascade. Mirror the room-cleanup pattern: strip `wallId` on each affected fixture (or delete the fixture entirely if its placement requires a wall — verify per-discipline), emit per-discipline validationEvents (`mep_<discipline>_orphaned_by_wall_delete`), and surface in the persistent-toast hint when fixtures were affected.
 
+- **BE-Excavation-001 — Excavation `buildingFootprintFt2` still uses centerline polygon sum.** With true built-up area now available via `getTotalBuiltUpAreaSft` (Phase BA, 2026-05-28), the bulk-excavation footprint at `src/quantities/excavation.js:45` (`sum(getRoomArea)` over valid rooms) is architecturally less accurate than the new outer-face calculation. A real excavation site is dug to the building's plinth footprint, including the band under external walls. Switching to built-up would change `bulkExcavationVolFt3` numbers and break the verify-boq byte-equality canary, so the swap is deferred until the BOQ regression seatbelt accommodates a one-shot rebaseline. When taking this on: re-source `buildingFootprintFt2` from `state.getTotalBuiltUpAreaSft(floorId)`, update verify-boq's expected excavation numbers, and document the migration in CLAUDE.md.
+
 ---
 
 ## Phase 1.5 — Structural BOQ system

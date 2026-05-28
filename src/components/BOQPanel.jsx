@@ -318,7 +318,6 @@ export default function BOQPanel() {
   const wallCount      = Object.values(scopedState.walls).filter(w => !w.isVirtual).length
   const totalLenFt     = r2(scopedState.getAllWallsLength())
   const totalWallArea  = scopedState.getTotalWallArea()
-  const totalFloorArea = scopedState.getTotalFloorArea()
 
   // ── Civil aux: stamp counts (for "Sump ×N" / "Septic ×N" labels). Use
   // scopedState so the count honors the toggle.
@@ -580,10 +579,13 @@ export default function BOQPanel() {
       <InfoRow label="Wall area"    value={fmtArea(totalWallArea)}
         infoId="wallArea" openId={openPopoverId} onInfoClick={handleInfoClick} />
       <hr className="boq-divider" />
-      <InfoRow label="Floor area" value={fmtArea(totalFloorArea)} />
 
       {/* Phase 4 Commit C — Scope of work block (collapsible). Reads from
-          presentation model so it mirrors what exports render. */}
+          presentation model so it mirrors what exports render.
+          NOTE: the former "Floor area" header row was removed (2026-05-28)
+          — it duplicated the scope-of-work "Built-up" row semantically
+          and reported the centerline-polygon sum, which is neither
+          carpet nor true built-up. Carpet + Built-up below replace it. */}
       <details className="boq-scope-of-work" style={{ marginTop: 'var(--space-2)' }}>
         <summary style={{
           cursor: 'pointer',
@@ -598,7 +600,15 @@ export default function BOQPanel() {
         </summary>
         <div style={{ paddingLeft: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
           <InfoRow label="Floors"      value={scopeOfWork.floorCount} />
-          <InfoRow label="Built-up"    value={`${scopeOfWork.totalBuiltUpAreaSft} Sft`} />
+          <InfoRow label="Carpet"      value={`${scopeOfWork.totalCarpetAreaSft} Sft`} />
+          <InfoRow
+            label="Built-up"
+            value={
+              scopeOfWork.builtUpComplete === false
+                ? `${scopeOfWork.totalBuiltUpAreaSft} Sft (incomplete)`
+                : `${scopeOfWork.totalBuiltUpAreaSft} Sft`
+            }
+          />
           {scopeOfWork.plotAreaSft > 0 && (
             <InfoRow label="Plot area" value={`${scopeOfWork.plotAreaSft} Sft`} />
           )}

@@ -47,6 +47,11 @@ function reset() {
     columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {},
     projectSettings: undefined, unit: 'inch',
   })
+  // Phase W canary assertions key off centerline wall coordinates at
+  // the literal addRectangleRoom drag corners. Lock centerline so the
+  // new 'inside_face' default (face-aware draw, 2026-05-28) doesn't
+  // shift them; face-aware draw is covered by verify-draw-reference.
+  s().setDrawReference('centerline')
 }
 
 // ── Helper: addWall by raw coords.

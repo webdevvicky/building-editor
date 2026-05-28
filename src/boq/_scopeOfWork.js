@@ -8,7 +8,9 @@ export function computeScopeOfWork(state) {
   if (!state) {
     return {
       floorCount: 0,
+      totalCarpetAreaSft: 0,
       totalBuiltUpAreaSft: 0,
+      builtUpComplete: true,
       plotAreaSft: 0,
       roomCountByType: {},
       openingCounts: { doors: 0, windows: 0, ventilators: 0 },
@@ -23,10 +25,18 @@ export function computeScopeOfWork(state) {
   const walls  = state.walls  ?? {}
   const columns = state.columns ?? {}
 
-  // Total built-up area across every valid room (project-level).
-  // getTotalFloorArea is scope-aware — at project scope it returns the
-  // sum across all floors.
-  const totalBuiltUpAreaSft = r2(state.getTotalFloorArea?.() ?? 0)
+  // Carpet area — strict inside-face floor area summed over every valid
+  // room. Uses the clear_internal inset kernel regardless of dimensionMode.
+  const totalCarpetAreaSft = r2(state.getTotalCarpetAreaSft?.() ?? 0)
+
+  // Built-up (plinth) area — outer-face footprint via the external-wall
+  // boundary loop offset outward by per-edge halfThickness. Includes
+  // enclosed-but-not-roomed spaces by construction (the loop is the
+  // building outline, not the union of rooms). `complete` falls to false
+  // when an external boundary chain fails to close.
+  const builtUpInfo = state.getBuiltUpAreaInfo?.() ?? { areaSft: 0, complete: true }
+  const totalBuiltUpAreaSft = r2(builtUpInfo.areaSft ?? 0)
+  const builtUpComplete = builtUpInfo.complete !== false
 
   // Plot area from getPlotPolygon, if helper exists.
   let plotAreaSft = 0
@@ -61,7 +71,9 @@ export function computeScopeOfWork(state) {
 
   return {
     floorCount: Math.max(1, floors.length),
+    totalCarpetAreaSft,
     totalBuiltUpAreaSft,
+    builtUpComplete,
     plotAreaSft,
     roomCountByType,
     openingCounts,

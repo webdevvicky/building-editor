@@ -32,6 +32,12 @@ function reset() {
     columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {},
     projectSettings: undefined, unit: 'inch',
   })
+  // This suite was authored for centerline rect-room creation; it
+  // asserts wall coords at the literal drag corners. Lock the mode so
+  // the new 'inside_face' default (face-aware draw, 2026-05-28) doesn't
+  // shift those coordinates by halfThickness. verify-draw-reference
+  // covers face mode end-to-end.
+  s().setDrawReference('centerline')
 }
 
 // ── 1. Basic atomic creation ─────────────────────────────────────────

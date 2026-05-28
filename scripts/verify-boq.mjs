@@ -1328,6 +1328,10 @@ s().loadProject({
   columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {},
   projectSettings: undefined, unit: 'inch',
 })
+// Phase W canary asserts centerline coordinates at the literal drag
+// corners. Lock centerline so the new 'inside_face' default doesn't
+// shift them; face-aware draw is covered by verify-draw-reference.
+s().setDrawReference('centerline')
 
 // Three stacked rooms:
 //   Room 1 (Living, 11×7 ft): 0..132 × 0..84

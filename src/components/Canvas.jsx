@@ -5,7 +5,8 @@ import {
   PX_PER_INCH, GRID_IN, DEFAULT_WALL_THICK_IN,
   closestPointOnSegment,
 } from '../geometry'
-import { resolveSnap, getTargetDescriptor, findNearestCandidate } from '../snap'
+import { resolveSnap, getTargetDescriptor, findNearestCandidate, getSnapRef } from '../snap'
+import { convertFacePointsToCenterline, isFaceChainClosed } from '../draw/faceToCenterline.js'
 import { isFaceCoveredByRoom } from '../topology/faces.js'
 import { canMergeWalls } from '../topology/canMerge.js'
 import { getActiveFloorWalls } from '../topology/floor.js'
@@ -251,6 +252,7 @@ export default function Canvas() {
   const unit           = useStore(s => s.unit)
   // Area 1 — dimension mode drives wall-label length (Correction 2).
   const dimensionMode  = useStore(s => s.projectSettings?.dimensionMode ?? 'centerline')
+  const drawReference  = useStore(s => s.projectSettings?.drawReference ?? 'inside_face')
   const draftOpening   = useStore(s => s.draftOpening)
   const selectedRoomId = useStore(s => s.selectedRoomId)
 
@@ -327,6 +329,16 @@ export default function Canvas() {
   // cancelAction path), or auto-close when the next click snaps to the
   // chain origin (a closing wall is created, then chain ends).
   const [drawChainOriginId, setDrawChainOriginId] = useState(null)
+  // Face-aware draw chain buffer (2026-05-28). For drawReference =
+  // 'inside_face' or 'outside_face': clicks are pushed here as face
+  // points; no walls are created until chain end (Enter / double-click
+  // / face-space closure). drawChainBufferOpen flips false on commit.
+  //   Each entry: { point: {x,y}, snapRef: 'face' | 'centerline' }
+  // Closure detection runs on these FACE points BEFORE convertFacePointsToCenterline
+  // (see src/draw/faceToCenterline.js header — closure-in-face-space rule).
+  // For drawReference = 'centerline' this buffer stays empty; the
+  // existing per-click commit path runs unchanged.
+  const [drawChainBuffer, setDrawChainBuffer] = useState([])
   // Area 2B — rect_room tool first-corner stash (world inches). Cleared
   // on Esc / tool change / second click.
   const [rectFirstCorner, setRectFirstCorner] = useState(null)
@@ -439,20 +451,45 @@ export default function Canvas() {
   // Area 2A — wall chain end via Enter key (dispatched from
   // useKeyboardShortcuts as a window event to keep the hook decoupled
   // from Canvas internals, mirroring the boq:toggle pattern).
+  //
+  // Face-aware draw (2026-05-28): if there's a buffered face chain,
+  // Enter commits it as an OPEN polyline (kernel handles endpoint
+  // perpendicular-translation). Otherwise the existing chain-cancel
+  // path runs.
   useEffect(() => {
     function endChain() {
+      if (drawChainBuffer.length >= 2) {
+        _commitFaceChain([...drawChainBuffer], false)
+        return
+      }
+      setDrawChainBuffer([])
       setDrawStart(null)
       setDrawChainOriginId(null)
     }
     window.addEventListener('canvas:end-chain', endChain)
     return () => window.removeEventListener('canvas:end-chain', endChain)
-  }, [setDrawStart])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawChainBuffer, drawReference])
 
-  // Clear chain-origin whenever the user leaves the draw tool. Esc already
-  // calls setTool('select'); we just shadow the chain-origin state too.
+  // Clear chain state whenever the user leaves the draw tool. Esc
+  // already calls setTool('select'); we shadow chain-origin AND the
+  // face-mode buffer here so a mode flip mid-chain doesn't strand state.
   useEffect(() => {
-    if (activeTool !== 'draw') setDrawChainOriginId(null)
+    if (activeTool !== 'draw') {
+      setDrawChainOriginId(null)
+      setDrawChainBuffer([])
+    }
   }, [activeTool])
+
+  // Also discard face-mode buffer if the user toggles the draw reference
+  // mid-chain — semantically the chain was "begun in mode X", switching
+  // mid-stroke is ambiguous so we restart cleanly.
+  useEffect(() => {
+    setDrawChainBuffer([])
+    setDrawStart(null)
+    setDrawChainOriginId(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawReference])
 
   // Area 2B — clear rectFirstCorner when leaving rect_room tool.
   useEffect(() => {
@@ -785,7 +822,53 @@ export default function Canvas() {
     // draw policy = NODE / WALL_ENDPOINT / WALL_MIDPOINT / GRID. The ortho
     // (apply90 / applyLockedLength) logic below operates on the resolved
     // world point — unchanged.
-    const { x, y } = runSnap(e).worldXY
+    const snapResult = runSnap(e)
+    const { x, y } = snapResult.worldXY
+    const clickSnapRef = getSnapRef(snapResult.targetKind)
+
+    // ── Face-aware draw path (2026-05-28).
+    //
+    // For drawReference ∈ {'inside_face', 'outside_face'}: buffer face
+    // clicks, render the face polyline, defer wall creation to chain
+    // commit. Closure-in-face-space rule (see faceToCenterline.js
+    // header): closure is detected on the buffered FACE points, BEFORE
+    // conversion — never on the post-conversion centerline geometry.
+    //
+    // For drawReference === 'centerline': fall through to the legacy
+    // per-click commit path below (zero behavior change for users on
+    // that setting).
+    if (drawReference !== 'centerline') {
+      // Ortho lock applies to face-space too — the user expects 90°
+      // snapping to operate on their visible click trajectory.
+      const last = drawChainBuffer.length > 0
+        ? drawChainBuffer[drawChainBuffer.length - 1]
+        : null
+      let snapped = { x, y }
+      if (last) {
+        snapped = hasLock
+          ? (shiftDown ? applyLockedLengthFree(last.point, { x, y }, parsedLength) : applyLockedLength(last.point, { x, y }, parsedLength))
+          : (shiftDown ? { x, y } : apply90(last.point, x, y))
+      }
+      // Closure detection — face space, before conversion.
+      if (drawChainBuffer.length >= 2) {
+        const first = drawChainBuffer[0].point
+        const dxC = snapped.x - first.x
+        const dyC = snapped.y - first.y
+        const distToFirst = Math.hypot(dxC, dyC)
+        if (distToFirst <= SNAP_IN) {
+          // User clicked back on the first buffered point — chain closes.
+          _commitFaceChain([...drawChainBuffer], true)
+          return
+        }
+      }
+      setDrawChainBuffer(prev => [
+        ...prev,
+        { point: { x: snapped.x, y: snapped.y }, snapRef: clickSnapRef },
+      ])
+      return
+    }
+
+    // ── Centerline draw path (legacy, unchanged).
     if (!drawStartId) {
       const id = getOrCreateNode(x, y)
       setDrawStart(id)
@@ -807,6 +890,63 @@ export default function Canvas() {
       return
     }
     setDrawStart(endNodeId)
+  }
+
+  // Commit a buffered face-mode chain. Runs conversion via the kernel,
+  // then atomically creates nodes + walls under _runAtomically. Refuses
+  // commit if the conversion collapses (validationEvent + toast.error).
+  // `closed` indicates whether the chain ends with a closure-to-origin
+  // detected in FACE space (per closure-in-face-space rule).
+  function _commitFaceChain(buffer, closed) {
+    if (!buffer || buffer.length < 2) {
+      setDrawChainBuffer([])
+      return
+    }
+    const points = buffer.map(b => ({ x: b.point.x, y: b.point.y }))
+    const snapRefs = buffer.map(b => b.snapRef)
+    const conv = convertFacePointsToCenterline(points, snapRefs, {
+      drawReference, closed,
+    })
+    if (conv.collapsed) {
+      const store = useStore.getState()
+      store.setState?.({})  // no-op; for clarity
+      // Push validationEvent directly via setState (matches existing
+      // pattern for face_conversion_collapsed in addRectangleRoom).
+      useStore.setState(s => ({
+        validationEvents: [
+          ...(s.validationEvents ?? []),
+          {
+            ruleId:     'face_conversion_collapsed',
+            severity:   'error',
+            category:   'topology',
+            entityType: 'draw_chain',
+            entityId:   null,
+            message:    `Chain (${closed ? 'closed' : 'open'}) collapsed under ${drawReference} conversion — geometry not committed.`,
+            meta:       { drawReference, closed, warnings: conv.warnings },
+          },
+        ].slice(-100),
+      }))
+      toast.error(`Cannot commit: ${drawReference.replace('_', ' ')} conversion collapsed.`)
+      setDrawChainBuffer([])
+      return
+    }
+    // Atomic commit: all walls in one history frame.
+    const store = useStore.getState()
+    store._runAtomically(() => {
+      const st = useStore.getState()
+      const nodeIds = conv.points.map(p => st.getOrCreateNode(p.x, p.y))
+      const N = nodeIds.length
+      const edgeCount = closed ? N : N - 1
+      for (let i = 0; i < edgeCount; i++) {
+        const a = nodeIds[i]
+        const b = nodeIds[(i + 1) % N]
+        if (a === b) continue
+        useStore.getState().addWall(a, b)
+      }
+    })
+    setDrawChainBuffer([])
+    setDrawStart(null)
+    setDrawChainOriginId(null)
   }
 
   function handleWallClick(e, wallId) {
@@ -1072,11 +1212,39 @@ export default function Canvas() {
     </div>
 
     {/* Area 2A — chain-drawing hint */}
-    {activeTool === 'draw' && drawStartId && (
+    {activeTool === 'draw' && (drawStartId || drawChainBuffer.length > 0) && (
       <div style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
         background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: '6px 14px',
         zIndex: 20, fontSize: 12, color: '#555' }}>
         Click to continue · Click origin to close · Double-click or Enter to end · Esc to cancel
+      </div>
+    )}
+
+    {/* Face-aware draw — always-visible mode badge during draw/rect_room.
+        Lives top-left next to the calibration / floor-switcher chrome. */}
+    {(activeTool === 'draw' || activeTool === 'rect_room') && (
+      <div style={{
+        position: 'absolute', top: 12, left: 12, zIndex: 20,
+        background: drawReference === 'centerline'
+          ? 'var(--color-surface)'
+          : (drawReference === 'inside_face' ? 'rgba(39,174,96,0.10)' : 'rgba(230,126,34,0.10)'),
+        border: '1px solid',
+        borderColor: drawReference === 'centerline'
+          ? 'var(--color-border)'
+          : (drawReference === 'inside_face' ? '#27ae60' : '#e67e22'),
+        borderRadius: 6, padding: '4px 10px',
+        fontSize: 12, color: 'var(--color-text-secondary)',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        boxShadow: 'var(--shadow-sm)',
+      }}>
+        <span style={{ fontWeight: 'var(--weight-medium)', color: 'var(--color-text)' }}>
+          Drawing to:
+        </span>
+        <span>
+          {drawReference === 'inside_face'  ? 'Inside face'  :
+           drawReference === 'outside_face' ? 'Outside face' :
+                                              'Centerline'}
+        </span>
       </div>
     )}
 
@@ -1113,9 +1281,17 @@ export default function Canvas() {
       onClick={handleSVGClick}
       onDoubleClick={() => {
         // Area 2A — end wall chain on double-click.
-        if (activeTool === 'draw' && (drawStartId || drawChainOriginId)) {
-          setDrawStart(null)
-          setDrawChainOriginId(null)
+        // Face-aware draw (2026-05-28): commit the buffered face chain
+        // as OPEN if one is active; otherwise cancel chain state.
+        if (activeTool === 'draw') {
+          if (drawChainBuffer.length >= 2) {
+            _commitFaceChain([...drawChainBuffer], false)
+            return
+          }
+          if (drawStartId || drawChainOriginId) {
+            setDrawStart(null)
+            setDrawChainOriginId(null)
+          }
         }
       }}
       onMouseDown={handleMouseDown}
@@ -1776,16 +1952,17 @@ export default function Canvas() {
           const c2 = cursor
           const xs = [c1.x, c2.x].sort((a, b) => a - b)
           const ys = [c1.y, c2.y].sort((a, b) => a - b)
-          const wFtCenter = Math.abs(c2.x - c1.x) / GRID_IN
-          const hFtCenter = Math.abs(c2.y - c1.y) / GRID_IN
-          // Effective interior dim = centerline − 2 × half-thickness, one
-          // perpendicular wall on each end. DEFAULT_WALL_THICK_IN matches
-          // what addRectangleRoom seeds onto the new walls.
-          const insetFt = (DEFAULT_WALL_THICK_IN ?? 9) / 12
-          const effW = dimensionMode === 'clear_internal'
-            ? Math.max(0, wFtCenter - insetFt) : wFtCenter
-          const effH = dimensionMode === 'clear_internal'
-            ? Math.max(0, hFtCenter - insetFt) : hFtCenter
+          // Ghost label shows the DRAGGED dimension as the active draw
+          // reference (face-aware draw, 2026-05-28). The drag IS the
+          // user's chosen reference frame:
+          //   - inside_face: drag = clear inside dimension
+          //   - centerline:  drag = wall centerline dimension
+          //   - outside_face: drag = outer-face / plinth dimension
+          // The label matches what the user is doing — dimensionMode no
+          // longer drives this label (it controls labels on existing
+          // rendered geometry, not the in-progress ghost).
+          const wFt = Math.abs(c2.x - c1.x) / GRID_IN
+          const hFt = Math.abs(c2.y - c1.y) / GRID_IN
           const sxA = sx(xs[0]), sxB = sx(xs[1])
           const syA = sy(ys[0]), syB = sy(ys[1])
           // SVG: y-flip means syA > syB visually; reorder for <rect>.
@@ -1802,8 +1979,34 @@ export default function Canvas() {
                 textAnchor="middle" dominantBaseline="middle"
                 fontSize={12} fill="#4a90e2"
                 style={{ userSelect: 'none' }}>
-                {fmtLen(effW, unit)} × {fmtLen(effH, unit)}
+                {fmtLen(wFt, unit)} × {fmtLen(hFt, unit)}
               </text>
+            </g>
+          )
+        })()}
+
+        {/* Face-aware draw — buffered face-mode chain preview (2026-05-28).
+            Shows ONLY face clicks per design decision Q2: no dual centerline
+            preview. The centerline conversion runs at chain commit. */}
+        {activeTool === 'draw' && drawReference !== 'centerline' && drawChainBuffer.length > 0 && (() => {
+          const pts = drawChainBuffer.map(b => b.point)
+          const tail = cursor ?? null
+          const color = drawReference === 'inside_face' ? '#27ae60' : '#e67e22'
+          // Polyline through buffered face points.
+          const path = pts.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')
+          return (
+            <g data-layer="face-chain-preview" style={{ pointerEvents: 'none' }}>
+              <polyline points={path} fill="none" stroke={color}
+                strokeWidth={1.5} strokeDasharray="6 4" />
+              {pts.map((p, i) => (
+                <circle key={`fbp-${i}`} cx={sx(p.x)} cy={sy(p.y)} r={3}
+                  fill={color} stroke="#fff" strokeWidth={1} />
+              ))}
+              {tail && (
+                <line x1={sx(pts[pts.length - 1].x)} y1={sy(pts[pts.length - 1].y)}
+                  x2={sx(tail.x)} y2={sy(tail.y)} stroke={color}
+                  strokeWidth={1.5} strokeDasharray="4 4" />
+              )}
             </g>
           )
         })()}

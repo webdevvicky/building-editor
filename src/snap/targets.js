@@ -23,6 +23,20 @@
 //     tier:            number,   // 0 = primary (competes on distance);
 //                                // 1+ = fallback (only fires if every
 //                                // lower-tier target missed). GRID is tier 1.
+//     snapRef:         'centerline' | 'face',
+//                                // Face-aware draw-reference classification.
+//                                // 'centerline' = this snap target's result
+//                                // sits on an existing centerline (NODE,
+//                                // WALL_ENDPOINT, WALL_MIDPOINT, WALL_NEAREST,
+//                                // WALL_JUNCTION, WALL_SEGMENT). In
+//                                // face-mode chain draw, these clicks are
+//                                // pinned (no face→centerline conversion) so
+//                                // the new wall joins the existing
+//                                // centerline node correctly. 'face' = the
+//                                // click result is the user's face position
+//                                // (GRID catch-all, raw / no-snap, future
+//                                // UNDERLAY_FEATURE) and gets converted
+//                                // per the active drawReference.
 //     defaultSettings: object,   // open-ended; merged into projectSettings.snap.targets[id]
 //     prepare?:        (state, signal) => Promise<void> | void,
 //     query:           (state, world, settings, ctx) =>
@@ -61,6 +75,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'NODE',
     label:           'Node',
     tier:            0,
+    snapRef:         'centerline',
     defaultSettings: Object.freeze({ enabled: true, toleranceIn: 4 }),
     query(state, world, settings /*, ctx */) {
       if (!settings?.enabled) return null
@@ -91,6 +106,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'WALL_ENDPOINT',
     label:           'Endpoint',
     tier:            0,
+    snapRef:         'centerline',
     defaultSettings: Object.freeze({ enabled: true, toleranceIn: 4 }),
     query(state, world, settings) {
       if (!settings?.enabled) return null
@@ -125,6 +141,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'WALL_JUNCTION',
     label:           'T-junction',
     tier:            0,
+    snapRef:         'centerline',
     defaultSettings: Object.freeze({ enabled: true, toleranceIn: 4 }),
     query(state, world, settings /*, ctx */) {
       if (!settings?.enabled) return null
@@ -153,6 +170,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'WALL_MIDPOINT',
     label:           'Midpoint',
     tier:            0,
+    snapRef:         'centerline',
     // Off by default to preserve today's behavior (no midpoint snap).
     defaultSettings: Object.freeze({ enabled: false, toleranceIn: 6 }),
     query(state, world, settings) {
@@ -184,6 +202,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'WALL_NEAREST',
     label:           'Wall',
     tier:            0,
+    snapRef:         'centerline',
     defaultSettings: Object.freeze({ enabled: true, toleranceIn: 36 }),
     query(state, world, settings) {
       if (!settings?.enabled) return null
@@ -215,6 +234,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'WALL_SEGMENT',
     label:           'Segment',
     tier:            0,
+    snapRef:         'centerline',
     defaultSettings: Object.freeze({ enabled: true, toleranceIn: 12 }),
     query(state, world, settings) {
       if (!settings?.enabled) return null
@@ -251,6 +271,7 @@ export const SNAP_TARGETS = Object.freeze({
     id:              'GRID',
     label:           'Grid',
     tier:            1,   // catch-all fallback; only wins when every tier-0 target missed
+    snapRef:         'face',   // grid intersections are user face positions, not centerline
     defaultSettings: Object.freeze({ enabled: true }),
     query(state, world, settings, ctx) {
       if (!settings?.enabled) return null
@@ -277,6 +298,17 @@ export const SNAP_TARGETS = Object.freeze({
 })
 
 export const SNAP_TARGET_IDS = Object.freeze(Object.keys(SNAP_TARGETS))
+
+// Lookup helper for face-aware draw conversion. Returns 'centerline' |
+// 'face'. Used by Canvas chain-draw buffer to tag each click with its
+// reference frame BEFORE invoking the conversion kernel. Raw / no-snap
+// clicks default to 'face' since the user is interpreting a PDF face.
+export function getSnapRef(targetKind) {
+  if (!targetKind) return 'face'
+  const desc = SNAP_TARGETS[targetKind]
+  if (!desc) return 'face'
+  return desc.snapRef ?? 'face'
+}
 
 // Helper: default-fill projectSettings.snap.targets from each descriptor's
 // defaultSettings. Used by store loadProject and verify-snap Section E.

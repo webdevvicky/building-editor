@@ -26,6 +26,10 @@ export {
   // getEffectiveWallLengthFt for canvas labels (Correction 2).
   getRoomGeometry, getRoomPolygonInsetEdges, resolveDimensionMode,
   getEffectiveWallLengthFt,
+  // Offset kernel — closed-polygon + open-polyline variants. Single
+  // source of geometric truth for inset (clear_internal), built-up
+  // (outer offset), and face→centerline draw conversion.
+  _offsetClosedPolygon, _offsetOpenPolyline, polygonSignedAreaIn2,
 } from './rooms.js'
 
 // Floor scope
@@ -121,3 +125,11 @@ export {
   enumerateFloorFaces, findFaceContainingEdge, findFaceContainingPoint,
   isFaceCoveredByRoom, findUncoveredFaces, _resetFaceCaches,
 } from './faces.js'
+
+// Building-area metrics — carpet (clear_internal sum) + built-up
+// (external-loop outward offset). Used by BOQ scope-of-work header.
+export {
+  findExternalBoundaryLoops,
+  computeBuiltUpAreaSft, computeCarpetAreaSft,
+  _resetBuildingAreaCaches,
+} from './buildingArea.js'

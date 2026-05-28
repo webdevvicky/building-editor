@@ -68,14 +68,38 @@ export const TOOL_CLUSTERS = Object.freeze([
   {
     id: 'draw',
     label: 'Draw',
-    items: [
-      { type: 'tool', toolId: 'draw',        icon: Pencil,        label: 'Draw walls',     shortcut: 'D' },
-      { type: 'tool', toolId: 'rect_room',   icon: Square,        label: 'Rectangle room', shortcut: 'Shift+R' },
-      { type: 'tool', toolId: 'select',      icon: MousePointer2, label: 'Select',         shortcut: 'S' },
-      { type: 'tool', toolId: 'split',       icon: Scissors,      label: 'Split wall' },
-      { type: 'tool', toolId: 'room',        icon: Hexagon,       label: 'Room',           shortcut: 'R' },
-      { type: 'tool', toolId: 'room_detect', icon: Frame,         label: 'Detect Room',    shortcut: 'Shift+A' },
-      { type: 'tool', toolId: 'join_walls',  icon: Link,          label: 'Join walls',     shortcut: 'J' },
+    groups: [
+      {
+        title: 'Tools',
+        items: [
+          { type: 'tool', toolId: 'draw',        icon: Pencil,        label: 'Draw walls',     shortcut: 'D' },
+          { type: 'tool', toolId: 'rect_room',   icon: Square,        label: 'Rectangle room', shortcut: 'Shift+R' },
+          { type: 'tool', toolId: 'select',      icon: MousePointer2, label: 'Select',         shortcut: 'S' },
+          { type: 'tool', toolId: 'split',       icon: Scissors,      label: 'Split wall' },
+          { type: 'tool', toolId: 'room',        icon: Hexagon,       label: 'Room',           shortcut: 'R' },
+          { type: 'tool', toolId: 'room_detect', icon: Frame,         label: 'Detect Room',    shortcut: 'Shift+A' },
+          { type: 'tool', toolId: 'join_walls',  icon: Link,          label: 'Join walls',     shortcut: 'J' },
+        ],
+      },
+      {
+        // Face-aware draw reference (2026-05-28). Default 'inside_face'
+        // matches Indian / RERA tracing convention (room labels are
+        // clear-inside). Mid-trace switching handles plans where outer
+        // perimeter is dimensioned outside-face. Centerline mode = legacy
+        // (clicks are literal centerline coords).
+        title: 'Drawing to',
+        items: [
+          {
+            type:   'segmented',
+            path:   'projectSettings.drawReference',
+            options: [
+              { value: 'inside_face',  label: 'Inside'  },
+              { value: 'centerline',   label: 'Center'  },
+              { value: 'outside_face', label: 'Outside' },
+            ],
+          },
+        ],
+      },
     ],
   },
   {

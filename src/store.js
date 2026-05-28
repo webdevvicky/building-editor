@@ -41,6 +41,11 @@ import {
   findExpandedEdge,
 } from './topology/adjacency.js'
 import {
+  computeBuiltUpAreaSft as topoComputeBuiltUpAreaSft,
+  computeCarpetAreaSft  as topoComputeCarpetAreaSft,
+} from './topology/buildingArea.js'
+import { convertFacePointsToCenterline } from './draw/faceToCenterline.js'
+import {
   planWallSplit,
 } from './topology/wallSplit.js'
 import {
@@ -473,11 +478,62 @@ export const useStore = create((set, get) => ({
       if (maxX - minX < GRID_IN || maxY - minY < GRID_IN) {
         return { error: 'too-small' }
       }
+
+      // Face-aware draw conversion (2026-05-28).
+      // The dragged rectangle corners are interpreted per drawReference:
+      //   'inside_face'  → corners are inside-face corners; convert
+      //                    OUTWARD by halfThickness to centerline.
+      //   'outside_face' → corners are outside-face corners; convert
+      //                    INWARD.
+      //   'centerline'   → corners are already centerline; no-op.
+      // Conversion via convertFacePointsToCenterline (kernel single source).
+      // Collapsed conversion (dragged rect narrower than the face-mode
+      // shrink would allow) → refuse + validationEvent, commit nothing.
+      const drawReference =
+        opts.drawReference
+        ?? get().projectSettings?.drawReference
+        ?? 'inside_face'
+
+      let cornerSW = { x: minX, y: minY }
+      let cornerSE = { x: maxX, y: minY }
+      let cornerNE = { x: maxX, y: maxY }
+      let cornerNW = { x: minX, y: maxY }
+
+      if (drawReference !== 'centerline') {
+        const faceCorners = [cornerSW, cornerSE, cornerNE, cornerNW]
+        const conv = convertFacePointsToCenterline(
+          faceCorners,
+          ['face', 'face', 'face', 'face'],
+          { drawReference, closed: true }
+        )
+        if (conv.collapsed) {
+          set(s => ({
+            validationEvents: [
+              ...(s.validationEvents ?? []),
+              {
+                ruleId:     'face_conversion_collapsed',
+                severity:   'error',
+                category:   'topology',
+                entityType: 'rect_room',
+                entityId:   null,
+                message:    `Rectangle is too small for ${drawReference} draw mode — face → centerline conversion would collapse.`,
+                meta:       { drawReference, warnings: conv.warnings },
+              },
+            ].slice(-100),
+          }))
+          return { error: 'face-conversion-collapsed', warnings: conv.warnings }
+        }
+        cornerSW = conv.points[0]
+        cornerSE = conv.points[1]
+        cornerNE = conv.points[2]
+        cornerNW = conv.points[3]
+      }
+
       // 4 corners CCW from SW so winding matches getRoomPolygon convention.
-      const sw = get().getOrCreateNode(minX, minY)
-      const se = get().getOrCreateNode(maxX, minY)
-      const ne = get().getOrCreateNode(maxX, maxY)
-      const nw = get().getOrCreateNode(minX, maxY)
+      const sw = get().getOrCreateNode(cornerSW.x, cornerSW.y)
+      const se = get().getOrCreateNode(cornerSE.x, cornerSE.y)
+      const ne = get().getOrCreateNode(cornerNE.x, cornerNE.y)
+      const nw = get().getOrCreateNode(cornerNW.x, cornerNW.y)
       if (!sw || !se || !ne || !nw) return { error: 'node-snap-failed' }
 
       // addWall is idempotent on dup geometry (returns early). After all
@@ -2034,6 +2090,11 @@ export const useStore = create((set, get) => ({
         const dimensionMode = _isNewProject
           ? 'clear_internal'
           : (psRest.dimensionMode ?? DEFAULT_PROJECT_SETTINGS.dimensionMode)
+        // Face-aware draw reference (2026-05-28). The setting governs
+        // future draws only — no migration of stored geometry. Default
+        // is 'inside_face' (RERA-aligned tracing) for new AND old
+        // projects that lack the field (greenfield rule).
+        const drawReference = psRest.drawReference ?? DEFAULT_PROJECT_SETTINGS.drawReference
         // Snap architecture (Phase A). Schema-fill missing fields from
         // DEFAULT_PROJECT_SETTINGS.snap; deep-merge targets so a partial
         // saved subtree picks up newer target defaults.
@@ -2059,6 +2120,7 @@ export const useStore = create((set, get) => ({
           rccSpecs, defaultPlasterSystemId, defaultExternalPlasterSystemId, floors,
           tileDefaults, kitchenCounter, grills,
           dimensionMode,
+          drawReference,
           snap,
         }
       })(),
@@ -2181,10 +2243,37 @@ export const useStore = create((set, get) => ({
   sumRoomAreas(predicate)        { return topoSumRoomAreas(get(), predicate) },
   getRoomArea(roomId)            { return topoGetRoomArea(get(), roomId) },
 
+  // Centerline-polygon floor-area sum. Retained for excavation
+  // (buildingFootprintFt2 keys off this and the BOQ canary depends on
+  // byte-equality — see BE-Excavation-001 backlog) and for any downstream
+  // consumer of the historical metric. NEW UI surfaces report carpet
+  // (getTotalCarpetAreaSft) and built-up (getTotalBuiltUpAreaSft) instead.
   getTotalFloorArea() {
     return Math.round(
       get().getValidRoomIds().reduce((t, id) => t + get().getRoomArea(id), 0)
     * 100) / 100
+  },
+
+  // Carpet area — strict inside-wall-face floor sum. Always computes
+  // via clear_internal regardless of projectSettings.dimensionMode
+  // (carpet is an absolute architectural metric, not a display choice).
+  // Pass a floorId to scope to one floor; omit for project-level total.
+  getTotalCarpetAreaSft(floorId) {
+    return topoComputeCarpetAreaSft(get(), floorId).areaSft
+  },
+
+  // Built-up (plinth) area — outer-face footprint via external-loop
+  // outward offset. Returns the area number directly; callers needing
+  // completeness / warnings can call buildingArea.computeBuiltUpAreaSft
+  // directly. Pass a floorId to scope to one floor; omit for project-level.
+  getTotalBuiltUpAreaSft(floorId) {
+    return topoComputeBuiltUpAreaSft(get(), floorId).areaSft
+  },
+
+  // Full built-up payload — used by BOQ surface when it needs the
+  // `complete: false` flag for the "(incomplete)" hint.
+  getBuiltUpAreaInfo(floorId) {
+    return topoComputeBuiltUpAreaSft(get(), floorId)
   },
 
   getTotalFlooringArea()       { return get().sumRoomAreas(r => r?.finishes?.flooring) },
