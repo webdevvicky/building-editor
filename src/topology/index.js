@@ -77,7 +77,32 @@ export {
   findSharedWalls, getRoomAdjacencyGraph, getRoomsBorderingRoom,
   getRoomConnectivityGraph, getRoomNeighbourThroughDoor,
   getFloorWallPerimeterGraph, getRoomWallPerimeterGraph, getCeilingPaths,
+  findWallContainingEdge, findExpandedEdge,
 } from './adjacency.js'
+
+// Phase W — T-junction primitives
+export {
+  getOrderedWallJunctions, probeWallForMidSpan,
+  findNearestTjunction, junctionSpacingIn, findCoalescingJunction,
+} from './junctions.js'
+
+// Phase W — Manual Join predicate
+export { canMergeWalls } from './canMerge.js'
+
+// Phase W — wallSplit propagation planner
+export { planWallSplit } from './wallSplit.js'
+
+// Phase W — Per-segment classification (post-T-junction adjacency)
+export {
+  classifySegment, iterateSegmentsWithClassification,
+  _resetSegmentClassifyCaches,
+} from './segmentClassify.js'
+
+// Phase W — Authoritative nodeOrder recomputation
+export {
+  recomputeRoomNodeOrder, refreshRoomNodeOrderInState,
+  computeNodeOrderForWallIds,
+} from './nodeOrderRefresh.js'
 
 // Surfaces
 export {

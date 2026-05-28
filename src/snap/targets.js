@@ -115,6 +115,40 @@ export const SNAP_TARGETS = Object.freeze({
     },
   }),
 
+  // Phase W — T-junction snap target. A TJUNCTION node attached
+  // mid-span to a parent wall. Distinct from NODE (which excludes
+  // TJUNCTION-kind nodes) and from WALL_ENDPOINT (which references
+  // wall n1/n2 only). At distance ties between NODE / WALL_ENDPOINT /
+  // WALL_JUNCTION at the same point, policy index resolves: NODE >
+  // WALL_ENDPOINT > WALL_JUNCTION per the typical policy.
+  WALL_JUNCTION: Object.freeze({
+    id:              'WALL_JUNCTION',
+    label:           'T-junction',
+    tier:            0,
+    defaultSettings: Object.freeze({ enabled: true, toleranceIn: 4 }),
+    query(state, world, settings /*, ctx */) {
+      if (!settings?.enabled) return null
+      const tol = settings.toleranceIn ?? 4
+      const c = findNearestCandidate(state, 'tjunction', world.x, world.y)
+      if (!c || c.distanceIn > tol) return null
+      return {
+        point:      c.point,
+        sourceId:   c.entity.id,
+        distanceIn: c.distanceIn,
+        _sortKey:   c.sortKey,
+      }
+    },
+    displayLabel() { return 'T-junction' },
+    renderOverlay(result) {
+      return {
+        kind:   'diamond',
+        worldX: result.point.x,
+        worldY: result.point.y,
+        radiusPx: 7,
+      }
+    },
+  }),
+
   WALL_MIDPOINT: Object.freeze({
     id:              'WALL_MIDPOINT',
     label:           'Midpoint',

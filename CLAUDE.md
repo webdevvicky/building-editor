@@ -2,9 +2,217 @@
 
 ## Codebase Overview
 
-Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus 29 verify scripts that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
+Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus 30 verify scripts that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
+
+## Phase W — Wall Topology Integrity (2026-05-27)
+
+T-junctions are now first-class. Walls preserve identity across
+topological touches. Explicit Split is the only path to physical
+fragmentation. **30 verify scripts now gate every commit** (+1:
+`verify-wall-topology`, 127 assertions across Sections A-G plus
+bootstrap purity grep). `verify-boq` now includes a Phase W canary
+section that builds the stacked-rooms scenario and asserts 10 walls
+(not 11), 9 nodes, 1 TJUNCTION, hand-computed 160 ft² flooring, and
+correct per-segment classification (long PARTITION + short EXTERNAL).
+
+### What landed
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | Node schema additions | `kind: 'CORNER' \| 'TJUNCTION'` + `onWallId: string \| null`. CORNER for ordinary graph vertices; TJUNCTION for nodes attached mid-span to a parent wall. |
+| 2 | Wall schema additions | `junctions: string[]` (UNORDERED set of TJUNCTION node ids) + `splitOrigin: 'NONE' \| 'USER_SPLIT'` (provenance — only `splitWall` stamps USER_SPLIT). |
+| 3 | Room schema addition | `nodeOrder: string[]` (derived snapshot of the closed polygon's node sequence; runtime recomputation via `recomputeRoomNodeOrder` is authoritative). |
+| 4 | `src/topology/junctions.js` (NEW) | `getOrderedWallJunctions` (dynamic projection sort — no stored ordering), `probeWallForMidSpan`, `findCoalescingJunction`, `findNearestTjunction`. Pure. |
+| 5 | `src/topology/canMerge.js` (NEW) | `canMergeWalls` conservative predicate — same floor, isVirtual/isPlot match, exactly-one shared endpoint of degree-2, collinear, same material/height/thickness/classification/beam flags, no opening near merge point. False positives forbidden. |
+| 6 | `src/topology/segmentClassify.js` (NEW) | `classifySegment(state, floorId, edgeKey)` → 'EXTERNAL' \| 'PARTITION' based on which rooms' nodeOrder include the edge. Memoized per (rooms, walls, nodes) ref triple. |
+| 7 | `src/topology/nodeOrderRefresh.js` (NEW) | `recomputeRoomNodeOrder` is authoritative; uses face enumeration (never room.wallIds ordering). `computeNodeOrderForWallIds` (used by saveRoom for in-flight rooms). |
+| 8 | `src/topology/wallSplit.js` (NEW) | `planWallSplit` pure planner: partitions openings, junctions, MEP fixtures (5 disciplines), foundation refs by offset/wallT. Returns refusal reasons for opening-straddle, junction-near-split, split-too-close-to-endpoint. |
+| 9 | `getFloorWallPerimeterGraph` EXPANDED | Walls with junctions produce multiple graph edges. Each edge has unique `edgeKey = ${wallId}::${segmentIndex}::${fromNodeId}::${toNodeId}`. Adjacency stores edgeKey (not wallId) so multiple segments per parent are addressable. `findWallContainingEdge` + `findExpandedEdge` look up parent wallId. |
+| 10 | `faces.js` updates | Visited tracking + canonicalization use edgeKey discipline. `face.wallIds` dedupes by parent wallId so room.wallIds is semantic-membership only. |
+| 11 | `getOrCreateNode` REWRITE | Four-branch priority: CORNER snap (Phase A 4in) → TJUNCTION snap (4in) → mid-span T-junction creation (no split) → fresh CORNER. **Auto-split is fully removed.** Mid-span clicks create T-junctions; the wall stays one entity. |
+| 12 | `addRectangleRoom` compat | Uses `findExpandedEdge` so rect corners landing mid-span on existing walls work via T-junctions (the pair lookup falls back to the expanded graph). |
+| 13 | `splitWall` REWRITE | Delegates to `planWallSplit`. Returns `{ newNodeId, w1Id, w2Id, splitOffsetIn }` on success; `{ error: <reason> }` on refusal. Full propagation: openings by offset, MEP fixtures by wallT, foundation wallIds, room wallIds, junctions by t. Stamps `splitOrigin: 'USER_SPLIT'` on both sub-walls; fresh ifcGlobalIds. |
+| 14 | `joinWalls` (NEW action) | Inverse of explicit Split. Gates via `canMergeWalls`. Survivor = lex-smaller id, retains ifcGlobalId, absorbs partner's geometry/openings/junctions/MEP refs. Reverts `splitOrigin` to `'NONE'`. Returns `{ survivorId, removedId, wasSplit, sharedNodeId }`. |
+| 15 | `deleteWall` junction handling | Each junction node attached to the deleted wall either converts to CORNER (if referenced by another wall) or becomes orphan and is pruned. Stale-ownership corruption (a junction in another wall's junctions[] too) refuses the delete with `validationEvent`. |
+| 16 | `WALL_JUNCTION` snap target | Tier 0, default 4in tolerance. New `'tjunction'` candidate type in `src/snap/candidates.js` (NODE excludes TJUNCTION-kind). Tool policies updated: `draw`, `rect_room`, `column` all include WALL_JUNCTION at policy position after WALL_ENDPOINT. |
+| 17 | `join_walls` tool registered | Policy `[WALL_NEAREST]`. Toolbar entry + Section A fuzz coverage. Section A bumped to 1500/1500 (100 triples × 15 tools — honest expansion). |
+| 18 | `verifyIntegrity` INV-W1-W10 | INV-W1: wall.n1/n2 NOT in own wall.junctions[]. INV-W2: TJUNCTION ↔ wall.junctions two-way ref. INV-W3: TJUNCTION on centerline within SNAP_IN. INV-W7: room.wallIds dedup. INV-W8: nodeOrder valid + closed. INV-W9: splitOrigin only 'USER_SPLIT' from splitWall. INV-W10: junctions monotonic + ≥ SNAP_IN spacing. |
+| 19 | `verify-wall-topology.mjs` (NEW) | 127 assertions across Bootstrap purity grep + Section A (T-junction primitives) + Section B (stacked-rooms canary: 10/9/1) + Section C (splitWall propagation: openings, MEP, junctions) + Section D (split refusal: straddle / junction-near-split / endpoint-too-close) + Section E (Manual Join: round-trip, refusals, opening re-rebase) + Section F (deleteWall junction handling + stale-ownership refusal) + Section G (multi-floor T-junction isolation) + Section H.3 (nodeOrder decoupled from wallIds array order). |
+| 20 | FK_DESCRIPTORS additions | `walls → junctions[] → nodes`, `nodes.onWallId → walls`, `rooms.nodeOrder[] → nodes` (all optional). Template clone now correctly remaps all Phase W references. |
+
+### Locked rules (Phase W)
+
+- **A wall's identity (id, ifcGlobalId) is stable across T-junction
+  attachment.** A T-junction adds a node to `wall.junctions[]` but
+  never changes wall.n1, wall.n2, wall.openings, or wall.ifcGlobalId.
+  Identity-affecting changes only happen via explicit `splitWall`
+  (which destroys the original wall and creates two new ones with
+  fresh ifcGlobalIds) or `joinWalls` (which retains the survivor's
+  ifcGlobalId).
+- **`wall.junctions` is UNORDERED.** Geometric order is computed
+  dynamically by `getOrderedWallJunctions`. Storing sorted order is
+  a cache-invalidation trap.
+- **`wall.n1` / `wall.n2` are CORNER nodes by enforcement OR may be
+  TJUNCTION nodes that happen to also be endpoints of OTHER walls.**
+  INV-W1: a wall's n1/n2 must NOT appear in its OWN junctions[].
+  (A T-junction node CAN be an endpoint of a different wall — that's
+  exactly "wall A T-junctions onto wall B.")
+- **TJUNCTION nodes have onWallId; CORNER nodes have null.** Two-way
+  reference: `state.walls[N.onWallId].junctions[]` contains N.id.
+  INV-W2 enforces.
+- **Mid-span draw never splits.** `getOrCreateNode`'s mid-span branch
+  creates a T-junction node attached to the wall. The wall stays one
+  entity. Auto-split (the pre-Phase-W behavior) is fully removed.
+- **Explicit Split is the ONLY path to physical wall fragmentation.**
+  Invoked by the user via the Split tool. Stamps `splitOrigin:
+  'USER_SPLIT'`. Propagates all dependent data (openings by offset,
+  MEP fixtures by wallT, foundation wallIds, room wallIds, junctions
+  by t) via centralized `planWallSplit`.
+- **Split refuses cleanly.** Three refusal reasons:
+  `opening-straddles-split`, `junction-near-split`,
+  `split-too-close-to-endpoint`. Each returns `{ error: <reason> }`
+  with diagnostic detail; state is unchanged.
+- **`canMergeWalls` is the conservative gate for Manual Join.**
+  Aggressively rejects on any property mismatch (material, height,
+  thickness, classification, beam flags). False negatives acceptable
+  (user can keep walls separate); false positives forbidden.
+- **`room.wallIds` is deduplicated semantic membership.** A room
+  references each parent wall it touches AT MOST ONCE in wallIds —
+  even when the room walks the same parent across multiple segments.
+  Polygon geometry comes from `room.nodeOrder`, not from wallIds
+  order or count.
+- **`room.nodeOrder` is a derived snapshot.** Authoritative source is
+  runtime recomputation via `recomputeRoomNodeOrder` (face
+  enumeration — NEVER reads wallIds order). Snapshot refreshed in:
+  `saveRoom`, `createRoomFromFace`, `getOrCreateNode` (mid-span
+  branch), `splitWall`, `deleteWall`, `joinWalls`. Mismatch logs
+  validationEvent but doesn't reject — recomputation wins.
+- **Expanded-graph edges are uniquely keyed.** `edgeKey = ${wallId}
+  ::${segmentIndex}::${fromNodeId}::${toNodeId}`. Face traversal,
+  visited tracking, canonicalization all use edgeKey. `wallId` alone
+  is NEVER a unique key inside traversal internals after Phase W.
+- **Per-segment adjacency classification.** Walls in the T-junction
+  model can have segments with different external/partition status
+  (e.g., parent wall in stacked-rooms has a 10ft partition segment
+  + a 1ft external segment). `classifySegment` is the source of
+  truth; BOQ aggregators that classify by adjacency must iterate
+  segments (not parent walls).
+- **No migration code.** Greenfield. `loadProject` accepts new-schema
+  projects only. Projects predating this schema fail to load by
+  design.
+
+### Invariants (INV-W1 through INV-W10)
+
+```
+INV-W1: Wall.n1 ∉ Wall.junctions[] and Wall.n2 ∉ Wall.junctions[]
+        (a wall cannot T-junction onto itself; n1/n2 may otherwise be
+        any node kind — TJUNCTIONs can be endpoints of OTHER walls).
+INV-W2: TJUNCTION node N has onWallId = W; W.junctions[] contains N.id
+        (two-way reference).
+INV-W3: A TJUNCTION node lies on the centerline of its onWallId
+        within SNAP_IN perpendicular tolerance.
+INV-W4: Wall openings have offsets ∈ [0, wallLengthIn]
+        (enforced by existing opening invariants).
+INV-W5: MEP fixtures have wallT ∈ [0, 1] AND state.walls[wallId]
+        exists.
+INV-W6: Foundation wallIds[] reference existing walls only.
+INV-W7: room.wallIds is deduplicated (no duplicate wallId entries).
+INV-W8: room.nodeOrder is either empty (malformed room) or has
+        length ≥ 3 with distinct, valid node ids forming a closed
+        polygon in the expanded graph.
+INV-W9: wall.splitOrigin ∈ {'NONE', 'USER_SPLIT'}.
+INV-W10: T-junctions on a wall are mutually ≥ SNAP_IN apart along the
+         wall's parametric direction (no zero-length segments).
+```
+
+`verifyIntegrity` enforces all 10.
+
+### Phase B-style deferral — what's NOT in Phase W (with architectural reason)
+
+- **Polygon-with-holes / courtyard handling**: deferred to Phase Y.
+  Architectural reason: T-junctions preserve wall identity across
+  topological touches. Polygon-with-holes handles room boundaries
+  with disconnected inner loops. They share zero implementation
+  logic. Bundling them would conflate two orthogonal architectural
+  changes and double review surface.
+- **IFC export consumer of splitOrigin**: IFC export doesn't exist
+  yet; building it is its own phase.
+- **Future editing operations** (endpoint drag, node move,
+  copy-paste, mirror, floor-duplicate): these features don't exist
+  today. INV-W1 through INV-W10 are documented as the contract any
+  future implementation must satisfy. `verifyIntegrity` enforces.
+- **DXF-style debug overlay**: deferred — dev-mode visual diagnostic
+  is useful but Stage 7 priority was the BOQ canary rewrite.
+- **`_scheduleAutoDetect` for Phase R2 auto-suggest**: still Phase R2
+  territory.
+
+### Verify-script inventory (30 total)
+
+```
+Phase 1-6 + A + R1 (29): unchanged. verify-boq EXTENDED with Phase W
+                          stacked-rooms canary (no fixture replacement;
+                          the old disjoint-rectangles fixture stays for
+                          continuity; a new Section 7 adds the canary).
+Phase W (+1):
+  verify-wall-topology — bootstrap purity grep (8) + Section A
+    T-junction primitives (16) + Section B stacked-rooms canary (17) +
+    Section C splitWall full propagation (24) + Section D split
+    refusal (6) + Section E Manual Join (16) + Section F deleteWall
+    junctions (13) + Section G multi-floor isolation (8) +
+    Section H.3 nodeOrder strictness (6) = 127 assertions
+```
+
+### Phase W follow-up — Manual Join toolbar UI (2026-05-28)
+
+Phase W shipped the `joinWalls` store action + `canMergeWalls`
+predicate + 16 verify-wall-topology Section E assertions, but the
+user-facing UI wiring was deferred. This follow-up closes the gap.
+Pure UI wiring on top of the tested action — topology / store / snap
+untouched.
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | Toolbar entry | Draw cluster gains "Join walls" (lucide `Link`, shortcut `J`) in `toolbarConfig.js`. Single registry entry; no Toolbar.jsx changes (config-driven). |
+| 2 | Bare-J shortcut | `useKeyboardShortcuts.js` routes `j`/`J` (outside form inputs) to `setTool('join_walls')` + `closeDropdowns()`. Mirrors D/S/R pattern. |
+| 3 | Canvas tool branch | `handleWallClick` adds a `join_walls` arm with one-click (1 eligible sibling → straight to dialog) + two-click (ambiguous → stage → click second wall) + same-wall-deselect flows. |
+| 4 | `_attemptJoin` async helper | Re-reads state fresh via `useStore.getState()` AFTER `await dialog.confirm(...)` (state may have changed during the await). Computes `wasSplit` pre-join from both walls' `splitOrigin === 'USER_SPLIT'` for the dialog hint. Maps refusal `reason` → user-facing message via the `JOIN_WALLS_REASONS` table with `?? JOIN_WALLS_DEFAULT_MESSAGE` fallback. Clears `joinHover` BEFORE `selectWall(survivorId)` so the preview overlay doesn't render against the deleted wallId during the React re-render flush. |
+| 5 | Hover preview | New `<g data-layer="join-walls-preview">` overlay group mirrors `face-detect-preview` styling (primary-tint dashed when eligible, warning-tint when not). Both walls rendered when `wallB != null`; just wallA otherwise. Label midpoint math branches on `wallB != null`. |
+| 6 | Sibling discovery | `findEligibleJoinSiblings(state, wallId)` floor-scoped via `getActiveFloorWalls(state, currentFloorId)` — skips cross-floor predicate calls. Each candidate vetted via `canMergeWalls`. |
+| 7 | Snap policy | `join_walls: ['WALL_NEAREST']` was already registered in `src/snap/toolPolicy.js` from Phase W (verify-snap Section A 1500/1500). Not re-added. |
+| 8 | `JOIN_WALLS_REASONS` map | 20 entries mapping `canMergeWalls` refusal `reason` strings to user-facing toast messages. Unmapped reasons fall back to `'Cannot join these walls'` — future-proof against new refusal reasons. |
+| 9 | Cursor states | `TOOL_CURSOR['join_walls'] = 'pointer'`; `wallHitCursor` array includes `'join_walls'`. |
+| 10 | Cleanup | Tool-change `useEffect` clears `joinFirstWallId` + `joinHover` on `activeTool !== 'join_walls'`. `handleMouseLeave` clears `joinHover`. |
+
+### Locked rules (Phase W follow-up)
+
+- **Re-read store state after any async `await` boundary.** The store
+  may have mutated during the await (autosave / undo from another
+  window / a different async action completing). `_attemptJoin`
+  enforces this at the dialog-confirm boundary; future UI flows
+  with async awaits before a store mutation MUST do the same.
+- **Clear hover-preview state BEFORE selecting the survivor.** When a
+  mutation deletes an entity the preview was rendering against
+  (e.g., the partner wall after join), set the hover state to null
+  FIRST so the next render frame doesn't try to read the now-missing
+  entity. Pattern: `setJoinHover(null); setJoinFirstWallId(null);
+  selectWall(survivorId)`.
+- **Refusal-reason → user-message maps must have a fallback.**
+  Future changes to `canMergeWalls` (or any predicate that returns
+  discrete `reason` strings) can add new reasons. The UI lookup site
+  must use `?? DEFAULT_MESSAGE` so unmapped reasons still produce a
+  sensible toast rather than `undefined`.
+- **Sibling-discovery scans are floor-scoped.** Iterate
+  `getActiveFloorWalls(state, currentFloorId)`, not the full
+  `state.walls` map. Cross-floor predicate calls are wasted work
+  (canMergeWalls rejects different floors anyway) and silently mask
+  perf regressions on multi-storey projects.
+- **Configuration-driven toolbar entries.** New tools go in
+  `toolbarConfig.js`'s TOOL_CLUSTERS array — never inline in
+  Toolbar.jsx. The dispatcher (`renderItem`) routes by `type` so
+  adding a tool is one config entry + (optionally) one shortcut
+  handler.
 
 ## Phase R1 — Auto Room Detection, interactive (2026-05-27)
 
@@ -2144,9 +2352,28 @@ rect-room atomic create + smart MEP defaults + project templates)** +
 priority tiers + Alt bypass + F9 toggle + per-project pitch)** +
 **Phase R1 Auto Room Detection — interactive (planar face enumeration +
 canonical normalization + hover-preview cache + Shift+A tool +
-createRoomFromFace with provenance meta)**
-complete on `main` (latest 2026-05-27). See **Phase R1** section at the
+createRoomFromFace with provenance meta)** +
+**Phase W Wall Topology Integrity (T-junction primitive + walls stable
+across topological touches + explicit Split full propagation + Manual
+Join tool + deleteWall junction handling + per-segment classification +
+INV-W1-W10)**
+complete on `main` (latest 2026-05-27). See **Phase W** section at the
 top of this file for the most recent landing.
+
+**Phase W — Wall Topology Integrity (2026-05-27) — COMPLETE.** Verify
+results at merge: `verify-wall-topology` 127/127 assertions across
+9 sections (A through H.3). `verify-boq` Phase W canary green:
+stacked-rooms scenario produces 10 walls (NOT 11 — old auto-split bug
+eliminated), 9 nodes (8 CORNER + 1 TJUNCTION), 160 ft² flooring
+(hand-computed match), parent wall expands into 2 segments correctly
+classified PARTITION (long) + EXTERNAL (short). All 30 verify scripts
+green including verify-snap Section A at 1500/1500 (with new
+`join_walls` tool + `WALL_JUNCTION` snap target). The architectural
+defect — auto-split silently destroying openings, IFC GUIDs, MEP refs
+— is fully resolved. Walls now preserve identity across topological
+touches; explicit Split is the only fragmentation path and propagates
+all dependent data cleanly. INV-W1 through INV-W10 enforced by
+`verifyIntegrity`.
 
 **Phase R1 — Auto Room Detection, interactive (2026-05-27) —
 COMPLETE.** Verify results at merge: `verify-room-detection`

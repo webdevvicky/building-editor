@@ -107,6 +107,9 @@ export function findCandidates(state, type, x, y, radiusIn) {
     case 'node': {
       const out = []
       for (const n of _floorNodes(state)) {
+        // Phase W: NODE excludes TJUNCTION-kind nodes; those are
+        // queried via the dedicated WALL_JUNCTION target.
+        if ((n.kind ?? 'CORNER') === 'TJUNCTION') continue
         const d = _dist(n.x, n.y, x, y)
         if (d <= radiusIn) {
           out.push({
@@ -114,6 +117,24 @@ export function findCandidates(state, type, x, y, radiusIn) {
             point:      { x: n.x, y: n.y },
             distanceIn: d,
             sortKey:    `node:${n.id}`,
+          })
+        }
+      }
+      return out.sort(_byDistanceThenKey)
+    }
+    case 'tjunction': {
+      // Phase W — TJUNCTION-kind nodes only (the dedicated target for
+      // mid-span-attached junction points).
+      const out = []
+      for (const n of _floorNodes(state)) {
+        if ((n.kind ?? 'CORNER') !== 'TJUNCTION') continue
+        const d = _dist(n.x, n.y, x, y)
+        if (d <= radiusIn) {
+          out.push({
+            entity:     n,
+            point:      { x: n.x, y: n.y },
+            distanceIn: d,
+            sortKey:    `tjunction:${n.id}`,
           })
         }
       }

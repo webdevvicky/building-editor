@@ -294,8 +294,9 @@ const f1WallToSplit = allWallsList.find(w => (w.floorId ?? 'F1') === 'F1')
 const eventsBefore = (s().validationEvents ?? []).length
 s().setCurrentFloorId(f2Id)
 const splitResult = s().splitWall(f1WallToSplit.id, 6 * FT, 0)
-check('splitWall on F1 wall while currentFloor=F2 returns null (rejected)',
-      splitResult === null)
+// Phase W: splitWall returns { error: 'cross-floor-split-blocked' } instead of null.
+check('splitWall on F1 wall while currentFloor=F2 returns rejection error',
+      splitResult?.error === 'cross-floor-split-blocked')
 const eventsAfter = (s().validationEvents ?? []).length
 check('Rejected splitWall emits a validation event',
       eventsAfter === eventsBefore + 1,
@@ -314,15 +315,17 @@ check('runValidation surfaces cross_floor_split_attempt issue',
 // Forced cross-floor split succeeds (programmatic caller path).
 const eventsBeforeForce = (s().validationEvents ?? []).length
 const forced = s().splitWall(f1WallToSplit.id, 6 * FT, 0, { force: true })
+// Phase W: splitWall returns { newNodeId, w1Id, w2Id, splitOffsetIn } on success.
+const forcedNodeId = forced?.newNodeId
 check('splitWall with { force: true } succeeds across floors',
-      forced !== null,
-      `got ${forced}`)
+      !!forcedNodeId && !forced?.error,
+      `got ${JSON.stringify(forced)}`)
 check('Forced split does NOT emit a validation event',
       (s().validationEvents ?? []).length === eventsBeforeForce)
 // Midpoint node inherits floorIds from the split wall (F1), not currentFloorId.
 check('Forced-split midpoint node inherits floorIds from wall topology',
-      s().nodes[forced]?.floorIds?.length === 1 && s().nodes[forced]?.floorIds?.[0] === 'F1',
-      `got ${JSON.stringify(s().nodes[forced]?.floorIds)}`)
+      s().nodes[forcedNodeId]?.floorIds?.length === 1 && s().nodes[forcedNodeId]?.floorIds?.[0] === 'F1',
+      `got ${JSON.stringify(s().nodes[forcedNodeId]?.floorIds)}`)
 
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ✓ ${p}`)

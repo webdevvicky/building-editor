@@ -99,26 +99,35 @@ function _enumerateUncached(state, graph) {
   // Filter plot walls — they bound the site, not interior rooms. The
   // perimeter graph includes them (MEP routing needs them); face
   // enumeration excludes them by re-checking state.walls[wallId].isPlot.
-  function isWallEligible(wallId) {
-    const w = state.walls?.[wallId]
+  // Phase W: edgeKey discipline. adjacency now stores edgeKey strings;
+  // each edgeKey identifies a unique segment. Multiple segments can
+  // share a parent wallId. Filter eligibility by parent wallId's flags.
+  function isEdgeEligible(edgeKey) {
+    const edge = gEdges?.[edgeKey]
+    if (!edge) return false
+    const w = state.walls?.[edge.wallId]
     if (!w) return false
     if (w.isPlot) return false
     return true
   }
+  function parentWallIdOf(edgeKey) {
+    return gEdges?.[edgeKey]?.wallId ?? null
+  }
 
   // Sort each node's neighbors by angle CCW.
-  // Result: sortedNeighbors[nodeId] = [{ neighborId, wallId, angle }, ...]
+  // Result: sortedNeighbors[nodeId] = [{ neighborId, edgeKey, wallId, angle }, ...]
   const sortedNeighbors = {}
   for (const nid of Object.keys(gNodes)) {
     const node = gNodes[nid]
     const entries = []
-    for (const [otherNid, wallId] of Object.entries(adjacency[nid] ?? {})) {
-      if (!isWallEligible(wallId)) continue
+    for (const [otherNid, edgeKey] of Object.entries(adjacency[nid] ?? {})) {
+      if (!isEdgeEligible(edgeKey)) continue
       const other = gNodes[otherNid]
       if (!other) continue
       entries.push({
         neighborId: otherNid,
-        wallId,
+        edgeKey,
+        wallId: parentWallIdOf(edgeKey),
         angle: _angleFromTo(node, other),
       })
     }
@@ -137,24 +146,23 @@ function _enumerateUncached(state, graph) {
   function nextEdge(a, b) {
     const list = sortedNeighbors[b]
     if (!list || list.length === 0) return null
-    // Find the index of the entry pointing back to a (the reverse of incoming).
     const idx = list.findIndex(e => e.neighborId === a)
     if (idx === -1) return null
-    // Predecessor in CCW order wraps to the end of the list.
     const prevIdx = (idx - 1 + list.length) % list.length
     const e = list[prevIdx]
-    return { fromNodeId: b, toNodeId: e.neighborId, wallId: e.wallId }
+    return { fromNodeId: b, toNodeId: e.neighborId, edgeKey: e.edgeKey, wallId: e.wallId }
   }
 
   const visited = new Set()
   const faces = []
   const safetyBound = Math.max(64, Object.keys(gEdges).length * 4 + 16)
 
-  // Iterate eligible wallIds deterministically.
-  const eligibleWallIds = Object.keys(gEdges).filter(isWallEligible).sort()
+  // Iterate eligible edgeKeys deterministically.
+  const eligibleEdgeKeys = Object.keys(gEdges).filter(isEdgeEligible).sort()
 
-  for (const wallId of eligibleWallIds) {
-    const edge = gEdges[wallId]
+  for (const edgeKey of eligibleEdgeKeys) {
+    const edge = gEdges[edgeKey]
+    const startWallId = edge.wallId
     const directions = [
       [edge.fromNodeId, edge.toNodeId],
       [edge.toNodeId,   edge.fromNodeId],
@@ -164,8 +172,8 @@ function _enumerateUncached(state, graph) {
       if (visited.has(key0)) continue
 
       const facePath = []   // node ids walked
-      const faceWalls = []  // wallIds walked (parallel to facePath; wall from facePath[i] to facePath[(i+1)%n])
-      let cur = { fromNodeId: startA, toNodeId: startB, wallId }
+      const faceWalls = []  // parent wallIds walked (parallel to facePath)
+      let cur = { fromNodeId: startA, toNodeId: startB, edgeKey, wallId: startWallId }
       let iter = 0
       let closed = false
 
@@ -246,7 +254,10 @@ function _enumerateUncached(state, graph) {
       cx /= canonPolygon.length
       cy /= canonPolygon.length
 
-      const canonWallIds = [...canonWallsInOrder].sort()
+      // Phase W: dedupe parent wallIds. A face may walk multiple
+      // segments of the same parent wall (T-junctions in between);
+      // room.wallIds is semantic-membership-only (deduplicated).
+      const canonWallIds = [...new Set(canonWallsInOrder)].sort()
 
       faces.push(Object.freeze({
         wallIds:        Object.freeze(canonWallIds),         // sorted ascending — canonical Set key

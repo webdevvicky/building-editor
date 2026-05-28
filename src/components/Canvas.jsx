@@ -7,6 +7,9 @@ import {
 } from '../geometry'
 import { resolveSnap, getTargetDescriptor, findNearestCandidate } from '../snap'
 import { isFaceCoveredByRoom } from '../topology/faces.js'
+import { canMergeWalls } from '../topology/canMerge.js'
+import { getActiveFloorWalls } from '../topology/floor.js'
+import { dialog } from './ui/Dialog'
 import { BEAM_LEVEL_REGISTRY } from '../constants/structural'
 import { getColumnSvgDims } from '../lib/columnShapes'
 import { getEffectiveWallLengthFt } from '../topology/index.js'
@@ -130,6 +133,7 @@ const TOOL_CURSOR = {
   select:        'default',
   room:          'default',
   room_detect:   'pointer',
+  join_walls:    'pointer',
   stairs:        'crosshair',
   lift:          'crosshair',
   sump:          'crosshair',
@@ -153,6 +157,49 @@ function getColPos(col, nodes) {
 }
 
 const STAMP_TOOLS = new Set(['stairs', 'lift', 'sump', 'overhead_tank', 'septic_tank'])
+
+// Phase W follow-up — Manual Join refusal-reason → user-facing message.
+// Mirrors the reason strings produced by canMergeWalls in
+// src/topology/canMerge.js. Unmapped reasons fall back to a generic
+// "Cannot join these walls" via the lookup site's `?? __default__`.
+const JOIN_WALLS_REASONS = Object.freeze({
+  'wall-not-found':                          'Wall not found',
+  'same-wall':                               'Cannot join a wall to itself',
+  'different-floors':                        'Walls are on different floors',
+  'isVirtual-mismatch':                      'Walls have different virtual/real status',
+  'isPlot-mismatch':                         'Cannot mix plot walls with regular walls',
+  'no-shared-endpoint':                      'Walls do not share an endpoint',
+  'shared-node-has-third-wall':              'A third wall meets at the join point — cannot merge',
+  'shared-node-is-tjunction-of-third-wall':  'Join point is attached to a third wall — cannot merge',
+  'missing-endpoint-node':                   'Wall endpoint missing — invalid topology',
+  'zero-length-wall':                        'One of the walls has zero length',
+  'not-collinear':                           'Walls are not collinear',
+  'material-mismatch':                       'Walls have different materials',
+  'height-mismatch':                         'Walls have different heights',
+  'thickness-mismatch':                      'Walls have different thicknesses',
+  'classification-mismatch':                 'Walls have different classifications',
+  'hasPlinthBeam-mismatch':                  'Walls disagree on plinth-beam flag',
+  'hasLintelBeam-mismatch':                  'Walls disagree on lintel-beam flag',
+  'hasRoofBeam-mismatch':                    'Walls disagree on roof-beam flag',
+  'opening-near-merge-point':                'An opening is too close to the merge point',
+  'no-eligible-sibling':                     'No collinear-eligible adjacent wall to join with',
+  'ambiguous':                               'Multiple eligible neighbors — click each in turn',
+})
+const JOIN_WALLS_DEFAULT_MESSAGE = 'Cannot join these walls'
+
+// Find collinear-eligible siblings of a wall via canMergeWalls.
+// Floor-scoped — iterates only the current floor's walls. Returns an
+// array of wallIds whose canMergeWalls(state, wallId, W) returns ok=true.
+function findEligibleJoinSiblings(state, wallId) {
+  const floorWalls = getActiveFloorWalls(state, state.currentFloorId)
+  const out = []
+  for (const otherId of Object.keys(floorWalls)) {
+    if (otherId === wallId) continue
+    const gate = canMergeWalls(state, wallId, otherId)
+    if (gate.ok) out.push(otherId)
+  }
+  return out
+}
 
 // Given a wallId and a projected point already on (or very near) the wall,
 // return the parametric position t in [0, 1]. Used by MEP placement to
@@ -225,7 +272,7 @@ export default function Canvas() {
   const setTool = useStore(s => s.setTool)
   const {
     getOrCreateNode, addWall, setDrawStart, selectWall, deleteWall,
-    splitWall, togglePendingWall, cancelAction,
+    splitWall, joinWalls, togglePendingWall, cancelAction,
     addStamp, deleteStamp, selectStamp, moveStamp,
     toggleWallMultiSelect, selectRoom,
     detectFaceFromWallClick, createRoomFromFace,
@@ -265,6 +312,11 @@ export default function Canvas() {
   // Phase R1 — room_detect tool hover preview. Updated on mousemove
   // while activeTool === 'room_detect'; null otherwise.
   const [hoveredFace,  setHoveredFace]  = useState(null)
+  // Phase W follow-up — Manual Join tool. joinFirstWallId holds the
+  // first wall selected in two-click mode. joinHover is the live
+  // mousemove-driven preview state.
+  const [joinFirstWallId, setJoinFirstWallId] = useState(null)
+  const [joinHover, setJoinHover] = useState(null)   // { wallA, wallB|null, eligible, reason }
   const [lockedLength, setLockedLength] = useState('')
   const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY } in world inches
   const [beamFromColId, setBeamFromColId] = useState(null)      // first column selected for beam
@@ -412,6 +464,14 @@ export default function Canvas() {
     if (activeTool !== 'room_detect') setHoveredFace(null)
   }, [activeTool])
 
+  // Phase W follow-up — clear Manual Join state when leaving the tool.
+  useEffect(() => {
+    if (activeTool !== 'join_walls') {
+      setJoinFirstWallId(null)
+      setJoinHover(null)
+    }
+  }, [activeTool])
+
   const startNode    = drawStartId ? nodes[drawStartId] : null
   // lockedLength may be '' (free draw) or a number-as-string ('10.5') or a
   // number — FeetInchesInput commits numbers, the legacy clear button
@@ -495,6 +555,49 @@ export default function Canvas() {
         setHoveredFace(null)
       }
     }
+
+    // Phase W follow-up — join_walls hover preview. Find the hovered wall,
+    // then either look up its single collinear-eligible sibling (no
+    // first pick yet) or evaluate canMergeWalls against the staged
+    // first pick. Sets joinHover for the SVG overlay to render.
+    if (activeTool === 'join_walls') {
+      const raw = screenToWorldRaw(e.clientX, e.clientY, getRect(), panRef.current, zoomRef.current)
+      const state = useStore.getState()
+      const nearest = findNearestCandidate(state, 'wallSegment', raw.x, raw.y)
+      if (!nearest || nearest.distanceIn > 24) {
+        if (joinHover) setJoinHover(null)
+        return
+      }
+      const hoveredId = nearest.entity.id
+      if (joinFirstWallId == null) {
+        // No first pick yet — discover siblings.
+        if (hoveredId === joinHover?.wallA && joinHover.wallB !== undefined) {
+          // Same wall; skip re-scan to avoid mousemove churn.
+        }
+        const siblings = findEligibleJoinSiblings(state, hoveredId)
+        if (siblings.length === 1) {
+          setJoinHover({ wallA: hoveredId, wallB: siblings[0], eligible: true, reason: null })
+        } else if (siblings.length === 0) {
+          setJoinHover({ wallA: hoveredId, wallB: null, eligible: false, reason: 'no-eligible-sibling' })
+        } else {
+          setJoinHover({ wallA: hoveredId, wallB: null, eligible: false, reason: 'ambiguous' })
+        }
+      } else {
+        // Second-pick mode — evaluate against the staged first pick.
+        if (hoveredId === joinFirstWallId) {
+          // Hovering the staged wall itself — neutral preview (click clears).
+          setJoinHover({ wallA: joinFirstWallId, wallB: null, eligible: false, reason: null })
+        } else {
+          const gate = canMergeWalls(state, joinFirstWallId, hoveredId)
+          setJoinHover({
+            wallA:    joinFirstWallId,
+            wallB:    hoveredId,
+            eligible: gate.ok,
+            reason:   gate.ok ? null : gate.reason,
+          })
+        }
+      }
+    }
   }
 
   function handleMouseUp(e) {
@@ -502,7 +605,7 @@ export default function Canvas() {
   }
 
   function handleMouseLeave() {
-    setCursor(null); setHoveredWallId(null); setDraggingStamp(null); setHoveredFace(null)
+    setCursor(null); setHoveredWallId(null); setDraggingStamp(null); setHoveredFace(null); setJoinHover(null)
   }
 
   function handleColumnClick(e, colId) {
@@ -757,6 +860,95 @@ export default function Canvas() {
         toast.error('Could not create room')
       }
     }
+
+    // Phase W follow-up — join_walls click handler. One-click flow
+    // when there's exactly 1 eligible sibling; two-click flow otherwise.
+    // Re-reads state fresh both before staging AND after dialog.confirm
+    // await (state may have changed during the async dialog).
+    if (activeTool === 'join_walls') {
+      e.stopPropagation()
+
+      // _attemptJoin is a local async helper. Encapsulated here so it
+      // closes over toast / selectWall / joinWalls / setJoin*State.
+      const _attemptJoin = async (w1Id, w2Id) => {
+        // Re-read fresh state (defensive — predicate run on stale state).
+        const stateBefore = useStore.getState()
+        const gate = canMergeWalls(stateBefore, w1Id, w2Id)
+        if (!gate.ok) {
+          toast.warning(JOIN_WALLS_REASONS[gate.reason] ?? JOIN_WALLS_DEFAULT_MESSAGE)
+          setJoinFirstWallId(null)
+          setJoinHover(null)
+          return
+        }
+        const w1 = stateBefore.walls[w1Id]
+        const w2 = stateBefore.walls[w2Id]
+        const wasSplit = w1?.splitOrigin === 'USER_SPLIT'
+                      && w2?.splitOrigin === 'USER_SPLIT'
+        const message = wasSplit
+          ? 'Join these two walls into one?\n\nThese walls were split via the Split tool.'
+          : 'Join these two walls into one?'
+        const confirmed = await dialog.confirm(message, {
+          title:        'Join walls',
+          confirmLabel: 'Join',
+        })
+        if (!confirmed) {
+          setJoinFirstWallId(null)
+          setJoinHover(null)
+          return
+        }
+        // Refinement #3 — re-read state AFTER the await. State may have
+        // changed during the dialog (autosave, another window, undo).
+        const stateAfter = useStore.getState()
+        if (!stateAfter.walls[w1Id] || !stateAfter.walls[w2Id]) {
+          toast.warning('One of the selected walls no longer exists')
+          setJoinFirstWallId(null)
+          setJoinHover(null)
+          return
+        }
+        const result = joinWalls(w1Id, w2Id)
+        if (result?.error) {
+          toast.warning(JOIN_WALLS_REASONS[result.error] ?? JOIN_WALLS_DEFAULT_MESSAGE)
+          setJoinFirstWallId(null)
+          setJoinHover(null)
+          return
+        }
+        // Refinement #4 — clear hover BEFORE selectWall to avoid the
+        // preview overlay rendering against the now-removed wallId.
+        setJoinFirstWallId(null)
+        setJoinHover(null)
+        if (result?.survivorId) {
+          selectWall(result.survivorId)
+          toast.success(result.wasSplit ? 'Walls re-joined.' : 'Walls joined.')
+        } else {
+          toast.error('Could not join walls')
+        }
+      }
+
+      if (joinFirstWallId == null) {
+        // First click — discover siblings.
+        const state = useStore.getState()
+        const siblings = findEligibleJoinSiblings(state, wallId)
+        if (siblings.length === 1) {
+          // One-click flow.
+          _attemptJoin(wallId, siblings[0])
+        } else if (siblings.length === 0) {
+          toast.warning(JOIN_WALLS_REASONS['no-eligible-sibling'])
+        } else {
+          // Ambiguous — stage as first pick for two-click flow.
+          setJoinFirstWallId(wallId)
+          toast.info('First wall selected. Click the wall to join with.')
+        }
+      } else {
+        // Second click.
+        if (wallId === joinFirstWallId) {
+          setJoinFirstWallId(null)
+          setJoinHover(null)
+          toast.info('Selection cleared.')
+        } else {
+          _attemptJoin(joinFirstWallId, wallId)
+        }
+      }
+    }
   }
 
   function handleStampClick(e, stampId) {
@@ -773,7 +965,7 @@ export default function Canvas() {
   }
 
   const svgCursor     = isPanning || spaceDown ? 'grab' : (TOOL_CURSOR[activeTool] || 'default')
-  const wallHitCursor = ['select', 'split', 'room', 'room_detect'].includes(activeTool) ? 'pointer' : 'default'
+  const wallHitCursor = ['select', 'split', 'room', 'room_detect', 'join_walls'].includes(activeTool) ? 'pointer' : 'default'
   const zoomPct       = Math.round(zoom * 100)
 
   // Phase 1.9 — per-floor visibility. Single-floor projects auto-match (everything tagged 'F1').
@@ -1524,6 +1716,57 @@ export default function Canvas() {
                 style={{ userSelect: 'none', fontFamily: 'var(--font-mono)' }}>
                 {isExisting ? 'Already a room' : `${areaFt2} ft²`}
               </text>
+            </g>
+          )
+        })()}
+
+        {/* Phase W follow-up — Manual Join hover preview. Renders both
+            walls (or just wallA when no sibling is determined) with a
+            small label showing the action or the refusal reason.
+            Eligible → primary tint dashed; ineligible → warning tint. */}
+        {activeTool === 'join_walls' && joinHover && (() => {
+          const { wallA, wallB, eligible, reason } = joinHover
+          const wA = walls[wallA]
+          if (!wA) return null
+          const wAn1 = nodes[wA.n1], wAn2 = nodes[wA.n2]
+          if (!wAn1 || !wAn2) return null
+          const wB = wallB ? walls[wallB] : null
+          const wBn1 = wB ? nodes[wB.n1] : null
+          const wBn2 = wB ? nodes[wB.n2] : null
+          const stroke = eligible ? 'var(--color-primary)' : 'var(--color-warning)'
+          const label = eligible
+            ? 'Click to join'
+            : (JOIN_WALLS_REASONS[reason] ?? (reason ? JOIN_WALLS_DEFAULT_MESSAGE : ''))
+          // Refinement #5 — midpoint math handles wallB === null.
+          let labelX, labelY
+          if (wB && wBn1 && wBn2) {
+            // Midpoint of the pair's combined geometry.
+            labelX = (wAn1.x + wAn2.x + wBn1.x + wBn2.x) / 4
+            labelY = (wAn1.y + wAn2.y + wBn1.y + wBn2.y) / 4
+          } else {
+            labelX = (wAn1.x + wAn2.x) / 2
+            labelY = (wAn1.y + wAn2.y) / 2
+          }
+          return (
+            <g data-layer="join-walls-preview" style={{ pointerEvents: 'none' }}>
+              <line x1={sx(wAn1.x)} y1={sy(wAn1.y)}
+                    x2={sx(wAn2.x)} y2={sy(wAn2.y)}
+                    stroke={stroke} strokeWidth={4}
+                    strokeDasharray="6 4" />
+              {wB && wBn1 && wBn2 && (
+                <line x1={sx(wBn1.x)} y1={sy(wBn1.y)}
+                      x2={sx(wBn2.x)} y2={sy(wBn2.y)}
+                      stroke={stroke} strokeWidth={4}
+                      strokeDasharray="6 4" />
+              )}
+              {label && (
+                <text x={sx(labelX)} y={sy(labelY)}
+                      textAnchor="middle" dominantBaseline="middle"
+                      fontSize={12} fill={stroke}
+                      style={{ userSelect: 'none', fontFamily: 'var(--font-mono)' }}>
+                  {label}
+                </text>
+              )}
             </g>
           )
         })()}

@@ -206,6 +206,11 @@ section('Section A — defaults reproduce today (byte-equality fuzz)')
   // (no walls) → resolver falls through to GRID → byte-identical to
   // legacy. The GRID fallback was added post-implementation to preserve
   // current behavior.
+  //
+  // Phase W: WALL_JUNCTION added to draw / rect_room / column policies.
+  // On clean canvas (no TJUNCTION nodes), WALL_JUNCTION returns null
+  // and the fall-through to GRID is unchanged — byte-identical to
+  // legacy preserved.
   const gridFallthroughTools = [
     'draw', 'rect_room', 'column',
     'sump', 'overhead_tank', 'septic_tank', 'stairs', 'lift',
@@ -215,6 +220,11 @@ section('Section A — defaults reproduce today (byte-equality fuzz)')
   // Tools whose policy is []. Legacy uses screenToWorldRaw, so legacy
   // result === raw === resolver result.
   const rawTools = ['calibrate_underlay']
+
+  // Phase W — Manual Join tool. Policy = [WALL_NEAREST]. On clean
+  // canvas with no walls, WALL_NEAREST returns null → resolver
+  // returns raw → matches screenToWorldRaw baseline (NOT screenToWorld).
+  const wallNearestOnlyTools = ['join_walls']
 
   // Note: `split` policy is [WALL_SEGMENT]; in production never invoked on
   // an empty canvas (split is wall-click only). Skipped per brief.
@@ -255,9 +265,26 @@ section('Section A — defaults reproduce today (byte-equality fuzz)')
       byteTotal++
       if (matchRaw) byteMatches++
     }
+
+    // Phase W — join_walls and other WALL_NEAREST-only tools on clean
+    // canvas: WALL_NEAREST returns null → resolver returns raw.
+    for (const toolId of wallNearestOnlyTools) {
+      const r = resolveSnap(state,
+        { clientX, clientY },
+        makeCtx(toolId, pan, zoom, svgRect, settings))
+      const raw = screenToWorldRaw(clientX, clientY, svgRect, pan, zoom)
+      const matchRaw = r.raw === true
+                    && Math.abs(r.worldXY.x - raw.x) < 1e-9
+                    && Math.abs(r.worldXY.y - raw.y) < 1e-9
+      check(matchRaw,
+        `[${toolId}] WALL_NEAREST-only tool on empty canvas → raw worldXY`)
+      byteTotal++
+      if (matchRaw) byteMatches++
+    }
   }
+  const _totalTools = gridFallthroughTools.length + rawTools.length + wallNearestOnlyTools.length
   console.log(`  Section A: byte-equality ${byteMatches}/${byteTotal} ` +
-              `(100 triples × ${gridFallthroughTools.length + rawTools.length} tools)`)
+              `(100 triples × ${_totalTools} tools)`)
 }
 sectionSummary('Section A — defaults reproduce today (byte-equality fuzz)')
 

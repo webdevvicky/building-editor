@@ -125,6 +125,13 @@ export function useKeyboardShortcuts() {
         closeDropdowns()
         return
       }
+      // Phase W follow-up — bare J picks the Manual Join tool.
+      if (key === 'j' || key === 'J') {
+        e.preventDefault()
+        useStore.getState().setTool?.('join_walls')
+        closeDropdowns()
+        return
+      }
       if (key === 'p' || key === 'P') {
         e.preventDefault()
         useStore.getState().setTool?.('plumbing')

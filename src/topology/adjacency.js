@@ -146,6 +146,15 @@ export function getRoomNeighbourThroughDoor(state, roomId, openingId) {
 //   - Result reference is stable within a memoized window so React/Zustand
 //     selectors don't trigger spurious re-renders.
 
+// Phase W — buildFloorWallPerimeterGraph EXPANDED.
+//
+// Walls with T-junctions expand into multiple graph edges. Each edge
+// carries a unique `edgeKey = ${wallId}::${segmentIndex}::${fromNodeId}::${toNodeId}`.
+// Face traversal / canonicalization MUST use edgeKey, not wallId alone
+// (multiple edges share a wallId after expansion).
+//
+// Pre-Phase-W walls (no junctions / junctions=[]) produce exactly one
+// edge per wall — backward-compatible by construction.
 function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
   // First pass: collect floor-scoped walls. Sort by id for determinism.
   const floorWalls = []
@@ -156,7 +165,7 @@ function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
   }
   floorWalls.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
-  // Second pass: collect used nodes
+  // Second pass: collect used nodes (wall endpoints + T-junctions on walls)
   const graphNodes = {}
   for (const w of floorWalls) {
     for (const nid of [w.n1, w.n2]) {
@@ -164,9 +173,16 @@ function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
       if (!n) continue
       if (!graphNodes[nid]) graphNodes[nid] = { id: nid, x: n.x, y: n.y, edgeIds: [] }
     }
+    // T-junctions attached to this wall are also graph nodes.
+    for (const jId of (w.junctions ?? [])) {
+      const j = nodes[jId]
+      if (!j) continue
+      if (!graphNodes[jId]) graphNodes[jId] = { id: jId, x: j.x, y: j.y, edgeIds: [] }
+    }
   }
 
-  // Third pass: build edges + adjacency
+  // Third pass: build edges + adjacency. Each wall expands into one or
+  // more segments based on its junctions list (ordered along the wall).
   const graphEdges = {}
   const adjacency = {}
   for (const nid of Object.keys(graphNodes)) adjacency[nid] = {}
@@ -175,21 +191,49 @@ function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
     const a = graphNodes[w.n1]
     const b = graphNodes[w.n2]
     if (!a || !b) continue
-    const dx = b.x - a.x, dy = b.y - a.y
-    const lengthIn = Math.hypot(dx, dy)
-    const lengthFt = lengthIn / 12
-    graphEdges[w.id] = {
-      id: w.id,
-      wallId: w.id,
-      fromNodeId: w.n1,
-      toNodeId: w.n2,
-      lengthIn,
-      lengthFt,
+    const wDx = b.x - a.x, wDy = b.y - a.y
+    const wLen2 = wDx * wDx + wDy * wDy
+    if (wLen2 === 0) continue
+
+    // Order junctions along the wall by parametric t (projection onto n1→n2).
+    const junctionEntries = []
+    for (const jId of (w.junctions ?? [])) {
+      const j = nodes[jId]
+      if (!j) continue
+      const t = ((j.x - a.x) * wDx + (j.y - a.y) * wDy) / wLen2
+      junctionEntries.push({ nodeId: jId, t })
     }
-    a.edgeIds.push(w.id)
-    b.edgeIds.push(w.id)
-    adjacency[w.n1][w.n2] = w.id
-    adjacency[w.n2][w.n1] = w.id
+    junctionEntries.sort((p, q) => {
+      if (p.t !== q.t) return p.t - q.t
+      return p.nodeId < q.nodeId ? -1 : p.nodeId > q.nodeId ? 1 : 0
+    })
+
+    // Walk: n1 → j1 → j2 → ... → n2. Each consecutive pair is a segment.
+    const ordered = [w.n1, ...junctionEntries.map(e => e.nodeId), w.n2]
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const fromId = ordered[i]
+      const toId   = ordered[i + 1]
+      const fromN  = graphNodes[fromId]
+      const toN    = graphNodes[toId]
+      if (!fromN || !toN) continue
+      const dx = toN.x - fromN.x, dy = toN.y - fromN.y
+      const lengthIn = Math.hypot(dx, dy)
+      const lengthFt = lengthIn / 12
+      const edgeKey = `${w.id}::${i}::${fromId}::${toId}`
+      graphEdges[edgeKey] = {
+        id:           edgeKey,
+        wallId:       w.id,
+        segmentIndex: i,
+        fromNodeId:   fromId,
+        toNodeId:     toId,
+        lengthIn,
+        lengthFt,
+      }
+      fromN.edgeIds.push(edgeKey)
+      toN.edgeIds.push(edgeKey)
+      adjacency[fromId][toId] = edgeKey
+      adjacency[toId][fromId] = edgeKey
+    }
   }
 
   // Sort edgeIds per node for determinism
@@ -198,6 +242,38 @@ function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
   }
 
   return { floorId, nodes: graphNodes, edges: graphEdges, adjacency }
+}
+
+/**
+ * Phase W — resolve the parent wall id for an edge between two nodes.
+ * Returns the parent wallId (string) or null if no edge connects the
+ * nodes in the current expanded graph for the relevant floor.
+ *
+ * The floor is derived from either node's floorIds (first entry).
+ */
+export function findWallContainingEdge(state, fromNodeId, toNodeId) {
+  const fromNode = state.nodes?.[fromNodeId]
+  if (!fromNode) return null
+  const floorId = fromNode.floorIds?.[0] ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+  const graph = getFloorWallPerimeterGraph(state, floorId)
+  const edgeKey = graph.adjacency?.[fromNodeId]?.[toNodeId]
+  if (!edgeKey) return null
+  return graph.edges[edgeKey]?.wallId ?? null
+}
+
+/**
+ * Phase W — look up the full edge record for a node pair.
+ * Returns { id (edgeKey), wallId, segmentIndex, ..., lengthIn, lengthFt }
+ * or null.
+ */
+export function findExpandedEdge(state, fromNodeId, toNodeId) {
+  const fromNode = state.nodes?.[fromNodeId]
+  if (!fromNode) return null
+  const floorId = fromNode.floorIds?.[0] ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+  const graph = getFloorWallPerimeterGraph(state, floorId)
+  const edgeKey = graph.adjacency?.[fromNodeId]?.[toNodeId]
+  if (!edgeKey) return null
+  return graph.edges[edgeKey] ?? null
 }
 
 export function getFloorWallPerimeterGraph(state, floorId) {

@@ -30,6 +30,23 @@ import {
   isFaceCoveredByRoom,
 } from './topology/faces.js'
 import {
+  probeWallForMidSpan,
+  findCoalescingJunction,
+} from './topology/junctions.js'
+import {
+  recomputeRoomNodeOrder,
+  computeNodeOrderForWallIds,
+} from './topology/nodeOrderRefresh.js'
+import {
+  findExpandedEdge,
+} from './topology/adjacency.js'
+import {
+  planWallSplit,
+} from './topology/wallSplit.js'
+import {
+  canMergeWalls,
+} from './topology/canMerge.js'
+import {
   OPENING_SUBTYPE, SUBTYPE_SOURCE,
   VENTILATOR_MAX_HEIGHT_IN, VENTILATOR_MAX_WIDTH_IN,
 } from './constants/joinery.js'
@@ -288,63 +305,113 @@ export const useStore = create((set, get) => ({
 
   // ── Nodes ─────────────────────────────────────────────────────────────
 
-  // x, y are world inches (Y-up).
+  // Phase W — getOrCreateNode priority (rewritten):
+  //   1. CORNER snap (Phase A NODE 4in tolerance) — reuse existing corner.
+  //   2. TJUNCTION snap (4in tolerance via findNearestTjunction) — reuse junction.
+  //   3. Mid-span on a wall (within SNAP_IN perpendicular, beyond SNAP_IN
+  //      from any endpoint, beyond SNAP_IN from any existing junction):
+  //      → Create a TJUNCTION node attached to the wall. Wall is NOT split.
+  //      → Wall identity, ifcGlobalId, openings, hasPlinthBeam/etc. preserved.
+  //      → Refresh room.nodeOrder for every room whose wallIds contains the wall.
+  //   4. Fresh CORNER node.
   //
-  // Floor-aware topology (Phase 1.7+):
-  //   - findNearbyNode searches only nodes owned by the current floor.
-  //     Cross-floor coordinate collisions create distinct nodes — spatial
-  //     alignment never implies shared ownership.
-  //   - Auto-split-on-segment iterates only current-floor walls. Drawing on
-  //     F2 over an F1 wall body does NOT mutate F1.
-  //   - The new node carries floorIds: [currentFloorId]. Auto-split midpoint
-  //     inherits its topology context from the parent wall.
+  // Floor-aware topology:
+  //   - All snaps + wall iteration restricted to current floor.
+  //   - Cross-floor coordinate collisions create distinct nodes.
+  //   - Mid-span junctions inherit wall.floorId.
   getOrCreateNode(x, y) {
     const state = get()
     const cur = state.currentFloorId ?? DEFAULT_FLOOR_ID
 
-    // Snap candidates: nodes owned by current floor only.
+    // 1. CORNER snap on current floor.
     const candidateNodes = getActiveFloorNodes(state, cur)
-    const existing = findNearbyNode(candidateNodes, x, y)
-    if (existing) return existing.id
+    // findNearbyNode walks ALL nodes; we need to exclude TJUNCTIONs here
+    // (those are queried separately). Box-distance test mirrors findNearbyNode.
+    let cornerHit = null
+    for (const n of Object.values(candidateNodes)) {
+      if ((n.kind ?? 'CORNER') !== 'CORNER') continue
+      if (Math.abs(n.x - x) < SNAP_IN && Math.abs(n.y - y) < SNAP_IN) {
+        cornerHit = n
+        break
+      }
+    }
+    if (cornerHit) return cornerHit.id
 
-    // Auto-split: walls owned by current floor only.
-    const { walls, nodes: currentNodes } = state
+    // 2. TJUNCTION snap on current floor.
+    let junctionHit = null
+    for (const n of Object.values(candidateNodes)) {
+      if ((n.kind ?? 'CORNER') !== 'TJUNCTION') continue
+      if (Math.abs(n.x - x) < SNAP_IN && Math.abs(n.y - y) < SNAP_IN) {
+        junctionHit = n
+        break
+      }
+    }
+    if (junctionHit) return junctionHit.id
+
+    // 3. Mid-span: create a T-junction (do NOT split the wall).
     const splittableWalls = getActiveFloorWalls(state, cur)
     for (const wall of Object.values(splittableWalls)) {
-      const a = currentNodes[wall.n1], b = currentNodes[wall.n2]
-      if (!a || !b) continue
-      if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) continue
-      if (Math.hypot(x - a.x, y - a.y) < SNAP_IN || Math.hypot(x - b.x, y - b.y) < SNAP_IN) continue
+      if (wall.isPlot) continue   // plot walls are site boundaries; no T-junctions on them
+      const probe = probeWallForMidSpan(state, wall.id, x, y)
+      if (!probe.onCenterline) continue
+
+      // INV-W10 guard: refuse if within SNAP_IN of an existing junction.
+      const coalesceId = findCoalescingJunction(state, wall.id, probe.t)
+      if (coalesceId) return coalesceId   // reuse existing junction
+
+      // Create the TJUNCTION node and attach to wall.
       const newNodeId = uid()
       const newNodeIfc = uidIfc()
-      const w1Id = uid(), w2Id = uid()
-      const w1Ifc = uidIfc(), w2Ifc = uidIfc()
-      // Midpoint node inherits topology from the wall being split. Wall is
-      // single-floor today (wall.floorId), so the node's floorIds wraps it.
       const newNodeFloorIds = [wall.floorId ?? cur]
+      // Use projected coordinates so the junction sits exactly on the
+      // wall centerline.
+      const jX = probe.x, jY = probe.y
+
       set(s => {
-        const newWalls = { ...s.walls }
-        delete newWalls[wall.id]
-        newWalls[w1Id] = { ...wall, id: w1Id, ifcGlobalId: w1Ifc, n1: wall.n1, n2: newNodeId, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
-        newWalls[w2Id] = { ...wall, id: w2Id, ifcGlobalId: w2Ifc, n1: newNodeId, n2: wall.n2, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null }
-        const rooms = {}
-        Object.values(s.rooms).forEach(r => {
-          const idx = r.wallIds.indexOf(wall.id)
-          const wallIds = idx === -1
-            ? r.wallIds
-            : [...r.wallIds.slice(0, idx), w1Id, w2Id, ...r.wallIds.slice(idx + 1)]
-          rooms[r.id] = { ...r, wallIds }
-        })
+        const newNodes = {
+          ...s.nodes,
+          [newNodeId]: {
+            id: newNodeId,
+            ifcGlobalId: newNodeIfc,
+            x: jX,
+            y: jY,
+            floorIds: newNodeFloorIds,
+            kind: 'TJUNCTION',
+            onWallId: wall.id,
+          },
+        }
+        const newWalls = {
+          ...s.walls,
+          [wall.id]: {
+            ...s.walls[wall.id],
+            junctions: [...(s.walls[wall.id].junctions ?? []), newNodeId],
+          },
+        }
+        // Refresh room.nodeOrder for every room whose wallIds contains
+        // this parent wall — the new junction is now a polygon vertex.
+        const stateAfter = { ...s, nodes: newNodes, walls: newWalls }
+        const newRooms = {}
+        let anyRoomTouched = false
+        for (const room of Object.values(s.rooms)) {
+          if (!(room.wallIds ?? []).includes(wall.id)) {
+            newRooms[room.id] = room
+            continue
+          }
+          const refreshed = recomputeRoomNodeOrder(stateAfter, room.id)
+          newRooms[room.id] = { ...room, nodeOrder: refreshed }
+          anyRoomTouched = true
+        }
         return {
-          nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, ifcGlobalId: newNodeIfc, x, y, floorIds: newNodeFloorIds } },
-          walls: newWalls, rooms,
+          nodes: newNodes,
+          walls: newWalls,
+          ...(anyRoomTouched ? { rooms: newRooms } : {}),
         }
       })
       return newNodeId
     }
 
     const { id, ifcGlobalId } = newEntityIds()
-    set(s => ({ nodes: { ...s.nodes, [id]: { id, ifcGlobalId, x, y, floorIds: [cur] } } }))
+    set(s => ({ nodes: { ...s.nodes, [id]: { id, ifcGlobalId, x, y, floorIds: [cur], kind: 'CORNER', onWallId: null } } }))
     return id
   },
 
@@ -388,7 +455,7 @@ export const useStore = create((set, get) => ({
     const isVirtual = get().drawVirtual
     const floorId = cur
     set(s => ({
-      walls: { ...s.walls, [id]: { id, ifcGlobalId, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null } },
+      walls: { ...s.walls, [id]: { id, ifcGlobalId, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null, junctions: [], splitOrigin: 'NONE' } },
       drawStartId: null,
     }))
   },
@@ -420,12 +487,19 @@ export const useStore = create((set, get) => ({
       get().addWall(se, ne)
       get().addWall(ne, nw)
       get().addWall(nw, sw)
+      // Phase W — lookup via the expanded graph: a pair (a, b) might be
+      // a SEGMENT of an existing parent wall (T-junction case) rather
+      // than a fresh wall. findExpandedEdge returns the parent wallId.
       const pairs = [[sw, se], [se, ne], [ne, nw], [nw, sw]]
       const wallIds = pairs.map(([a, b]) => {
-        const w = Object.values(get().walls).find(
+        // Try direct wall lookup first.
+        const direct = Object.values(get().walls).find(
           x => (x.n1 === a && x.n2 === b) || (x.n1 === b && x.n2 === a)
         )
-        return w?.id ?? null
+        if (direct) return direct.id
+        // Fall back to expanded graph: pair may span a wall segment.
+        const expanded = findExpandedEdge(get(), a, b)
+        return expanded?.wallId ?? null
       })
       if (wallIds.some(id => !id)) return { error: 'wall-create-failed' }
 
@@ -492,12 +566,17 @@ export const useStore = create((set, get) => ({
         .at(-1)
       if (!created) return { error: 'save-room-failed' }
 
-      // Stamp provenance meta (schema slot — no UI consumption in R1).
+      // Phase W — overwrite saveRoom's walkPolygon-derived nodeOrder with
+      // the face's authoritative nodeOrder (canonical from face
+      // enumeration). saveRoom's wallIds dedup may have changed order;
+      // face.nodeOrder is the authoritative closed-polygon sequence.
+      // Also stamp provenance meta.
       set(s => ({
         rooms: {
           ...s.rooms,
           [created.id]: {
             ...s.rooms[created.id],
+            nodeOrder: Array.isArray(face.nodeOrder) ? [...face.nodeOrder] : s.rooms[created.id].nodeOrder,
             meta: {
               ...(s.rooms[created.id].meta ?? {}),
               createdFrom: 'face-detect',
@@ -511,19 +590,106 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // Phase W — deleteWall handles T-junction cleanup correctly:
+  //   - For each junction node N attached to this wall (in junctions[]):
+  //     * If N is also referenced by ANOTHER wall (via n1/n2 or junctions[])
+  //       → convert N to CORNER (clear onWallId), keep the node.
+  //     * If N has no other reference → orphan; removeOrphanNodes prunes it.
+  //   - Refuse the delete if any junction is in ANOTHER wall's junctions[]
+  //     (stale ownership corruption) — flag as validationEvent.
+  //   - room.nodeOrder refreshed for every room that referenced this wall.
   deleteWall(wallId) {
+    const state = get()
+    const wall = state.walls?.[wallId]
+    if (!wall) return null
+
+    // Stale-ownership corruption check (Section F.4).
+    const ownJunctions = wall.junctions ?? []
+    const corrupted = []
+    for (const otherWall of Object.values(state.walls)) {
+      if (otherWall.id === wallId) continue
+      for (const jId of (otherWall.junctions ?? [])) {
+        if (ownJunctions.includes(jId)) {
+          corrupted.push({ junctionId: jId, alsoIn: otherWall.id })
+        }
+      }
+    }
+    if (corrupted.length > 0) {
+      set(s => ({
+        validationEvents: [
+          ...(s.validationEvents ?? []),
+          ...corrupted.map(c => ({
+            ruleId:     'wall_junction_stale_ownership',
+            severity:   'error',
+            category:   'topology',
+            entityType: 'wall',
+            entityId:   wallId,
+            message:    `deleteWall refused: junction ${c.junctionId} also in wall ${c.alsoIn}.junctions[]`,
+          })),
+        ].slice(-100),
+      }))
+      return { error: 'junction-stale-ownership', corrupted }
+    }
+
     get()._save()
     set(s => {
       const walls = { ...s.walls }
       delete walls[wallId]
-      const nodes = removeOrphanNodes(s.nodes, walls)
+
+      // Junction cleanup: each junction node that was attached to this
+      // wall is either converted to CORNER (if referenced elsewhere)
+      // or left for removeOrphanNodes to prune.
+      const newNodes = { ...s.nodes }
+      for (const jId of ownJunctions) {
+        const j = newNodes[jId]
+        if (!j) continue
+        // Determine if j is referenced by any remaining wall.
+        let referenced = false
+        for (const w of Object.values(walls)) {
+          if (w.n1 === jId || w.n2 === jId) { referenced = true; break }
+          if ((w.junctions ?? []).includes(jId)) { referenced = true; break }
+        }
+        if (referenced) {
+          // Convert to CORNER — it's no longer "mid-span on a wall."
+          newNodes[jId] = { ...j, kind: 'CORNER', onWallId: null }
+        }
+        // If not referenced, leave for removeOrphanNodes below.
+      }
+
+      const nodes = removeOrphanNodes(newNodes, walls)
       const rooms = {}
+      const affectedRoomIds = []
       Object.values(s.rooms).forEach(r => {
-        rooms[r.id] = { ...r, wallIds: r.wallIds.filter(id => id !== wallId) }
+        if ((r.wallIds ?? []).includes(wallId)) {
+          affectedRoomIds.push(r.id)
+        }
+        rooms[r.id] = { ...r, wallIds: (r.wallIds ?? []).filter(id => id !== wallId) }
       })
       const clearOpening = s.selectedOpening?.wallId === wallId
-      return { walls, nodes, rooms, selectedWallId: null, ...(clearOpening ? { selectedOpening: null } : {}) }
+      return {
+        walls, nodes, rooms,
+        selectedWallId: null,
+        ...(clearOpening ? { selectedOpening: null } : {}),
+      }
     })
+
+    // Refresh nodeOrder for every affected room.
+    const affectedRoomIds = []
+    for (const r of Object.values(state.rooms ?? {})) {
+      if ((r.wallIds ?? []).includes(wallId)) affectedRoomIds.push(r.id)
+    }
+    if (affectedRoomIds.length > 0) {
+      set(s => {
+        const refreshed = { ...s.rooms }
+        for (const rid of affectedRoomIds) {
+          if (!refreshed[rid]) continue
+          const order = recomputeRoomNodeOrder(s, rid)
+          refreshed[rid] = { ...refreshed[rid], nodeOrder: order }
+        }
+        return { rooms: refreshed }
+      })
+    }
+    return { ok: true }
   },
 
   selectWall(wallId) {
@@ -596,11 +762,22 @@ export const useStore = create((set, get) => ({
   // them — no console.warn anywhere. The midpoint node inherits floorIds
   // from the wall being split (wall.floorId wrapped in an array), so
   // forced cross-floor splits still produce consistent topology.
+  // Phase W — splitWall delegates propagation to wallSplit.js
+  // (central pure planner). Failures return { error: <reason> }; the
+  // store applies the plan inside one history frame.
+  //
+  // Refusal reasons:
+  //   - 'wall-not-found' / 'wall-endpoints-missing' / 'invalid-offset'
+  //   - 'split-too-close-to-endpoint' (within SNAP_IN of n1 or n2)
+  //   - 'opening-straddles-split' (an opening's range overlaps split)
+  //   - 'junction-near-split' (existing T-junction within SNAP_IN)
+  //   - 'cross-floor-split-blocked' (opts.force overrides)
+  //
+  // On success returns { newNodeId, w1Id, w2Id, splitOffsetIn }.
   splitWall(wallId, x, y, opts = {}) {
     const state = get()
-    const { walls, nodes } = state
-    const wall = walls[wallId]
-    if (!wall) return null
+    const wall = state.walls?.[wallId]
+    if (!wall) return { error: 'wall-not-found' }
 
     const wallFloorId = wall.floorId ?? DEFAULT_FLOOR_ID
     const cur = state.currentFloorId ?? DEFAULT_FLOOR_ID
@@ -618,43 +795,401 @@ export const useStore = create((set, get) => ({
           },
         ].slice(-100),
       }))
-      return null
+      return { error: 'cross-floor-split-blocked' }
     }
 
-    const a = nodes[wall.n1], b = nodes[wall.n2]
-    if (!isOnSegment(x, y, a.x, a.y, b.x, b.y)) return null
-    if (
-      (Math.abs(x - a.x) < SNAP_IN && Math.abs(y - a.y) < SNAP_IN) ||
-      (Math.abs(x - b.x) < SNAP_IN && Math.abs(y - b.y) < SNAP_IN)
-    ) return null
+    const plan = planWallSplit(state, wallId, x, y)
+    if (!plan.ok) return { error: plan.reason, ...plan }
 
     get()._save()
     const newNodeId = uid()
     const newNodeIfc = uidIfc()
     const w1Id = uid(), w2Id = uid()
     const w1Ifc = uidIfc(), w2Ifc = uidIfc()
-    // Midpoint node inherits topology from the wall it splits. Wall is
-    // single-floor today; floorIds wraps that one floor.
     const newNodeFloorIds = [wallFloorId]
+    const { splitWorld } = plan
+
     set(s => {
+      // ── Walls ────────────────────────────────────────────────────────
       const newWalls = { ...s.walls }
       delete newWalls[wallId]
-      newWalls[w1Id] = { id: w1Id, ifcGlobalId: w1Ifc, n1: wall.n1, n2: newNodeId, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
-      newWalls[w2Id] = { id: w2Id, ifcGlobalId: w2Ifc, n1: newNodeId, n2: wall.n2, height: wall.height, thickness: wall.thickness, materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK', isPlot: wall.isPlot, isVirtual: wall.isVirtual, openings: [], hasPlinthBeam: wall.hasPlinthBeam ?? null, hasLintelBeam: wall.hasLintelBeam ?? null, hasRoofBeam: wall.hasRoofBeam ?? null, floorId: wallFloorId, classification: wall.classification ?? null, meta: wall.meta ?? null }
-      const rooms = {}
-      Object.values(s.rooms).forEach(r => {
+      // Junctions migrate: each junction node's onWallId rebases to w1Id or w2Id.
+      const w1JunctionIds = plan.w1Junctions.map(j => j.nodeId)
+      const w2JunctionIds = plan.w2Junctions.map(j => j.nodeId)
+      newWalls[w1Id] = {
+        id: w1Id, ifcGlobalId: w1Ifc, n1: wall.n1, n2: newNodeId,
+        height: wall.height, thickness: wall.thickness,
+        materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK',
+        isPlot: wall.isPlot, isVirtual: wall.isVirtual,
+        openings: plan.w1Openings,
+        hasPlinthBeam: wall.hasPlinthBeam ?? null,
+        hasLintelBeam: wall.hasLintelBeam ?? null,
+        hasRoofBeam:   wall.hasRoofBeam ?? null,
+        floorId: wallFloorId,
+        classification: wall.classification ?? null,
+        meta: wall.meta ?? null,
+        junctions: w1JunctionIds,
+        splitOrigin: 'USER_SPLIT',
+      }
+      newWalls[w2Id] = {
+        id: w2Id, ifcGlobalId: w2Ifc, n1: newNodeId, n2: wall.n2,
+        height: wall.height, thickness: wall.thickness,
+        materialKey: wall.materialKey ?? 'IS_MODULAR_BRICK',
+        isPlot: wall.isPlot, isVirtual: wall.isVirtual,
+        openings: plan.w2Openings,
+        hasPlinthBeam: wall.hasPlinthBeam ?? null,
+        hasLintelBeam: wall.hasLintelBeam ?? null,
+        hasRoofBeam:   wall.hasRoofBeam ?? null,
+        floorId: wallFloorId,
+        classification: wall.classification ?? null,
+        meta: wall.meta ?? null,
+        junctions: w2JunctionIds,
+        splitOrigin: 'USER_SPLIT',
+      }
+
+      // ── Nodes ────────────────────────────────────────────────────────
+      const newNodes = {
+        ...s.nodes,
+        [newNodeId]: {
+          id: newNodeId, ifcGlobalId: newNodeIfc,
+          x: splitWorld.x, y: splitWorld.y,
+          floorIds: newNodeFloorIds,
+          kind: 'CORNER', onWallId: null,
+        },
+      }
+      // Migrate TJUNCTION nodes' onWallId from wallId to the new sub-walls.
+      for (const j of plan.w1Junctions) {
+        const node = newNodes[j.nodeId]
+        if (node) newNodes[j.nodeId] = { ...node, onWallId: w1Id }
+      }
+      for (const j of plan.w2Junctions) {
+        const node = newNodes[j.nodeId]
+        if (node) newNodes[j.nodeId] = { ...node, onWallId: w2Id }
+      }
+
+      // ── Rooms ────────────────────────────────────────────────────────
+      const newRooms = {}
+      for (const r of Object.values(s.rooms)) {
+        if (!plan.roomsAffected.includes(r.id)) {
+          newRooms[r.id] = r
+          continue
+        }
         const idx = r.wallIds.indexOf(wallId)
-        const wallIds = idx === -1
+        const newWallIds = idx === -1
           ? r.wallIds
           : [...r.wallIds.slice(0, idx), w1Id, w2Id, ...r.wallIds.slice(idx + 1)]
-        rooms[r.id] = { ...r, wallIds }
-      })
+        // Dedup defensive — rare but possible if room.wallIds already
+        // referenced one of the new id slots somehow.
+        const uniqWallIds = Array.from(new Set(newWallIds))
+        newRooms[r.id] = { ...r, wallIds: uniqWallIds }
+      }
+
+      // ── Foundations ──────────────────────────────────────────────────
+      const newFoundations = {}
+      for (const f of Object.values(s.foundations ?? {})) {
+        if (!plan.foundationsAffected.includes(f.id)) {
+          newFoundations[f.id] = f
+          continue
+        }
+        const idx = (f.wallIds ?? []).indexOf(wallId)
+        const newFWalls = idx === -1
+          ? (f.wallIds ?? [])
+          : [...f.wallIds.slice(0, idx), w1Id, w2Id, ...f.wallIds.slice(idx + 1)]
+        const uniqFWalls = Array.from(new Set(newFWalls))
+        newFoundations[f.id] = { ...f, wallIds: uniqFWalls }
+      }
+
+      // ── MEP fixtures (5 disciplines) ─────────────────────────────────
+      function applyMepPartition(collection, partition, sideId) {
+        const next = { ...collection }
+        for (const entry of partition) {
+          const f = next[entry.fixtureId]
+          if (!f) continue
+          next[entry.fixtureId] = { ...f, wallId: sideId, wallT: entry.newWallT }
+        }
+        return next
+      }
+      const newPlumbing = applyMepPartition(applyMepPartition(
+        s.plumbingFixtures ?? {}, plan.mep.plumbingFixtures.w1, w1Id),
+        plan.mep.plumbingFixtures.w2, w2Id)
+      const newElectrical = applyMepPartition(applyMepPartition(
+        s.electricalPoints ?? {}, plan.mep.electricalPoints.w1, w1Id),
+        plan.mep.electricalPoints.w2, w2Id)
+      const newHvac = applyMepPartition(applyMepPartition(
+        s.hvacUnits ?? {}, plan.mep.hvacUnits.w1, w1Id),
+        plan.mep.hvacUnits.w2, w2Id)
+      const newFire = applyMepPartition(applyMepPartition(
+        s.fireDevices ?? {}, plan.mep.fireDevices.w1, w1Id),
+        plan.mep.fireDevices.w2, w2Id)
+      const newElv = applyMepPartition(applyMepPartition(
+        s.elvDevices ?? {}, plan.mep.elvDevices.w1, w1Id),
+        plan.mep.elvDevices.w2, w2Id)
+
       return {
-        nodes: { ...s.nodes, [newNodeId]: { id: newNodeId, ifcGlobalId: newNodeIfc, x, y, floorIds: newNodeFloorIds } },
-        walls: newWalls, rooms,
+        nodes:            newNodes,
+        walls:            newWalls,
+        rooms:            newRooms,
+        foundations:      newFoundations,
+        plumbingFixtures: newPlumbing,
+        electricalPoints: newElectrical,
+        hvacUnits:        newHvac,
+        fireDevices:      newFire,
+        elvDevices:       newElv,
       }
     })
-    return newNodeId
+
+    // Refresh nodeOrder for every affected room (recomputation uses
+    // the post-update state's expanded graph).
+    if (plan.roomsAffected.length > 0) {
+      set(s => {
+        const refreshedRooms = { ...s.rooms }
+        for (const rid of plan.roomsAffected) {
+          if (!refreshedRooms[rid]) continue
+          const order = recomputeRoomNodeOrder(s, rid)
+          refreshedRooms[rid] = { ...refreshedRooms[rid], nodeOrder: order }
+        }
+        return { rooms: refreshedRooms }
+      })
+    }
+
+    return { newNodeId, w1Id, w2Id, splitOffsetIn: plan.splitOffsetIn }
+  },
+
+  // Phase W — Manual Join tool. Inverse of explicit Split.
+  //
+  // joinWalls(w1Id, w2Id) gates via canMergeWalls; on success, the
+  // lex-smaller id survives, retains its ifcGlobalId, absorbs the
+  // partner's geometry / openings / junctions / MEP references /
+  // foundation references / room references. Surviving splitOrigin
+  // reverts to 'NONE' (merged wall is no longer split-derived).
+  //
+  // Returns:
+  //   { survivorId, removedId, wasSplit, sharedNodeId } on success
+  //   { error: <reason> } on refusal — see canMergeWalls reasons
+  joinWalls(w1Id, w2Id) {
+    const gate = canMergeWalls(get(), w1Id, w2Id)
+    if (!gate.ok) return { error: gate.reason }
+
+    const state = get()
+    const wA = state.walls[w1Id]
+    const wB = state.walls[w2Id]
+    const sharedNodeId = gate.sharedNodeId
+
+    // Survivor: lex-smaller id.
+    const survivorId = w1Id < w2Id ? w1Id : w2Id
+    const removedId  = w1Id < w2Id ? w2Id : w1Id
+    const survivor   = state.walls[survivorId]
+    const removed    = state.walls[removedId]
+    const wasSplit   = survivor.splitOrigin === 'USER_SPLIT'
+                    && removed.splitOrigin  === 'USER_SPLIT'
+
+    // Determine survivor's new endpoints.
+    // Survivor keeps its non-shared endpoint; takes partner's non-shared endpoint.
+    const survivorNonSharedEnd =
+      survivor.n1 === sharedNodeId ? survivor.n2 : survivor.n1
+    const removedNonSharedEnd =
+      removed.n1  === sharedNodeId ? removed.n2  : removed.n1
+
+    // For opening offset rebase: openings on the partner need their
+    // offsets shifted by survivor's old length (if survivor sits
+    // "before" the partner along the merged centerline).
+    const sN1 = state.nodes[survivor.n1]
+    const sN2 = state.nodes[survivor.n2]
+    const survivorLenIn = Math.hypot(sN2.x - sN1.x, sN2.y - sN1.y)
+    const survivorSharedIsN2 = (survivor.n2 === sharedNodeId)
+
+    // Rebased survivor endpoints (in canonical n1 → n2 direction
+    // matching the original survivor's direction). If sharedNodeId was
+    // survivor's n2, the merged wall extends from survivor.n1 to
+    // removedNonSharedEnd. Otherwise from removedNonSharedEnd to
+    // survivor.n2 (we flip to keep n1 < n2 in a deterministic sense).
+    // Simpler: keep survivor.n1 as the new n1; the new n2 is either
+    // survivor.n2 (if shared was n1) or removed's non-shared endpoint.
+    let newN1, newN2
+    if (survivorSharedIsN2) {
+      // survivor: A → shared, partner: shared → B → merged A → B.
+      newN1 = survivor.n1
+      newN2 = removedNonSharedEnd
+    } else {
+      // shared was survivor's n1. partner: B → shared. merged B → survivor.n2.
+      newN1 = removedNonSharedEnd
+      newN2 = survivor.n2
+    }
+
+    // Opening rebase: openings stored with offset from n1.
+    // After merge, openings on the "before-survivor" side (the side
+    // that becomes the n1 portion of merged) need offset preserved or
+    // mirrored depending on which wall's openings.
+    // Cleanest: compute each opening's WORLD-coord position, then
+    // recompute offset from new n1.
+    //
+    // For practical purposes since merged.n1 is one of (survivor.n1,
+    // removedNonSharedEnd), the survivor-openings' offsets either
+    // stay (if newN1 === survivor.n1) or shift to (survivorLenIn -
+    // (offset + width)) + removedLenIn... complicated.
+    //
+    // Use the WORLD-position approach:
+    const newN1Node = state.nodes[newN1]
+    const newN2Node = state.nodes[newN2]
+    const newDx = newN2Node.x - newN1Node.x
+    const newDy = newN2Node.y - newN1Node.y
+    const newLen2 = newDx * newDx + newDy * newDy
+    const newLenIn = Math.sqrt(newLen2)
+
+    function _rebaseOpening(op, origWall) {
+      // Compute opening's start point in world coords using origWall n1.
+      const oN1 = state.nodes[origWall.n1]
+      const oN2 = state.nodes[origWall.n2]
+      const oDx = oN2.x - oN1.x, oDy = oN2.y - oN1.y
+      const oLen = Math.hypot(oDx, oDy)
+      if (oLen === 0) return op
+      const ux = oDx / oLen, uy = oDy / oLen
+      const startX = oN1.x + ux * (op.offset ?? 0)
+      const startY = oN1.y + uy * (op.offset ?? 0)
+      // Project startX/Y onto new wall (newN1 → newN2).
+      const newOffsetIn =
+        ((startX - newN1Node.x) * newDx + (startY - newN1Node.y) * newDy) / newLenIn
+      return { ...op, offset: Math.max(0, Math.min(newLenIn, newOffsetIn)) }
+    }
+
+    const mergedOpenings = [
+      ...(survivor.openings ?? []).map(op => _rebaseOpening(op, survivor)),
+      ...(removed.openings  ?? []).map(op => _rebaseOpening(op, removed)),
+    ]
+
+    // Merge junctions: concatenate the two lists. Each junction's
+    // onWallId rebases to survivorId.
+    const mergedJunctionIds = [
+      ...(survivor.junctions ?? []),
+      ...(removed.junctions  ?? []),
+    ]
+
+    get()._save()
+    set(s => {
+      // ── Walls ──
+      const newWalls = { ...s.walls }
+      delete newWalls[removedId]
+      newWalls[survivorId] = {
+        ...survivor,
+        n1: newN1,
+        n2: newN2,
+        openings:    mergedOpenings,
+        junctions:   mergedJunctionIds,
+        splitOrigin: 'NONE',   // no longer split-derived after re-join
+      }
+
+      // ── Nodes ──
+      const newNodes = { ...s.nodes }
+      // Update junction nodes' onWallId.
+      for (const jId of mergedJunctionIds) {
+        if (newNodes[jId]) {
+          newNodes[jId] = { ...newNodes[jId], onWallId: survivorId }
+        }
+      }
+      // Delete the formerly-shared node if its degree (in the new wall set)
+      // is 0. Shared was an endpoint of two walls; after merge it's no
+      // longer either n1/n2 of any wall and is not in anyone's junctions[].
+      // A defensive check before deleting:
+      let stillReferenced = false
+      for (const w of Object.values(newWalls)) {
+        if (w.n1 === sharedNodeId || w.n2 === sharedNodeId) {
+          stillReferenced = true; break
+        }
+        if ((w.junctions ?? []).includes(sharedNodeId)) {
+          stillReferenced = true; break
+        }
+      }
+      if (!stillReferenced) {
+        delete newNodes[sharedNodeId]
+      }
+
+      // ── Rooms ──
+      const newRooms = {}
+      for (const r of Object.values(s.rooms)) {
+        const wallIds = r.wallIds ?? []
+        if (!wallIds.includes(removedId)) {
+          // Survivor reference may still exist; keep room as-is.
+          newRooms[r.id] = r
+          continue
+        }
+        // Replace removed with survivor; dedupe (survivor may already exist).
+        const replaced = wallIds.map(id => id === removedId ? survivorId : id)
+        const uniq = Array.from(new Set(replaced))
+        newRooms[r.id] = { ...r, wallIds: uniq }
+      }
+
+      // ── Foundations ──
+      const newFoundations = {}
+      for (const f of Object.values(s.foundations ?? {})) {
+        const fwids = f.wallIds ?? []
+        if (!fwids.includes(removedId)) {
+          newFoundations[f.id] = f
+          continue
+        }
+        const replaced = fwids.map(id => id === removedId ? survivorId : id)
+        const uniq = Array.from(new Set(replaced))
+        newFoundations[f.id] = { ...f, wallIds: uniq }
+      }
+
+      // ── MEP fixtures (5 disciplines) ──
+      // Any fixture referencing removedId moves to survivorId; wallT
+      // rebases via world-position recomputation.
+      function _rebaseMep(collection, origWallId) {
+        const next = { ...collection }
+        for (const f of Object.values(collection)) {
+          if (f.wallId !== origWallId) continue
+          // Compute world position via original wall.
+          const origWall = origWallId === survivorId ? survivor : removed
+          const oN1 = state.nodes[origWall.n1]
+          const oN2 = state.nodes[origWall.n2]
+          const oDx = oN2.x - oN1.x, oDy = oN2.y - oN1.y
+          const oLen = Math.hypot(oDx, oDy)
+          if (oLen === 0) continue
+          const ux = oDx / oLen, uy = oDy / oLen
+          const fx = oN1.x + ux * oLen * (f.wallT ?? 0)
+          const fy = oN1.y + uy * oLen * (f.wallT ?? 0)
+          // Project onto new wall.
+          const newT = newLenIn > 0
+            ? ((fx - newN1Node.x) * newDx + (fy - newN1Node.y) * newDy) / newLen2
+            : 0
+          next[f.id] = {
+            ...f, wallId: survivorId,
+            wallT: Math.max(0, Math.min(1, newT)),
+          }
+        }
+        return next
+      }
+      const newPlumbing = _rebaseMep(_rebaseMep(s.plumbingFixtures ?? {}, survivorId), removedId)
+      const newElectrical = _rebaseMep(_rebaseMep(s.electricalPoints ?? {}, survivorId), removedId)
+      const newHvac = _rebaseMep(_rebaseMep(s.hvacUnits ?? {}, survivorId), removedId)
+      const newFire = _rebaseMep(_rebaseMep(s.fireDevices ?? {}, survivorId), removedId)
+      const newElv = _rebaseMep(_rebaseMep(s.elvDevices ?? {}, survivorId), removedId)
+
+      return {
+        nodes:            newNodes,
+        walls:            newWalls,
+        rooms:            newRooms,
+        foundations:      newFoundations,
+        plumbingFixtures: newPlumbing,
+        electricalPoints: newElectrical,
+        hvacUnits:        newHvac,
+        fireDevices:      newFire,
+        elvDevices:       newElv,
+      }
+    })
+
+    // Refresh nodeOrder for every affected room.
+    set(s => {
+      const refreshedRooms = { ...s.rooms }
+      for (const r of Object.values(s.rooms)) {
+        if (!(r.wallIds ?? []).includes(survivorId)) continue
+        const order = recomputeRoomNodeOrder(s, r.id)
+        refreshedRooms[r.id] = { ...r, nodeOrder: order }
+      }
+      return { rooms: refreshedRooms }
+    })
+
+    return { survivorId, removedId, wasSplit, sharedNodeId }
   },
 
   togglePendingWall(wallId) {
@@ -966,7 +1501,18 @@ export const useStore = create((set, get) => ({
     // typically has identical or overlapping footprints across floors. Only
     // compare against rooms on the floor where the new room is being saved.
     const candidateFloorId = get().currentFloorId ?? DEFAULT_FLOOR_ID
-    const nodeOrder = walkPolygon(pendingWallIds, walls)
+    // Phase W — use expanded-graph nodeOrder walk so T-junction segments
+    // appear as polygon vertices when applicable. Falls back gracefully
+    // for legacy/simple rooms (no T-junctions on touched walls).
+    const dedupedPendingIds = Array.from(new Set(pendingWallIds))
+    let nodeOrder = computeNodeOrderForWallIds(get(), dedupedPendingIds, candidateFloorId)
+    // For rooms drawn via the legacy room-tool flow (togglePendingWall),
+    // the wallIds may include duplicates and may not form a single closed
+    // chain in the expanded graph. Fall back to the old walkPolygon helper
+    // when the expanded walk returns empty — preserves legacy behavior.
+    if (!nodeOrder || nodeOrder.length === 0) {
+      nodeOrder = walkPolygon(pendingWallIds, walls)
+    }
     if (nodeOrder) {
       const candidatePoly = nodeOrder.map(id => nodes[id]).filter(Boolean)
       if (candidatePoly.length >= 3) {
@@ -985,6 +1531,13 @@ export const useStore = create((set, get) => ({
     const { id, ifcGlobalId } = newEntityIds()
     const safeType = ROOM_PRESETS[type] ? type : 'OTHER'
     const floorId  = get().currentFloorId ?? DEFAULT_FLOOR_ID
+    // Phase W — stamp room.nodeOrder at create time. The authoritative
+    // source is recomputeRoomNodeOrder (runtime); this is the cache.
+    // For initial create, walkPolygon(pendingWallIds) produces the
+    // closed sequence — but we deduplicate parent wallIds first since
+    // the new model has room.wallIds as semantic-membership only.
+    const dedupedWallIds = Array.from(new Set([...get().pendingWallIds]))
+    const initialNodeOrder = nodeOrder ?? []
     set(s => ({
       rooms: {
         ...s.rooms,
@@ -992,7 +1545,8 @@ export const useStore = create((set, get) => ({
           id,
           ifcGlobalId,
           name,
-          wallIds:          [...s.pendingWallIds],
+          wallIds:          dedupedWallIds,
+          nodeOrder:        [...initialNodeOrder],
           type:             safeType,
           customType:       null,
           finishes:         getPresetFinishes(safeType),

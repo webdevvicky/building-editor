@@ -1316,6 +1316,105 @@ check('skirting height 6" persists in tileDefaults',
       s().projectSettings.tileDefaults.skirtingHeightIn === 6,
       `got ${s().projectSettings.tileDefaults.skirtingHeightIn}`)
 
+// ── Phase W — Stacked-rooms canary ──────────────────────────────────────
+// Replaces the old "two disjoint rectangles to avoid auto-split" workaround
+// with a real stacked-rooms layout. The new T-junction model handles this
+// correctly; the OLD buggy auto-split model would have produced 11 walls.
+header('7. Phase W — Stacked-rooms canary')
+
+// Fresh state for the canary.
+s().loadProject({
+  nodes: {}, walls: {}, rooms: {}, stamps: {},
+  columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {},
+  projectSettings: undefined, unit: 'inch',
+})
+
+// Three stacked rooms:
+//   Room 1 (Living, 11×7 ft): 0..132 × 0..84
+//   Room 3 (Hallway, 11×3 ft): 0..132 × 84..120
+//   Room 2 (Bedroom, 10×5 ft): 0..120 × 120..180  (narrower; T-junctions at (120, 120))
+const r1 = s().addRectangleRoom(0, 0,         11*FT, 7*FT,  { type: 'LIVING', name: 'Living' })
+const r3 = s().addRectangleRoom(0, 7*FT,      11*FT, 10*FT, { type: 'OTHER',  name: 'Hallway' })
+const r2 = s().addRectangleRoom(0, 10*FT,     10*FT, 15*FT, { type: 'BEDROOM',name: 'Bedroom' })
+
+check('Phase W canary: Room 1 created',  !!r1?.roomId && !r1?.error)
+check('Phase W canary: Room 3 created',  !!r3?.roomId && !r3?.error)
+check('Phase W canary: Room 2 created',  !!r2?.roomId && !r2?.error)
+
+const phaseWWallCount = Object.keys(s().walls).length
+const phaseWNodeCount = Object.keys(s().nodes).length
+const phaseWTjCount = Object.values(s().nodes).filter(n => n.kind === 'TJUNCTION').length
+
+check(`Phase W canary: wall count === 10 (NOT 11 — old auto-split bug gone)`,
+      phaseWWallCount === 10, `got ${phaseWWallCount}`)
+check(`Phase W canary: node count === 9 (8 CORNER + 1 TJUNCTION)`,
+      phaseWNodeCount === 9, `got ${phaseWNodeCount}`)
+check(`Phase W canary: TJUNCTION nodes === 1`,
+      phaseWTjCount === 1, `got ${phaseWTjCount}`)
+check(`Phase W canary: verifyIntegrity passes`,
+      verifyIntegrity(s()).valid,
+      `${verifyIntegrity(s()).count} issues`)
+
+// BOQ output from the canary fixture.
+const phaseWLines = getBoqLines(s(), {}, { floorId: 'F1' })
+check(`Phase W canary: getBoqLines produces non-empty output`,
+      phaseWLines.length > 0,
+      `got ${phaseWLines.length} lines`)
+
+// Scope-of-work wall count matches PARENT walls (not segments).
+const { computeScopeOfWork: _phaseWScopeOfWork } = await import('../src/boq/_scopeOfWork.js')
+const sow = _phaseWScopeOfWork(s())
+check(`Phase W canary: scopeOfWork.wallCount === 10 (parent walls)`,
+      sow.wallCount === 10, `got ${sow.wallCount}`)
+
+// Hand-computed floor area: 11×7 + 11×3 + 10×5 = 77 + 33 + 50 = 160 ft²
+const totalFloorArea = s().getTotalFlooringArea()
+check(`Phase W canary: total flooring area === 160 ft² (hand-computed)`,
+      Math.abs(totalFloorArea - 160) < 0.01,
+      `got ${totalFloorArea}`)
+
+// Derived beams: 10 parent walls × default plinth/lintel/roof active levels.
+// Check that derivation produces one beam per (parent wall × level), NOT
+// doubled by T-junctions.
+const { getDerivedWallBeams: _phaseWGetDerivedWallBeams } = await import('../src/topology/beams.js')
+const _phaseWDerivedBeams = _phaseWGetDerivedWallBeams(s())
+// Each wall may contribute 0-3 beams depending on classifyWallBeamFlags;
+// the key invariant is no SAME-wallId duplicates beyond 3 (one per level).
+const beamCountsByWall = {}
+for (const beam of _phaseWDerivedBeams) {
+  beamCountsByWall[beam.sourceWallId] = (beamCountsByWall[beam.sourceWallId] || 0) + 1
+}
+let beamMaxPerWall = 0
+for (const count of Object.values(beamCountsByWall)) {
+  if (count > beamMaxPerWall) beamMaxPerWall = count
+}
+check(`Phase W canary: derived beams ≤ 3 per parent wall (no T-junction inflation)`,
+      beamMaxPerWall <= 3, `max per wall = ${beamMaxPerWall}`)
+// And the parent wall with a T-junction still produces only one beam per level.
+const parentTjWall = Object.values(s().walls).find(w => (w.junctions ?? []).length > 0)
+const beamsForParent = _phaseWDerivedBeams.filter(b => b.sourceWallId === parentTjWall.id)
+check(`Phase W canary: parent wall with T-junction produces 1 beam per level (not doubled)`,
+      beamsForParent.length <= 3,
+      `parent wall ${parentTjWall.id} produced ${beamsForParent.length} beams`)
+
+// Per-segment classification verification.
+const { classifySegment, _resetSegmentClassifyCaches } = await import('../src/topology/segmentClassify.js')
+const { getFloorWallPerimeterGraph } = await import('../src/topology/adjacency.js')
+_resetSegmentClassifyCaches()
+const phaseWGraph = getFloorWallPerimeterGraph(s(), 'F1')
+const parentSegments = Object.values(phaseWGraph.edges)
+  .filter(e => e.wallId === parentTjWall.id)
+  .sort((a, b) => b.lengthIn - a.lengthIn)
+check(`Phase W canary: parent wall expands into 2 segments`,
+      parentSegments.length === 2,
+      `got ${parentSegments.length}`)
+const longClass = classifySegment(s(), 'F1', parentSegments[0].id)
+const shortClass = classifySegment(s(), 'F1', parentSegments[1].id)
+check(`Phase W canary: long (10ft) segment is PARTITION (shared between Room 3 and Room 2)`,
+      longClass === 'PARTITION', `got ${longClass}`)
+check(`Phase W canary: short (1ft) segment is EXTERNAL (Room 3 only)`,
+      shortClass === 'EXTERNAL', `got ${shortClass}`)
+
 // Done.
 console.log(`\nPASSED: ${passed.length}`)
 for (const p of passed) console.log(`   ${p}`)

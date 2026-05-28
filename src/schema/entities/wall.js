@@ -27,6 +27,17 @@ export const wallSchema = Object.freeze({
     hasRoofBeam:           Object.freeze({ type: 'boolean|null', required: true, default: null }),
     hasBalconyRailingEdge: Object.freeze({ type: 'boolean|null', required: true, default: null }),
     meta:                  Object.freeze({ type: 'object|null',  required: true, default: null }),
+    // Phase W — UNORDERED set of TJUNCTION node ids attached to this
+    // wall mid-span. Geometric order along the wall is derived via
+    // getOrderedWallJunctions, never stored.
+    junctions:             Object.freeze({ type: 'array',         required: true, default: () => [],
+                                            itemType: 'string' }),
+    // Phase W — provenance for explicit splits. 'USER_SPLIT' iff this
+    // wall was produced by a splitWall invocation; 'NONE' otherwise.
+    // T-junction insertion never sets 'USER_SPLIT' (wall identity
+    // is preserved across T-junctions, not split).
+    splitOrigin:           Object.freeze({ type: 'string',        required: true, default: 'NONE',
+                                            oneOf: ['NONE', 'USER_SPLIT'] }),
   }),
   invariants: Object.freeze([
     Object.freeze({

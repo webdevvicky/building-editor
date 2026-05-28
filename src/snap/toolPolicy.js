@@ -44,18 +44,23 @@ export function normalizePolicyEntry(entry) {
 }
 
 export const TOOL_SNAP_POLICY = Object.freeze({
-  // Wall drawing: prefer existing node / endpoint; fall through to grid.
-  draw:        Object.freeze(['NODE', 'WALL_ENDPOINT', 'WALL_MIDPOINT', 'GRID']),
+  // Wall drawing: prefer existing node / endpoint / T-junction;
+  // fall through to grid. Policy order at distance ties:
+  //   CORNER (NODE) > WALL_ENDPOINT > WALL_JUNCTION > WALL_MIDPOINT > GRID.
+  draw:        Object.freeze(['NODE', 'WALL_ENDPOINT', 'WALL_JUNCTION', 'WALL_MIDPOINT', 'GRID']),
 
-  // Rectangle room: corners snap to existing nodes/endpoints or grid.
-  rect_room:   Object.freeze(['NODE', 'WALL_ENDPOINT', 'GRID']),
+  // Rectangle room: corners snap to existing nodes / endpoints /
+  // T-junctions or grid. T-junctions matter for stacked-room cases
+  // where a corner of a new rect lands on an existing wall mid-span
+  // and the user expects to re-use the prior junction.
+  rect_room:   Object.freeze(['NODE', 'WALL_ENDPOINT', 'WALL_JUNCTION', 'GRID']),
 
   // Column placement: today's code attracts to nearby nodes within a
-  // 24in radius (Canvas.jsx legacy nearNode check). Preserved via a
-  // per-tool tolerance override so the same usability behavior survives
-  // without inline snap logic in Canvas.
+  // 24in radius. T-junctions also attract within 24in — columns
+  // landing near a T-junction probably want to attach.
   column:      Object.freeze([
-    Object.freeze({ id: 'NODE', toleranceIn: 24 }),
+    Object.freeze({ id: 'NODE',          toleranceIn: 24 }),
+    Object.freeze({ id: 'WALL_JUNCTION', toleranceIn: 24 }),
     'GRID',
   ]),
 
@@ -91,6 +96,12 @@ export const TOOL_SNAP_POLICY = Object.freeze({
 
   // Tools that intentionally bypass snap.
   calibrate_underlay: Object.freeze([]),
+
+  // Phase W — Manual Join tool. Clicks select a wall (identified by
+  // WALL_NEAREST → sourceId = parent wallId). Section A fuzz exercises
+  // this tool on a clean canvas; with no walls, WALL_NEAREST returns
+  // null → resolver returns raw — matching screenToWorldRaw baseline.
+  join_walls: Object.freeze(['WALL_NEAREST']),
 })
 
 _validatePolicy(TOOL_SNAP_POLICY)

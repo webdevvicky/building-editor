@@ -61,6 +61,7 @@ import {
   Grid3X3,
   Magnet,
   Frame,
+  Link,
 } from 'lucide-react'
 
 export const TOOL_CLUSTERS = Object.freeze([
@@ -74,6 +75,7 @@ export const TOOL_CLUSTERS = Object.freeze([
       { type: 'tool', toolId: 'split',       icon: Scissors,      label: 'Split wall' },
       { type: 'tool', toolId: 'room',        icon: Hexagon,       label: 'Room',           shortcut: 'R' },
       { type: 'tool', toolId: 'room_detect', icon: Frame,         label: 'Detect Room',    shortcut: 'Shift+A' },
+      { type: 'tool', toolId: 'join_walls',  icon: Link,          label: 'Join walls',     shortcut: 'J' },
     ],
   },
   {

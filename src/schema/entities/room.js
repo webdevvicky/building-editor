@@ -28,6 +28,13 @@ export const roomSchema = Object.freeze({
     floorId:         Object.freeze({ type: 'ref',              required: true, default: 'F1', refTarget: 'floor' }),
     classification:  Object.freeze({ type: 'string|null',      required: true, default: null }),
     meta:            Object.freeze({ type: 'object|null',      required: true, default: null }),
+    // Phase W — DERIVED SNAPSHOT of the closed polygon's node sequence.
+    // Authoritative source is runtime recomputation via
+    // recomputeRoomNodeOrder; this field is a cache for IDB round-trip
+    // performance and for consumers that need polygon-walk geometry.
+    // Refreshed whenever the room's wall topology changes.
+    nodeOrder:       Object.freeze({ type: 'array',            required: true, default: () => [],
+                                      itemType: 'string', refTarget: 'node' }),
   }),
   invariants: Object.freeze([
     Object.freeze({

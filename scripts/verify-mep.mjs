@@ -121,9 +121,9 @@ reset()
   const wallId = Object.values(s().walls).find(w =>
     (w.n1 === W && w.n2 === E) || (w.n1 === E && w.n2 === W)
   )?.id
-  // Split midway
+  // Split midway. Phase W: splitWall returns { newNodeId, w1Id, w2Id, splitOffsetIn }.
   const splitResult = s().splitWall(wallId, 10 * FT, 0, { force: true })
-  const midId = splitResult?.nodeId ?? splitResult  // splitWall may return id directly
+  const midId = splitResult?.newNodeId
 
   // After split: 2 walls (W→mid, mid→E). Now add a branch wall going north.
   const N = s().getOrCreateNode(10 * FT, 10 * FT)

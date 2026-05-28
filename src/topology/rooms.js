@@ -72,19 +72,36 @@ export function buildPlotPolygon(walls, nodes) {
 // if the room is malformed (missing walls, doesn't close).
 export function getRoomPolygon(state, roomId) {
   const room = state.rooms[roomId]
-  if (!room || room.wallIds.length < 3) return null
-  const nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  if (!room) return null
+  // Phase W — prefer room.nodeOrder (authoritative, T-junction-aware).
+  let nodeOrder = (Array.isArray(room.nodeOrder) && room.nodeOrder.length >= 3)
+    ? room.nodeOrder
+    : null
+  if (!nodeOrder) {
+    if (!room.wallIds || room.wallIds.length < 3) return null
+    nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  }
   if (!nodeOrder) return null
   return nodeOrder.map(id => state.nodes[id]).filter(Boolean)
 }
 
 // Returns room floor area in ft². Uses shoelace on the walked polygon.
+//
+// Phase W — prefers room.nodeOrder (authoritative, T-junction-aware).
+// Falls back to walkPolygonNodeOrder for legacy fixtures without nodeOrder.
 export function getRoomArea(state, roomId) {
   const room = state.rooms[roomId]
-  if (!room || room.wallIds.length < 2) return 0
-  const nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  if (!room) return 0
+  let nodeOrder = (Array.isArray(room.nodeOrder) && room.nodeOrder.length >= 3)
+    ? room.nodeOrder
+    : null
+  if (!nodeOrder) {
+    if (!room.wallIds || room.wallIds.length < 2) return 0
+    nodeOrder = walkPolygonNodeOrder(room.wallIds, state.walls)
+  }
   if (!nodeOrder || nodeOrder.length < 3) return 0
   const pts = nodeOrder.map(id => state.nodes[id]).filter(Boolean)
+  if (pts.length < 3) return 0
   let area = 0
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length
@@ -104,9 +121,19 @@ export function getRoomWallArea(state, roomId) {
 }
 
 // Pure topology: walls exist + form a closed loop. No overlap check.
+// Phase W: prefers room.nodeOrder (authoritative). Falls back to
+// walkPolygonNodeOrder for legacy fixtures without nodeOrder.
 export function isRoomStructurallyValid(state, roomId) {
   const room = state.rooms[roomId]
-  if (!room || room.wallIds.length < 3) return false
+  if (!room) return false
+  if (Array.isArray(room.nodeOrder) && room.nodeOrder.length >= 3) {
+    // Every nodeOrder entry must reference an existing node.
+    for (const nid of room.nodeOrder) {
+      if (!state.nodes?.[nid]) return false
+    }
+    return true
+  }
+  if (!room.wallIds || room.wallIds.length < 3) return false
   return walkPolygonNodeOrder(room.wallIds, state.walls) !== null
 }
 
