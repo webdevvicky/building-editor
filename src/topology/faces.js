@@ -102,6 +102,14 @@ function _enumerateUncached(state, graph) {
   // Phase W: edgeKey discipline. adjacency now stores edgeKey strings;
   // each edgeKey identifies a unique segment. Multiple segments can
   // share a parent wallId. Filter eligibility by parent wallId's flags.
+  //
+  // Bug A fix (2026-05-28): virtual walls are NOW eligible face boundaries.
+  // The graph is built in mode='topological' (see enumerateFloorFaces),
+  // so virtual walls appear as edges. A closed loop that includes a
+  // virtual wall must form a face so room detection works on
+  // partially-virtual room boundaries (LIVING/DINING open boundary,
+  // etc.). Quantity engines continue to filter wall.isVirtual locally,
+  // so virtual-wall faces never leak into BOQ totals.
   function isEdgeEligible(edgeKey) {
     const edge = gEdges?.[edgeKey]
     if (!edge) return false
@@ -302,7 +310,10 @@ function _enumerateUncached(state, graph) {
 
 export function enumerateFloorFaces(state, floorId) {
   const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
-  const graph = getFloorWallPerimeterGraph(state, fid)
+  // Bug A fix (2026-05-28): topological graph includes virtual walls so
+  // partially-virtual room boundaries close as faces. Separate cache
+  // cell from MEP/physical callers — see adjacency.js.
+  const graph = getFloorWallPerimeterGraph(state, fid, { mode: 'topological' })
   const cell = _faceCells.get(fid)
   if (cell && cell.graphRef === graph) return cell.faces
   const { faces, byEdgeSide } = _enumerateUncached(state, graph)
@@ -318,10 +329,18 @@ export function enumerateFloorFaces(state, floorId) {
 
 // Find the face on the side of `clickPoint` relative to `wallId`. Returns
 // null if the wall is dangling (no enclosing face on the chosen side) OR
-// the wall is ineligible (virtual / plot). Uses the per-floor hover cache.
+// the wall is ineligible (plot).
+//
+// Bug A fix (2026-05-28): virtual walls are eligible click targets.
+// They close faces in the topological graph; clicking a virtual wall
+// detects the face on the cursor side, same as any physical wall.
+// Plot walls remain ineligible — clicking the site boundary should not
+// create an "exterior room."
+//
+// Uses the per-floor hover cache.
 export function findFaceContainingEdge(state, wallId, clickPoint) {
   const wall = state.walls?.[wallId]
-  if (!wall || wall.isVirtual || wall.isPlot) return null
+  if (!wall || wall.isPlot) return null
   const fid = wall.floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
   enumerateFloorFaces(state, fid)   // ensure cache populated
   const cell = _faceCells.get(fid)

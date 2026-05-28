@@ -216,6 +216,8 @@ async function handleDelete() {
     entityId = s.selectedWallId
     entityLabel = 'wall'
     deleteFn = () => useStore.getState().deleteWall?.(entityId)
+    // Return value carries { purgedRoomIds, purgedRoomNames } so the
+    // toast below can upgrade to persistent when rooms went with it.
   } else if (s.selectedRoomId) {
     entityType = 'room'
     entityId = s.selectedRoomId
@@ -273,8 +275,13 @@ async function handleDelete() {
     const ids = [...s.selectedWallIds]
     deleteFn = () => {
       const del = useStore.getState().deleteWall
-      if (!del) return
-      ids.forEach((id) => del(id))
+      if (!del) return { purgedRoomNames: [] }
+      const acc = []
+      for (const id of ids) {
+        const r = del(id)
+        if (r && Array.isArray(r.purgedRoomNames)) acc.push(...r.purgedRoomNames)
+      }
+      return { purgedRoomNames: acc }
     }
   }
 
@@ -287,13 +294,30 @@ async function handleDelete() {
   })
   if (!ok) return
 
-  deleteFn()
+  const result = deleteFn()
+  const purgedRoomNames = Array.isArray(result?.purgedRoomNames) ? result.purgedRoomNames : []
 
-  toast.action(`Deleted ${entityLabel}.`, {
-    label: 'Undo',
-    onClick: () => useStore.getState().undo?.(),
-    duration: 5000,
-  })
+  if (purgedRoomNames.length > 0) {
+    // Persistent (sticky) toast — the consequence (lost room + name/type/
+    // finishes/MEP customization) is bigger than a plain wall delete.
+    // Single Undo restores both the wall and the purged rooms atomically.
+    const list = purgedRoomNames.map(n => `"${n}"`).join(', ')
+    const roomWord = purgedRoomNames.length === 1 ? 'room' : 'rooms'
+    toast.action(
+      `Deleted ${entityLabel} — also removed ${purgedRoomNames.length} ${roomWord}: ${list}.`,
+      {
+        label: 'Undo',
+        onClick: () => useStore.getState().undo?.(),
+        duration: null,
+      }
+    )
+  } else {
+    toast.action(`Deleted ${entityLabel}.`, {
+      label: 'Undo',
+      onClick: () => useStore.getState().undo?.(),
+      duration: 5000,
+    })
+  }
 }
 
 function handleSave() {

@@ -598,6 +598,17 @@ export const useStore = create((set, get) => ({
   //   - Refuse the delete if any junction is in ANOTHER wall's junctions[]
   //     (stale ownership corruption) — flag as validationEvent.
   //   - room.nodeOrder refreshed for every room that referenced this wall.
+  //
+  // Bug B fix (2026-05-28): rooms whose closure depended on the deleted
+  // wall are AUTO-PURGED, atomic with the wall removal. Each affected
+  // room is re-validated via isRoomStructurallyValid against the
+  // post-deletion state; rooms that fail are removed from state.rooms
+  // and an `room_orphaned_by_wall_delete` validationEvent is pushed.
+  // The whole operation runs under a single _save() snapshot so undo
+  // restores both the wall AND the purged rooms atomically. The action
+  // returns { ok, purgedRoomIds, purgedRoomNames } so UI callers can
+  // upgrade their wall-delete toast to a persistent one when rooms
+  // were affected.
   deleteWall(wallId) {
     const state = get()
     const wall = state.walls?.[wallId]
@@ -631,6 +642,13 @@ export const useStore = create((set, get) => ({
       return { error: 'junction-stale-ownership', corrupted }
     }
 
+    // Collect rooms that reference this wall BEFORE mutation so we can
+    // re-validate them after the strip + nodeOrder recompute pass.
+    const affectedRoomIds = []
+    for (const r of Object.values(state.rooms ?? {})) {
+      if ((r.wallIds ?? []).includes(wallId)) affectedRoomIds.push(r.id)
+    }
+
     get()._save()
     set(s => {
       const walls = { ...s.walls }
@@ -658,11 +676,7 @@ export const useStore = create((set, get) => ({
 
       const nodes = removeOrphanNodes(newNodes, walls)
       const rooms = {}
-      const affectedRoomIds = []
       Object.values(s.rooms).forEach(r => {
-        if ((r.wallIds ?? []).includes(wallId)) {
-          affectedRoomIds.push(r.id)
-        }
         rooms[r.id] = { ...r, wallIds: (r.wallIds ?? []).filter(id => id !== wallId) }
       })
       const clearOpening = s.selectedOpening?.wallId === wallId
@@ -673,23 +687,56 @@ export const useStore = create((set, get) => ({
       }
     })
 
-    // Refresh nodeOrder for every affected room.
-    const affectedRoomIds = []
-    for (const r of Object.values(state.rooms ?? {})) {
-      if ((r.wallIds ?? []).includes(wallId)) affectedRoomIds.push(r.id)
-    }
+    // Refresh nodeOrder for every affected room AND purge those whose
+    // closure broke. Atomic within this single set() — undo restores
+    // both the wall and any purged rooms because _save() above captured
+    // the pre-mutation snapshot.
+    const purgedRoomIds = []
+    const purgedRoomNames = []
     if (affectedRoomIds.length > 0) {
       set(s => {
         const refreshed = { ...s.rooms }
+        const purgeEvents = []
         for (const rid of affectedRoomIds) {
-          if (!refreshed[rid]) continue
+          const room = refreshed[rid]
+          if (!room) continue
           const order = recomputeRoomNodeOrder(s, rid)
-          refreshed[rid] = { ...refreshed[rid], nodeOrder: order }
+          // Build a candidate room reflecting the new nodeOrder so the
+          // canonical isRoomStructurallyValid call sees the post-refresh
+          // state without mutating store before validation.
+          const candidate = { ...room, nodeOrder: order }
+          const probeState = { ...s, rooms: { ...refreshed, [rid]: candidate } }
+          if (topoIsRoomStructurallyValid(probeState, rid)) {
+            refreshed[rid] = candidate
+            continue
+          }
+          // Orphan — closure broken. Purge.
+          purgedRoomIds.push(rid)
+          purgedRoomNames.push(room.name || 'Untitled')
+          purgeEvents.push({
+            ruleId:     'room_orphaned_by_wall_delete',
+            severity:   'warning',
+            category:   'topology',
+            entityType: 'room',
+            entityId:   rid,
+            message:    `Room "${room.name || 'Untitled'}" lost closure when wall ${wallId} was deleted; auto-removed.`,
+            meta:       { deletedWallId: wallId, roomName: room.name ?? null },
+          })
+          delete refreshed[rid]
         }
-        return { rooms: refreshed }
+        const out = { rooms: refreshed }
+        if (purgeEvents.length > 0) {
+          out.validationEvents = [
+            ...(s.validationEvents ?? []),
+            ...purgeEvents,
+          ].slice(-100)
+        }
+        // Clear room-related selection state when its target was purged.
+        if (purgedRoomIds.includes(s.selectedRoomId)) out.selectedRoomId = null
+        return out
       })
     }
-    return { ok: true }
+    return { ok: true, purgedRoomIds, purgedRoomNames }
   },
 
   selectWall(wallId) {

@@ -131,8 +131,18 @@ export default function OpeningPanel() {
           variant="danger"
           size="sm"
           onClick={() => {
-            deleteWall(selectedWallId)
-            toast.action('Wall deleted.', { label: 'Undo', onClick: () => undo(), duration: 5000 })
+            const r = deleteWall(selectedWallId)
+            const purged = Array.isArray(r?.purgedRoomNames) ? r.purgedRoomNames : []
+            if (purged.length > 0) {
+              const list = purged.map(n => `"${n}"`).join(', ')
+              const roomWord = purged.length === 1 ? 'room' : 'rooms'
+              toast.action(
+                `Wall deleted — also removed ${purged.length} ${roomWord}: ${list}.`,
+                { label: 'Undo', onClick: () => undo(), duration: null }
+              )
+            } else {
+              toast.action('Wall deleted.', { label: 'Undo', onClick: () => undo(), duration: 5000 })
+            }
           }}
         >
           Delete wall

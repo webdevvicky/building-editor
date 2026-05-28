@@ -100,6 +100,29 @@ export function computeNodeOrderForWallIds(state, wallIds, floorId) {
  *
  * NEVER infers ordering from room.wallIds; delegates to
  * computeNodeOrderForWallIds which uses the expanded graph only.
+ *
+ * EMPTY-RETURN CONTRACT (Bug B, 2026-05-28)
+ *   When closure fails this function returns the empty array `[]`.
+ *   Consumers MUST interpret an empty result as "this room no longer
+ *   has a closed polygon" and act on it explicitly:
+ *
+ *     - `deleteWall` is the SOLE site that converts an empty result
+ *       into a destructive purge (auto-removes the room from
+ *       `state.rooms`, emits a `room_orphaned_by_wall_delete`
+ *       validationEvent, and reports the purge to the UI caller for
+ *       the persistent-toast hint).
+ *
+ *     - Every OTHER consumer (saveRoom, splitWall, joinWalls, future
+ *       endpoint-drag etc.) MUST NOT silently store `[]` and leave
+ *       the room visible — that produces ghost rooms that render at
+ *       garbage centroids and break `isRoomStructurallyValid` /
+ *       `verifyIntegrity` downstream. Either:
+ *         (a) refuse the operation that would orphan the room, OR
+ *         (b) plumb the orphan back to a caller that performs the
+ *             explicit purge.
+ *
+ *   This contract makes `[]` the universal "I cannot recover ordering"
+ *   sentinel without forcing this helper to know about purge policy.
  */
 export function recomputeRoomNodeOrder(state, roomId) {
   const room = state.rooms?.[roomId]

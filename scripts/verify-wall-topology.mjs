@@ -713,6 +713,184 @@ reset()
      Object.values(f2Graph.edges).every(e => e.wallId !== wF1))
 }
 
+// ── Section I — deleteWall room cascade (Bug B) ────────────────────────
+
+header('Section I — deleteWall room cascade (Bug B fix)')
+
+// I.1 — Build a closed 4-wall room, delete a boundary wall, assert
+// the room is purged + validationEvent emitted + integrity valid +
+// undo restores both atomically.
+{
+  reset()
+  addWallAt(0,     0,      10*FT, 0)
+  addWallAt(10*FT, 0,      10*FT, 10*FT)
+  addWallAt(10*FT, 10*FT,  0,     10*FT)
+  addWallAt(0,     10*FT,  0,     0)
+
+  // Detect + create the face.
+  const faces = (await import('../src/topology/faces.js')).enumerateFloorFaces(s(), 'F1')
+  ok('I.1a 4-wall closed loop detects 1 face', faces.length === 1)
+  s().createRoomFromFace(faces[0], { type: 'TOILET' })
+  ok('I.1b Room created', Object.keys(s().rooms).length === 1)
+  const roomIdBefore = Object.keys(s().rooms)[0]
+  const wallsBefore  = { ...s().walls }
+  const wallCountBefore = Object.keys(wallsBefore).length
+  ok('I.1c verifyIntegrity valid before delete', verifyIntegrity(s()).valid)
+
+  // Pick the top wall to delete (y=0 → y=0; both endpoints at y=0).
+  const topWall = Object.values(s().walls).find(w => {
+    const a = s().nodes[w.n1], b = s().nodes[w.n2]
+    return a.y === 0 && b.y === 0
+  })
+  ok('I.1d found top wall to delete', !!topWall)
+
+  const delResult = s().deleteWall(topWall.id)
+  ok('I.1e deleteWall ok=true', delResult?.ok === true)
+  ok('I.1f deleteWall purged exactly 1 room',
+     delResult?.purgedRoomIds?.length === 1,
+     `purged=${JSON.stringify(delResult?.purgedRoomIds)}`)
+  ok('I.1g purgedRoomIds[0] matches the room id',
+     delResult?.purgedRoomIds?.[0] === roomIdBefore)
+  ok('I.1h wall removed from state.walls',
+     !s().walls[topWall.id] && Object.keys(s().walls).length === wallCountBefore - 1)
+  ok('I.1i room removed from state.rooms',
+     Object.keys(s().rooms).length === 0)
+  ok('I.1j verifyIntegrity remains valid after purge',
+     verifyIntegrity(s()).valid)
+
+  // validationEvent surfaced.
+  const events = s().validationEvents ?? []
+  const purgeEvent = events.find(e => e.ruleId === 'room_orphaned_by_wall_delete' && e.entityId === roomIdBefore)
+  ok('I.1k validationEvent room_orphaned_by_wall_delete emitted', !!purgeEvent)
+  ok('I.1l validationEvent severity=warning, category=topology',
+     purgeEvent?.severity === 'warning' && purgeEvent?.category === 'topology')
+  ok('I.1m validationEvent.meta.deletedWallId references the deleted wall',
+     purgeEvent?.meta?.deletedWallId === topWall.id)
+
+  // Undo atomicity: one snapshot restores both wall and room.
+  s().undo()
+  ok('I.1n undo restores the wall',
+     !!s().walls[topWall.id] && Object.keys(s().walls).length === wallCountBefore)
+  ok('I.1o undo restores the room',
+     !!s().rooms[roomIdBefore] && Object.keys(s().rooms).length === 1)
+  ok('I.1p verifyIntegrity valid after undo', verifyIntegrity(s()).valid)
+}
+
+// ── Section J — Shared-wall multi-room delete (Bug B edge case) ────────
+
+header('Section J — Shared-wall multi-room delete (Bug B edge case)')
+
+// J.1 — Two adjacent rooms share ONE wall. Delete a wall that's only in
+// ROOM A → only Room A should purge; Room B survives with its closure
+// intact. This is the no-over-purge edge case.
+{
+  reset()
+  // Room A: 0..10 horizontal, 0..10 vertical (left half)
+  // Room B: 10..20 horizontal, 0..10 vertical (right half)
+  // Shared wall: x=10, y=0..10
+  //
+  // Walls:
+  //   leftA:    (0,0)   → (0,10)
+  //   topA:     (0,10)  → (10,10)
+  //   shared:   (10,0)  → (10,10)
+  //   bottomA:  (0,0)   → (10,0)
+  //   topB:     (10,10) → (20,10)
+  //   rightB:   (20,0)  → (20,10)
+  //   bottomB:  (10,0)  → (20,0)
+  addWallAt(0,    0,    0,    10*FT)
+  addWallAt(0,    10*FT, 10*FT, 10*FT)
+  const sharedW = addWallAt(10*FT, 0, 10*FT, 10*FT)
+  addWallAt(0,    0,    10*FT, 0)
+  addWallAt(10*FT, 10*FT, 20*FT, 10*FT)
+  addWallAt(20*FT, 0,    20*FT, 10*FT)
+  addWallAt(10*FT, 0,    20*FT, 0)
+
+  _resetFaceCaches()
+  const faces = (await import('../src/topology/faces.js')).enumerateFloorFaces(s(), 'F1')
+  ok('J.1a two adjacent rooms detect 2 faces', faces.length === 2)
+
+  // Sort faces by centroid.x so we deterministically create A (left) then B (right).
+  const ordered = [...faces].sort((a, b) => a.centroid.x - b.centroid.x)
+  s().createRoomFromFace(ordered[0], { type: 'BEDROOM' })
+  s().createRoomFromFace(ordered[1], { type: 'BEDROOM' })
+  ok('J.1b two rooms created', Object.keys(s().rooms).length === 2)
+  ok('J.1c verifyIntegrity valid', verifyIntegrity(s()).valid)
+
+  const roomA = Object.values(s().rooms).find(r => !r.wallIds.some(wid => {
+    const n1 = s().nodes[s().walls[wid].n1]
+    const n2 = s().nodes[s().walls[wid].n2]
+    return n1.x === 20*FT || n2.x === 20*FT
+  }))
+  const roomB = Object.values(s().rooms).find(r => r.id !== roomA.id)
+  ok('J.1d identified room A (left) and room B (right)', !!roomA && !!roomB)
+  const roomBwallIdsBefore = [...roomB.wallIds].sort()
+
+  // Find the LEFT wall (in roomA only, NOT in shared).
+  const leftA = Object.values(s().walls).find(w => {
+    const a = s().nodes[w.n1], b = s().nodes[w.n2]
+    return a.x === 0 && b.x === 0
+  })
+  ok('J.1e located leftA wall', !!leftA)
+  ok('J.1f leftA is in roomA.wallIds, NOT in roomB.wallIds',
+     roomA.wallIds.includes(leftA.id) && !roomB.wallIds.includes(leftA.id))
+
+  const r1 = s().deleteWall(leftA.id)
+  ok('J.1g deleteWall(leftA) reports exactly 1 purged room',
+     r1?.purgedRoomIds?.length === 1)
+  ok('J.1h purgedRoomIds is roomA, not roomB',
+     r1?.purgedRoomIds?.[0] === roomA.id)
+  ok('J.1i state.rooms still contains roomB (NOT over-purged)',
+     !!s().rooms[roomB.id])
+  ok('J.1j state.rooms does NOT contain roomA',
+     !s().rooms[roomA.id])
+  // Room B's wallIds remain intact (leftA was never a member of B).
+  const roomBwallIdsAfter = [...(s().rooms[roomB.id].wallIds ?? [])].sort()
+  ok('J.1k roomB.wallIds unchanged (leftA was not a member)',
+     JSON.stringify(roomBwallIdsBefore) === JSON.stringify(roomBwallIdsAfter),
+     `before=${JSON.stringify(roomBwallIdsBefore)} after=${JSON.stringify(roomBwallIdsAfter)}`)
+  ok('J.1l roomB still structurally valid',
+     (await import('../src/topology/rooms.js')).isRoomStructurallyValid(s(), roomB.id))
+  ok('J.1m verifyIntegrity valid (only invalid rooms purged)',
+     verifyIntegrity(s()).valid)
+}
+
+// J.2 — Delete the SHARED wall. Both rooms lose closure → both purge.
+{
+  reset()
+  addWallAt(0,    0,    0,    10*FT)
+  addWallAt(0,    10*FT, 10*FT, 10*FT)
+  const sharedW = addWallAt(10*FT, 0, 10*FT, 10*FT)
+  addWallAt(0,    0,    10*FT, 0)
+  addWallAt(10*FT, 10*FT, 20*FT, 10*FT)
+  addWallAt(20*FT, 0,    20*FT, 10*FT)
+  addWallAt(10*FT, 0,    20*FT, 0)
+
+  _resetFaceCaches()
+  const faces = (await import('../src/topology/faces.js')).enumerateFloorFaces(s(), 'F1')
+  const ordered = [...faces].sort((a, b) => a.centroid.x - b.centroid.x)
+  s().createRoomFromFace(ordered[0], { type: 'BEDROOM' })
+  s().createRoomFromFace(ordered[1], { type: 'BEDROOM' })
+  ok('J.2a two rooms created', Object.keys(s().rooms).length === 2)
+
+  const r2 = s().deleteWall(sharedW)
+  ok('J.2b deleteWall(shared) reports 2 purged rooms',
+     r2?.purgedRoomIds?.length === 2,
+     `purged=${JSON.stringify(r2?.purgedRoomIds)}`)
+  ok('J.2c state.rooms is empty (both lost closure)',
+     Object.keys(s().rooms).length === 0)
+  ok('J.2d verifyIntegrity valid after dual purge',
+     verifyIntegrity(s()).valid)
+
+  // Undo restores everything.
+  s().undo()
+  ok('J.2e undo restores both rooms',
+     Object.keys(s().rooms).length === 2)
+  ok('J.2f undo restores the shared wall',
+     !!s().walls[sharedW])
+  ok('J.2g verifyIntegrity valid after undo',
+     verifyIntegrity(s()).valid)
+}
+
 // ── Summary ────────────────────────────────────────────────────────────
 
 console.log('\n' + '═'.repeat(70))

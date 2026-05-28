@@ -17,12 +17,15 @@ const DEFAULT_FLOOR_ID = 'F1'
 const _adjacencyMemo    = createMemo()
 const _connectivityMemo = createMemo()
 
-// Per-floor memo cells for the wall-perimeter graph. One cell per floorId.
-// Cell invalidates when state.walls or state.nodes reference changes —
-// which Zustand does on every store mutation. Multi-cell because the
-// function takes a floorId parameter; createMemo() is single-cell.
-const _floorWallPerimeterCells = new Map()
-const _roomWallPerimeterCells  = new Map()
+// Per-floor memo cells for the wall-perimeter graph. One cell per
+// (floorId, mode). Cell invalidates when state.walls or state.nodes
+// reference changes — which Zustand does on every store mutation.
+// Two cache Maps because 'physical' and 'topological' must not poison
+// each other: a MEP routing caller (physical) and a face-detect caller
+// (topological) can interleave in the same session.
+const _floorWallPerimeterCellsPhysical    = new Map()
+const _floorWallPerimeterCellsTopological = new Map()
+const _roomWallPerimeterCells             = new Map()
 
 // Returns string[] of wallIds that appear in BOTH wallIdsA and wallIdsB.
 // Pure helper. Most callers go through getRoomsBorderingRoom or the graph
@@ -127,8 +130,11 @@ export function getRoomNeighbourThroughDoor(state, roomId, openingId) {
 //
 // Invariants:
 //   - Only walls with (floorId ?? 'F1') === floorId are included.
-//   - Virtual walls (w.isVirtual) are excluded — they're not physical paths.
-//   - Plot walls (w.isPlot) are INCLUDED — site-boundary walls are routable.
+//   - Virtual walls (w.isVirtual): excluded when mode='physical' (default —
+//     they're not physical paths); INCLUDED when mode='topological' so
+//     room face enumeration sees them as eligible boundaries.
+//   - Plot walls (w.isPlot) are INCLUDED in BOTH modes — site-boundary
+//     walls are routable; face enumeration rejects them at face-time.
 //   - Only nodes that are endpoints of at least one included wall appear.
 //   - Edges are inserted in deterministic order (sorted by wall.id) so
 //     downstream consumers can produce stable hashes.
@@ -140,7 +146,11 @@ export function getRoomNeighbourThroughDoor(state, roomId, openingId) {
 //     points to both via the appropriate wallIds. No special handling.
 //
 // Memoization:
-//   - Per-floor cache in _floorWallPerimeterCells (Map<floorId, cell>).
+//   - TWO per-floor caches (one per mode):
+//     _floorWallPerimeterCellsPhysical, _floorWallPerimeterCellsTopological.
+//     Cache cells are NEVER shared across modes — a physical caller and a
+//     topological caller in the same session each get their own cell so
+//     virtual-wall edges can't leak from one into the other.
 //   - Cell invalidates when state.walls OR state.nodes reference changes
 //     (Zustand replaces both on every mutation), forcing a recompute.
 //   - Result reference is stable within a memoized window so React/Zustand
@@ -155,11 +165,24 @@ export function getRoomNeighbourThroughDoor(state, roomId, openingId) {
 //
 // Pre-Phase-W walls (no junctions / junctions=[]) produce exactly one
 // edge per wall — backward-compatible by construction.
-function buildFloorWallPerimeterGraph(walls, nodes, floorId) {
+//
+// Mode (Bug A fix, 2026-05-28):
+//   'physical'    — excludes wall.isVirtual. The graph models physical
+//                   paths only: MEP routing, snap targets, segment
+//                   classification, every consumer that cares about
+//                   real material. This is the default — every existing
+//                   caller stays on this path.
+//   'topological' — includes wall.isVirtual. Virtual walls participate
+//                   in face enumeration so closed loops that include a
+//                   virtual boundary detect as rooms. Quantity engines
+//                   continue to filter isVirtual locally; including
+//                   virtual walls here does not leak into BOQ totals.
+function buildFloorWallPerimeterGraph(walls, nodes, floorId, mode) {
+  const includeVirtual = mode === 'topological'
   // First pass: collect floor-scoped walls. Sort by id for determinism.
   const floorWalls = []
   for (const w of Object.values(walls)) {
-    if (w.isVirtual) continue
+    if (!includeVirtual && w.isVirtual) continue
     if ((w.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
     floorWalls.push(w)
   }
@@ -276,14 +299,28 @@ export function findExpandedEdge(state, fromNodeId, toNodeId) {
   return graph.edges[edgeKey] ?? null
 }
 
-export function getFloorWallPerimeterGraph(state, floorId) {
+// Default mode is 'physical' — preserves byte-identical behavior for
+// every existing caller (MEP routing, snap, segmentClassify, etc.).
+// Face enumeration opts into 'topological' so virtual-wall boundaries
+// close room faces.
+//
+// Backward-compatible signature: callers passing just (state, floorId)
+// still work and get the physical graph.
+export function getFloorWallPerimeterGraph(state, floorId, opts = {}) {
+  const mode = opts.mode ?? 'physical'
+  if (mode !== 'physical' && mode !== 'topological') {
+    throw new Error(`getFloorWallPerimeterGraph: invalid mode "${mode}" (expected 'physical' | 'topological')`)
+  }
   const fid = floorId ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
   const walls = state.walls
   const nodes = state.nodes
-  const cell = _floorWallPerimeterCells.get(fid)
+  const cells = mode === 'topological'
+    ? _floorWallPerimeterCellsTopological
+    : _floorWallPerimeterCellsPhysical
+  const cell = cells.get(fid)
   if (cell && cell.walls === walls && cell.nodes === nodes) return cell.result
-  const result = buildFloorWallPerimeterGraph(walls, nodes, fid)
-  _floorWallPerimeterCells.set(fid, { walls, nodes, result })
+  const result = buildFloorWallPerimeterGraph(walls, nodes, fid, mode)
+  cells.set(fid, { walls, nodes, result })
   return result
 }
 

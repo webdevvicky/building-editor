@@ -2175,6 +2175,72 @@ header('56. Phase 4 Tier-2 Item 24 — HVAC pairing setter + provenance')
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Bug A regression seatbelt — MEP routing graph excludes virtual walls
+// ─────────────────────────────────────────────────────────────────────
+header('Bug A regression — physical mode default excludes virtual walls')
+reset()
+{
+  const SW = s().getOrCreateNode(0, 0)
+  const SE = s().getOrCreateNode(10 * FT, 0)
+  const NE = s().getOrCreateNode(10 * FT, 10 * FT)
+  const NW = s().getOrCreateNode(0, 10 * FT)
+  s().addWall(SW, SE); s().addWall(SE, NE); s().addWall(NE, NW); s().addWall(NW, SW)
+
+  // Flag the SW→SE wall as virtual.
+  const virtWall = Object.values(s().walls).find(
+    w => (w.n1 === SW && w.n2 === SE) || (w.n1 === SE && w.n2 === SW)
+  )
+  s().setWallIsVirtual(virtWall.id, true)
+
+  // Default mode = 'physical'. MEP routing consumers call WITHOUT an opts
+  // argument; the virtual wall must NOT appear in the graph.
+  const physGraph = getFloorWallPerimeterGraph(s(), 'F1')
+  const physWallIds = new Set(Object.values(physGraph.edges).map(e => e.wallId))
+  ok('Bug A — physical (default) graph excludes the virtual wall',
+    !physWallIds.has(virtWall.id),
+    `wallIds=${[...physWallIds].join(',')}`)
+  ok('Bug A — physical graph has 3 edges (4 walls minus 1 virtual)',
+    Object.keys(physGraph.edges).length === 3,
+    `edges=${Object.keys(physGraph.edges).length}`)
+
+  // Explicit opts.mode='physical' matches default.
+  const physExplicit = getFloorWallPerimeterGraph(s(), 'F1', { mode: 'physical' })
+  ok('Bug A — explicit mode:physical matches default (same ref via memo)',
+    physExplicit === physGraph)
+
+  // mode='topological' INCLUDES the virtual wall — the face-detect path.
+  const topoGraph = getFloorWallPerimeterGraph(s(), 'F1', { mode: 'topological' })
+  const topoWallIds = new Set(Object.values(topoGraph.edges).map(e => e.wallId))
+  ok('Bug A — topological graph includes the virtual wall',
+    topoWallIds.has(virtWall.id),
+    `wallIds=${[...topoWallIds].join(',')}`)
+  ok('Bug A — topological graph has 4 edges (all walls)',
+    Object.keys(topoGraph.edges).length === 4,
+    `edges=${Object.keys(topoGraph.edges).length}`)
+
+  // Cache isolation — modes have SEPARATE cells; physical and topological
+  // results are distinct objects.
+  ok('Bug A — physical and topological graphs are distinct references',
+    physGraph !== topoGraph)
+
+  // Repeat calls re-use each mode's cell (no cross-pollination).
+  const physAgain = getFloorWallPerimeterGraph(s(), 'F1', { mode: 'physical' })
+  const topoAgain = getFloorWallPerimeterGraph(s(), 'F1', { mode: 'topological' })
+  ok('Bug A — physical cell stable across repeated calls',
+    physAgain === physGraph)
+  ok('Bug A — topological cell stable across repeated calls',
+    topoAgain === topoGraph)
+  ok('Bug A — re-fetched physical still excludes virtual (no poison)',
+    !new Set(Object.values(physAgain.edges).map(e => e.wallId)).has(virtWall.id))
+
+  // Invalid mode throws.
+  let threw = false
+  try { getFloorWallPerimeterGraph(s(), 'F1', { mode: 'bogus' }) }
+  catch { threw = true }
+  ok('Bug A — invalid mode throws', threw)
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))

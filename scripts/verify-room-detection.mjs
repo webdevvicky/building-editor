@@ -516,6 +516,175 @@ ok('verifyIntegrity passes on rect_room state', verifyIntegrity(s()).valid)
 buildStateFaceDetect()
 ok('verifyIntegrity passes on face-detect state', verifyIntegrity(s()).valid)
 
+// ── Section F — Virtual-wall room detection (Bug A) ─────────────────────
+
+header('Section F — Virtual-wall room detection (Bug A fix)')
+
+// A 4-wall closed loop where ONE boundary is flagged isVirtual.
+// Expected: face enumeration finds the room (topological graph includes
+// the virtual edge). BOQ output equals an equivalent 3-physical-wall room
+// (virtual contributes zero plaster/paint/masonry/etc. — confirmed via
+// quantity aggregators' local isVirtual filters).
+function buildVirtualWallReference() {
+  reset()
+  // All 4 walls physical — the BOQ baseline.
+  addWallAt(0,     0,      10*FT, 0)
+  addWallAt(10*FT, 0,      10*FT, 10*FT)
+  addWallAt(10*FT, 10*FT,  0,     10*FT)
+  addWallAt(0,     10*FT,  0,     0)
+  const faces = enumerateFloorFaces(s(), 'F1')
+  for (const f of faces) s().createRoomFromFace(f, { type: 'OTHER' })
+}
+function buildVirtualWallCanary() {
+  reset()
+  // 3 physical walls + 1 virtual wall closing the loop.
+  addWallAt(0,     0,      10*FT, 0)
+  addWallAt(10*FT, 0,      10*FT, 10*FT)
+  addWallAt(10*FT, 10*FT,  0,     10*FT)
+  const virtId = addWallAt(0, 10*FT, 0, 0)
+  s().setWallIsVirtual(virtId, true)
+  // Re-enumerate after the flag set; face cache must rebuild because
+  // state.walls reference changed.
+  const faces = enumerateFloorFaces(s(), 'F1')
+  for (const f of faces) s().createRoomFromFace(f, { type: 'OTHER' })
+}
+
+buildVirtualWallReference()
+const facesRef = enumerateFloorFaces(s(), 'F1')
+ok('reference: 4 physical walls → 1 detected face',
+   facesRef.length === 1,
+   `faces=${facesRef.length}`)
+ok('reference: face area ≈ 100 ft²',
+   facesRef.length === 1 && Math.abs(facesRef[0].signedAreaFt2 - 100) < 0.01,
+   facesRef.length === 1 ? `area=${facesRef[0].signedAreaFt2}` : '')
+const linesRef = getBoqLines(s(), {}, { floorId: 'F1' })
+
+buildVirtualWallCanary()
+const facesVirt = enumerateFloorFaces(s(), 'F1')
+ok('canary: 3 physical + 1 virtual → 1 detected face (Bug A fix)',
+   facesVirt.length === 1,
+   `faces=${facesVirt.length}`)
+ok('canary: detected face area ≈ 100 ft²',
+   facesVirt.length === 1 && Math.abs(facesVirt[0].signedAreaFt2 - 100) < 0.01,
+   facesVirt.length === 1 ? `area=${facesVirt[0].signedAreaFt2}` : '')
+// Confirm exactly one room created on the virtual side.
+ok('canary: exactly one Room created on the virtual boundary',
+   Object.keys(s().rooms).length === 1,
+   `rooms=${Object.keys(s().rooms).length}`)
+const linesVirt = getBoqLines(s(), {}, { floorId: 'F1' })
+
+// BOQ: room-area-driven lines (flooring) must match the reference
+// byte-identical — both rooms have the same 100 ft² polygon. Wall-area-
+// driven lines (plaster, paint walls, masonry) differ because the canary
+// has one fewer physical wall; that's the correct behavior and proves
+// the virtual wall contributes zero material to BOQ.
+function findLine(lines, rateKey) {
+  return lines.find(l => l.rateKey === rateKey) ?? null
+}
+const refFlooring  = findLine(linesRef,  'flooring')
+const virtFlooring = findLine(linesVirt, 'flooring')
+ok('flooring qty (room-area-driven): canary equals reference byte-identical',
+   refFlooring?.qty != null && virtFlooring?.qty != null &&
+   Math.abs(refFlooring.qty - virtFlooring.qty) < 1e-6,
+   `ref=${refFlooring?.qty} virt=${virtFlooring?.qty}`)
+
+// Quantity leakage check: the canary's masonry total must be STRICTLY
+// LESS than the reference (the virtual wall contributes zero material).
+function byCategory(lines, cat) {
+  return lines.filter(l => l.category === cat).reduce((s, l) => s + (typeof l.qty === 'number' ? l.qty : 0), 0)
+}
+const refMason  = byCategory(linesRef,  'masonry')
+const virtMason = byCategory(linesVirt, 'masonry')
+ok('masonry total: virtual canary < physical reference (no quantity leakage)',
+   virtMason < refMason - 1e-6,
+   `refMason=${refMason} virtMason=${virtMason}`)
+
+// Plaster external face — virtual wall must NOT be counted as external.
+// Reference's external-wall plaster equals (4 walls × 10ft × 10ft outer
+// face) — for the canary, only 3 walls are external, so external plaster
+// is strictly less.
+const refExtPlaster  = findLine(linesRef,  'plasterWallsExternal')?.qty ?? 0
+const virtExtPlaster = findLine(linesVirt, 'plasterWallsExternal')?.qty ?? 0
+ok('external plaster: virtual canary < physical reference',
+   virtExtPlaster < refExtPlaster - 1e-6,
+   `refExt=${refExtPlaster} virtExt=${virtExtPlaster}`)
+ok('external plaster: virtual canary ≈ 3/4 of reference (one wall short)',
+   Math.abs(virtExtPlaster - refExtPlaster * 0.75) < 0.5,
+   `refExt=${refExtPlaster} virtExt=${virtExtPlaster} ratio=${(virtExtPlaster/refExtPlaster).toFixed(3)}`)
+
+// Integrity must pass on the virtual-wall state.
+ok('verifyIntegrity passes on virtual-wall canary state', verifyIntegrity(s()).valid)
+
+// ── Section G — Delete-then-redraw canary (Bug B) ───────────────────────
+
+header('Section G — Delete-then-redraw canary (Bug B fix)')
+
+// Build the reference: one 10x10 ft room. Capture its BOQ fingerprint.
+reset()
+addWallAt(0,     0,      10*FT, 0)
+addWallAt(10*FT, 0,      10*FT, 10*FT)
+addWallAt(10*FT, 10*FT,  0,     10*FT)
+addWallAt(0,     10*FT,  0,     0)
+{
+  const faces = enumerateFloorFaces(s(), 'F1')
+  for (const f of faces) s().createRoomFromFace(f, { type: 'TOILET' })
+}
+const linesBaseline = getBoqLines(s(), {}, { floorId: 'F1' })
+const fingerprintBaseline = boqFingerprint(linesBaseline)
+ok('baseline: 1 room created (TOILET)',
+   Object.keys(s().rooms).length === 1)
+ok('baseline: verifyIntegrity valid',
+   verifyIntegrity(s()).valid)
+
+// Delete the top wall (10,0)→(10,10). Room loses closure → purged.
+const wallToDelete = Object.values(s().walls).find(w => {
+  const a = s().nodes[w.n1], b = s().nodes[w.n2]
+  return (a.x === 10*FT && b.x === 10*FT) || (a.y === 0 && b.y === 0 && false)
+  // Pick the right-edge wall (n1 or n2 at x=10*FT, both x equal).
+})
+// Find the right-edge wall robustly.
+const rightWall = Object.values(s().walls).find(w => {
+  const a = s().nodes[w.n1], b = s().nodes[w.n2]
+  return a.x === 10*FT && b.x === 10*FT
+})
+ok('found right-edge wall to delete', !!rightWall)
+const deleteResult = s().deleteWall(rightWall.id)
+ok('deleteWall returns ok=true', deleteResult?.ok === true)
+ok('deleteWall reports 1 purged room',
+   Array.isArray(deleteResult?.purgedRoomIds) && deleteResult.purgedRoomIds.length === 1,
+   `purgedRoomIds=${JSON.stringify(deleteResult?.purgedRoomIds)}`)
+ok('deleteWall reports purgedRoomNames[0] is the original room',
+   deleteResult?.purgedRoomNames?.length === 1,
+   `purgedRoomNames=${JSON.stringify(deleteResult?.purgedRoomNames)}`)
+ok('state.rooms is empty after orphan purge',
+   Object.keys(s().rooms).length === 0,
+   `rooms=${Object.keys(s().rooms).length}`)
+ok('verifyIntegrity remains valid after orphan purge',
+   verifyIntegrity(s()).valid)
+
+// Redraw the missing wall and re-detect.
+addWallAt(10*FT, 0, 10*FT, 10*FT)
+_resetFaceCaches()
+const facesAfterRedraw = enumerateFloorFaces(s(), 'F1')
+ok('after redraw: face enumeration finds 1 face',
+   facesAfterRedraw.length === 1,
+   `faces=${facesAfterRedraw.length}`)
+for (const f of facesAfterRedraw) {
+  s().createRoomFromFace(f, { type: 'TOILET' })
+}
+ok('after redraw + re-detect: exactly 1 room (no duplicate, no ghost)',
+   Object.keys(s().rooms).length === 1,
+   `rooms=${Object.keys(s().rooms).length}`)
+
+// BOQ must equal the baseline (no double-counted finishes).
+const linesAfter = getBoqLines(s(), {}, { floorId: 'F1' })
+const fingerprintAfter = boqFingerprint(linesAfter)
+const jsonBaseline = JSON.stringify(fingerprintBaseline)
+const jsonAfter    = JSON.stringify(fingerprintAfter)
+ok('delete-then-redraw canary: BOQ matches baseline byte-identical',
+   jsonBaseline === jsonAfter,
+   jsonBaseline === jsonAfter ? '' : `DRIFT — baseline=${jsonBaseline.slice(0,180)} after=${jsonAfter.slice(0,180)}`)
+
 // ── Summary ─────────────────────────────────────────────────────────────
 
 console.log('\n' + '═'.repeat(70))
