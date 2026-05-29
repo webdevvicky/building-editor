@@ -351,16 +351,20 @@ reset()
   ok('DOWEL shapeCode = L_BAR 11', dowel?.shapeCode === SHAPE_CODE.L_BAR)
   ok('DOWEL count = column.longitudinalBarCount × inline.count', dowel?.count === 6)
 
-  // Per-dia Ld fix verification: X mesh Ld should be based on its 10mm dia, not max(10,12)
-  // CL_X = widthMm + 2 × Ld_10
-  //   widthMm = 4 ft = 1219.2 mm
-  //   Ld_10 = 56.6 × 10 = 566 mm (Fe500_M20)
-  //   CL_X = 1219.2 + 2×566 = 2351.2 mm
-  ok('X_MESH Ld uses own dia (10mm → CL ≈ 2351mm, NOT inflated by 12mm)',
-     Math.abs(xMesh.cuttingLengthMm - 2351.2) < 1, `got ${xMesh?.cuttingLengthMm.toFixed(2)}`)
-  // CL_Y = lengthMm + 2 × Ld_12 = 1219.2 + 2×679.2 = 2577.6
-  ok('Y_MESH Ld uses own dia (12mm → CL ≈ 2577.6mm)',
-     Math.abs(yMesh.cuttingLengthMm - 2577.6) < 1, `got ${yMesh?.cuttingLengthMm.toFixed(2)}`)
+  // BE-Footing-Ld-001 fix: a footing mesh bar SPANS the pad — length =
+  // padDim − 2×cover + 2 end hooks (9d each), NOT pad + 2×Ld (the old bug).
+  //   widthMm = 4 ft = 1219.2; cover 40 → clear 1139.2; + 2×9×10 = 180 → 1319.2 mm (X, Ø10)
+  //   clear 1139.2; + 2×9×12 = 216 → 1355.2 mm (Y, Ø12)
+  ok('X_MESH ≈ 1319mm (pad − 2cover + 2×9d hooks, own dia)',
+     Math.abs(xMesh.cuttingLengthMm - 1319.2) < 1, `got ${xMesh?.cuttingLengthMm.toFixed(2)}`)
+  ok('Y_MESH ≈ 1355mm (own dia hook, NOT maxDia)',
+     Math.abs(yMesh.cuttingLengthMm - 1355.2) < 1, `got ${yMesh?.cuttingLengthMm.toFixed(2)}`)
+  // Regression guard: bar is NOT the old pad + 2×Ld over-count (~2351mm).
+  ok('X_MESH is NOT pad + 2×Ld (BE-Footing-Ld-001 guard)',
+     xMesh.cuttingLengthMm < 1800, `got ${xMesh?.cuttingLengthMm.toFixed(1)}mm (over-count was ~2351)`)
+  ok('X_MESH = (pad − 2cover) + 2×9d exactly',
+     Math.abs(xMesh.cuttingLengthMm - ((1219.2 - 80) + 2 * 9 * 10)) < 0.5,
+     `got ${xMesh?.cuttingLengthMm.toFixed(1)}mm`)
 }
 
 // ── Section D.2 — RAFT/STRIP/PILE deferred (skip cleanly) ─────────────────
@@ -536,12 +540,14 @@ reset()
      oldColKg > 0 && Math.abs(oldColKg - 142.3) < 2.0,
      `legacy=${oldColKg.toFixed(1)}kg`)
 
-  // Footing new > old (because of dowels), but X+Y mesh portion should
-  // still be ±5% of legacy. Approximate test: dowels are ~10% of mesh.
+  // BE-Footing-Ld-001 fix: the mesh bar now spans the pad (− 2×cover + hooks)
+  // instead of pad + 2×Ld, so the new footing total is LIGHTER than the legacy
+  // maxDia+Ld estimate. Assert non-zero AND that the over-count was removed.
   const newFootKg = newOut.totals.byCategory.footing
   const oldFootKg = oldOut.byFooting.reduce((s, f) => s + f.kg.total, 0)
-  ok('Footing new ≥ old (dowels add ~10-15% over mesh-only legacy)',
-     newFootKg >= oldFootKg, `new=${newFootKg.toFixed(1)}kg, old=${oldFootKg.toFixed(1)}kg`)
+  ok('Footing kg > 0', newFootKg > 0, `new=${newFootKg.toFixed(1)}kg`)
+  ok('Footing now lighter than legacy maxDia+Ld estimate (over-count removed)',
+     newFootKg < oldFootKg, `new=${newFootKg.toFixed(1)}kg, legacy=${oldFootKg.toFixed(1)}kg`)
 
   // byDiameter rollup populated
   ok('byDiameter has 12mm entry', !!newOut.totals.byDiameter[12])
