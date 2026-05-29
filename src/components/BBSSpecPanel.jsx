@@ -216,6 +216,7 @@ export default function BBSSpecPanel() {
   const setTool            = useStore(s => s.setTool)
   const projectSettings    = useStore(s => s.projectSettings)
   const setProjectSettings = useStore(s => s.setProjectSettings)
+  const setBbsAllowanceMode = useStore(s => s.setBbsAllowanceMode)
   const undo               = useStore(s => s.undo)
 
   const [selectedId, setSelectedId] = useState(null)
@@ -227,6 +228,7 @@ export default function BBSSpecPanel() {
 
   const specMap  = projectSettings?.reinforcementSpecs ?? {}
   const defaults = projectSettings?.bbsDefaults ?? {}
+  const allowanceMode = projectSettings?.bbsAllowanceMode ?? 'IS_STRICT'
   const specs = Object.values(specMap)
   const selected = selectedId ? specMap[selectedId] : null
 
@@ -445,6 +447,32 @@ export default function BBSSpecPanel() {
           <option value={9}>9 m</option>
           <option value={6}>6 m (legacy)</option>
         </select>
+      </div>
+
+      {/* Allowance convention — IS 2502 strict vs site-practice flat
+          allowances. Drives cutting-length bend/hook/lap/anchorage math. */}
+      <div style={fieldRow}>
+        <span style={lbl} title="Bend deductions, hook allowances, lap and anchorage convention used in cutting-length math.">
+          Allowance convention
+        </span>
+        <select
+          style={selectStyle}
+          value={allowanceMode}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setBbsAllowanceMode(e.target.value)}
+        >
+          <option value="IS_STRICT">IS 2502 strict (9d hooks, 56.6d lap, Ld anchorage)</option>
+          <option value="SITE_PRACTICE">Site practice (flat allowances, 50d lap)</option>
+        </select>
+      </div>
+      <div
+        style={{
+          fontSize: 'var(--text-xs)',
+          color: 'var(--color-text-muted)',
+          marginBottom: 'var(--space-2)',
+        }}
+      >
+        IS_STRICT is IS-correct (default). SITE_PRACTICE matches a contractor's hand BBS within a few %.
       </div>
 
       <div style={sectionHead}>Project defaults</div>
