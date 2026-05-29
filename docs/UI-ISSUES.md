@@ -5,7 +5,19 @@ recent first.
 
 ---
 
-## BE-DrawRegression-001 — Toolbar overlap (DEMO BLOCKER)
+## BE-DrawRegression-001 — Toolbar overlap (✅ RESOLVED 2026-05-29)
+
+- **Status**: RESOLVED · **Severity**: high (blocked in-canvas demo to MD)
+- **Root cause**: the "Drawing to:" mode badge was an absolute overlay at
+  `top:12, left:12, zIndex:20` — inside the toolbar's band (`top:8/left:8`,
+  z `--z-panel`=10), and the Structural & Civil flyout opens at
+  z `--z-overlay`=50, so the flyout overlapped the badge.
+- **Fix**: moved the badge to `top:56, left:16` (`Canvas.jsx` ~1227) — below the
+  toolbar, in the same top-left offset selection panels use. The badge only
+  shows during draw/rect_room (no selection panel open), so no new collision.
+- **Verify**: `vite build` clean; visual reflow (manual demo check).
+
+<details><summary>original report</summary>
 
 - **Status**: open · **Severity**: high (blocks in-canvas demo to MD)
 - **Reported**: 2026-05-29 (introduced "last night" — Phase D / face-aware draw
@@ -19,10 +31,27 @@ recent first.
   (`src/components/Canvas.jsx`, top-left pill during draw/rect_room). Check
   z-index tokens (`--z-selection-panel` 30 vs `--z-overlay` 50) and the badge's
   absolute positioning vs the toolbar.
-- **Repro (to confirm)**: open a project, activate Draw — observe toolbar layout.
-- **Not yet root-caused** (logged as reported; needs an in-app repro pass).
+- **Repro**: open a project, activate Draw — observe toolbar layout.
+</details>
 
-## BE-DrawRegression-002 — Chain-draw stops after first segment in Inside-face mode (DEMO BLOCKER)
+## BE-DrawRegression-002 — Chain-draw stops after first segment in Inside-face mode (✅ RESOLVED 2026-05-29)
+
+- **Status**: RESOLVED · **Severity**: high (blocked in-canvas demo to MD)
+- **Root cause**: `Canvas.jsx:858` used `SNAP_IN` in the face-mode closure
+  check but only `snapIn` (the function) was imported from `../geometry` —
+  `SNAP_IN` (`const = 4`) was never imported. On click 2+ in face mode
+  (`drawChainBuffer.length >= 2`) the closure block threw a `ReferenceError`,
+  aborting the handler before the buffer append, so no further segment
+  committed. Centerline mode was unaffected (legacy path never reaches that
+  line) — which is exactly why it "worked in Center but failed in Inside-face."
+- **Fix**: added `SNAP_IN` to the `from '../geometry'` import in `Canvas.jsx`.
+- **Verify**: `verify-draw-reference.mjs` Section O (static guard: every
+  ALL-CAPS geometry identifier used in Canvas.jsx must be imported — proven to
+  fail when the import is removed, pass when restored) + Section P (4-point open
+  inside_face chain converts to 4 points / 3 edges, no false closure). All 34
+  verify scripts green; `vite build` clean.
+
+<details><summary>original report</summary>
 
 - **Status**: open · **Severity**: high (blocks in-canvas demo to MD)
 - **Reported**: 2026-05-29 (Phase D face-aware draw).

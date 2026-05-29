@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import {
   w2s, screenToWorldRaw, snapIn,
-  PX_PER_INCH, GRID_IN, DEFAULT_WALL_THICK_IN,
+  PX_PER_INCH, GRID_IN, DEFAULT_WALL_THICK_IN, SNAP_IN,
   closestPointOnSegment,
 } from '../geometry'
 import { resolveSnap, getTargetDescriptor, findNearestCandidate, getSnapRef } from '../snap'
@@ -1224,7 +1224,7 @@ export default function Canvas() {
         Lives top-left next to the calibration / floor-switcher chrome. */}
     {(activeTool === 'draw' || activeTool === 'rect_room') && (
       <div style={{
-        position: 'absolute', top: 12, left: 12, zIndex: 20,
+        position: 'absolute', top: 56, left: 16, zIndex: 20,
         background: drawReference === 'centerline'
           ? 'var(--color-surface)'
           : (drawReference === 'inside_face' ? 'rgba(39,174,96,0.10)' : 'rgba(230,126,34,0.10)'),
