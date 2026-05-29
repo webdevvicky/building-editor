@@ -77,11 +77,14 @@ export function resolveColumnReinforcementSpecForColumn(state, column, columnTyp
 }
 
 // ── Beam resolver ────────────────────────────────────────────────────────────
-// instance (explicit only) → class (bbsDefaults.BEAM[beamClass]) → ESTIMATE
+// Explicit beam:    instance → class (bbsDefaults.BEAM[beamClass]) → ESTIMATE
+// Wall-derived beam: wall_instance (wall.wallBeamSpecs[beamClass])
+//                  → class (bbsDefaults.BEAM[beamClass]) → ESTIMATE
 //
 // `beamOrId` may be a beam entity (explicit or wall-derived) or a beam id.
-// Wall-derived beams don't persist a reinforcementSpecId — they skip the
-// INSTANCE tier and resolve via class default → ESTIMATE.
+// Wall-derived beams don't persist a reinforcementSpecId of their own, but
+// BBS-4 adds wallBeamSpecs on the parent wall so the engineer can override
+// reinforcement for a specific wall's plinth/lintel/roof.
 export function resolveBeamReinforcementSpec(state, beamOrId) {
   let beam = beamOrId
   if (typeof beamOrId === 'string') {
@@ -96,6 +99,14 @@ export function resolveBeamReinforcementSpec(state, beamOrId) {
   if (isExplicit) {
     const instanceSpec = lookupSpec(state, beam.reinforcementSpecId)
     if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  } else {
+    // BBS-4 — WALL_INSTANCE tier: wall-derived beam inherits from its
+    // parent wall's per-class spec slot when set.
+    const wall = state.walls?.[beam.sourceWallId]
+    const wallSpecs = wall?.wallBeamSpecs
+    const wallSpecId = wallSpecs && typeof wallSpecs === 'object' ? wallSpecs[beamClass] : null
+    const wallInstanceSpec = lookupSpec(state, wallSpecId)
+    if (wallInstanceSpec) return makeResolved(wallInstanceSpec, 'WALL_INSTANCE')
   }
 
   // bbsDefaults.BEAM is per-class object: { plinth, lintel, roof } → specId | null
@@ -173,6 +184,7 @@ export function resolveFootingReinforcementSpec(state, opts) {
 export function humanizeAssignmentSource(source) {
   switch (source) {
     case 'INSTANCE':        return 'instance override'
+    case 'WALL_INSTANCE':   return 'wall override'
     case 'TYPE':            return 'type default'
     case 'CLASS':           return 'class default'
     case 'PROJECT_DEFAULT': return 'project default'

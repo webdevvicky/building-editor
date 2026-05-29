@@ -25,6 +25,7 @@ import { CATALOG_VERSION as PAINT_VERSION }    from './paintSystems.js'
 import { CATALOG_VERSION as CEILING_VERSION }  from './ceilingFinishSystems.js'
 import { CATALOG_VERSION as HW_ITEMS_VERSION } from './hardware/hardwareItems.js'
 import { CATALOG_VERSION as HW_SETS_VERSION }  from './hardware/hardwareSets.js'
+import { CATALOG_VERSION as IS2502_VERSION }   from './cuttingLength.js'
 
 // Returns a frozen snapshot of every catalog version. Pure / deterministic.
 // Call cost is one object construction; safe to call on every save.
@@ -35,6 +36,7 @@ export function getAllCatalogVersions() {
     ceilingFinish:   CEILING_VERSION,
     hardwareItems:   HW_ITEMS_VERSION,
     hardwareSets:    HW_SETS_VERSION,
+    is2502:          IS2502_VERSION,
     mep:             Object.freeze({ ...MEP_CATALOG_VERSIONS }),
   })
 }

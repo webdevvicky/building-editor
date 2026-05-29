@@ -62,6 +62,7 @@ import {
   Magnet,
   Frame,
   Link,
+  Table2,
 } from 'lucide-react'
 
 export const TOOL_CLUSTERS = Object.freeze([
@@ -146,7 +147,8 @@ export const TOOL_CLUSTERS = Object.freeze([
         title: 'Tools',
         items: [
           { type: 'tool', toolId: 'floors',   icon: Building2,    label: 'Floors' },
-          { type: 'tool', toolId: 'bbs',      icon: Ruler,        label: 'BBS' },
+          { type: 'tool', toolId: 'bbs',           icon: Ruler,        label: 'BBS' },
+          { type: 'tool', toolId: 'bbs_schedule',  icon: Table2,       label: 'BBS Schedule', shortcut: 'Shift+B' },
           { type: 'tool', toolId: 'iso',      icon: Box,          label: '3D View', shortcut: 'Ctrl+3' },
           { type: 'tool', toolId: 'settings', icon: SettingsIcon, label: 'Settings' },
         ],

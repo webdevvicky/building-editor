@@ -219,18 +219,33 @@ export function computeBBSQuantities(state) {
   }
 
   // ── Slabs ──────────────────────────────────────────────────────────────────
+  // BBS-0.5 fix (2026-05-28): replaced the √area approximation (which treated
+  // every slab as square) with real span/width derived from the underlying
+  // room polygons. spanFt = longest edge across the slab's rooms; widthFt =
+  // areaFt2 / spanFt (preserves total area). A 20×10 room now produces
+  // spanFt=20, widthFt=10 — not 14.1×14.1.
   const validSet = new Set(state.getValidRoomIds?.() ?? [])
   for (const slab of Object.values(slabs ?? {})) {
     const resolved = resolveSlabReinforcementSpecForSlab(state, slab)
     if (!resolved.spec) continue
     let areaFt2 = 0
+    let spanFt  = 0
     for (const rid of (slab.roomIds ?? [])) {
       if (validSet.size && !validSet.has(rid)) continue
-      areaFt2 += state.getRoomArea?.(rid) ?? 0
+      const geom = state.getRoomGeometry?.(rid, 'centerline')
+      if (geom) {
+        areaFt2 += geom.area
+        if (geom.longestWall > spanFt) spanFt = geom.longestWall
+      } else {
+        areaFt2 += state.getRoomArea?.(rid) ?? 0
+      }
     }
     if (areaFt2 <= 0) continue
-    const sideFt = Math.sqrt(areaFt2)
-    const r = computeSlabBBS(resolved.spec, areaFt2, sideFt, sideFt)
+    // Fall back to √area only when geometry queries returned nothing
+    // (defensive — getRoomGeometry should always succeed on a valid room).
+    if (spanFt <= 0) spanFt = Math.sqrt(areaFt2)
+    const widthFt = areaFt2 / spanFt
+    const r = computeSlabBBS(resolved.spec, areaFt2, spanFt, widthFt)
     bySlab.push({
       slabId:         slab.id,
       entityId:       slab.id,

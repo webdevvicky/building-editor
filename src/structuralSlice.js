@@ -1239,6 +1239,30 @@ export const createStructuralSlice = (set, get, uid) => ({
     }))
   },
 
+  // BBS-4 — per-wall, per-beam-class reinforcement spec override. Wall-derived
+  // beams (the majority in residential projects) have no entity to attach a
+  // spec to; this slot is consulted by resolveBeamReinforcementSpec's
+  // WALL_INSTANCE tier before falling back to bbsDefaults.BEAM[class] or
+  // ESTIMATE. Passing specId === null clears the override for that class.
+  setWallBeamSpec: (wallId, beamClass, specId) => {
+    get()._save()
+    set(state => {
+      const wall = state.walls[wallId]
+      if (!wall) return {}
+      const current = wall.wallBeamSpecs ?? {}
+      const next = { ...current }
+      if (specId) next[beamClass] = specId
+      else delete next[beamClass]
+      const hasAny = Object.keys(next).length > 0
+      return {
+        walls: {
+          ...state.walls,
+          [wallId]: { ...wall, wallBeamSpecs: hasAny ? next : null },
+        },
+      }
+    })
+  },
+
   // Rev 2 future-ready slot — programmatic override of the balcony-railing-edge
   // heuristic. Null = inherit heuristic (external + bounds a BALCONY room, no
   // large door). true/false = explicit. No UI in current iteration; provided

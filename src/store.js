@@ -20,6 +20,7 @@ import {
   getOverlappingRoomName as topoGetOverlappingRoomName,
   getValidRoomIds as topoGetValidRoomIds,
   sumRoomAreas as topoSumRoomAreas,
+  getRoomGeometry as topoGetRoomGeometry,
 } from './topology/rooms.js'
 import {
   getActiveFloorNodes,
@@ -2242,6 +2243,9 @@ export const useStore = create((set, get) => ({
   getValidRoomIds()              { return topoGetValidRoomIds(get()) },
   sumRoomAreas(predicate)        { return topoSumRoomAreas(get(), predicate) },
   getRoomArea(roomId)            { return topoGetRoomArea(get(), roomId) },
+  // Canonical room geometry entry — drives BBS slab span/width math + canvas
+  // labels via dimension mode resolution. See src/topology/rooms.js header.
+  getRoomGeometry(roomId, mode = null) { return topoGetRoomGeometry(get(), roomId, mode) },
 
   // Centerline-polygon floor-area sum. Retained for excavation
   // (buildingFootprintFt2 keys off this and the BOQ canary depends on

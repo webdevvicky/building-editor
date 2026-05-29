@@ -38,6 +38,15 @@ export const wallSchema = Object.freeze({
     // is preserved across T-junctions, not split).
     splitOrigin:           Object.freeze({ type: 'string',        required: true, default: 'NONE',
                                             oneOf: ['NONE', 'USER_SPLIT'] }),
+    // BBS-4 — per-beam-class reinforcement spec overrides for the three
+    // wall-derived beams (plinth / lintel / roof) that this wall implies.
+    // Default null = no override; resolveBeamReinforcementSpec falls back
+    // to bbsDefaults.BEAM[class] then ESTIMATE. Shape when non-null:
+    //   { plinth?: specId|null, lintel?: specId|null, roof?: specId|null }
+    // Greenfield: no migration; loadProject hydrates default null. The
+    // specId references projectSettings.reinforcementSpecs entries; the
+    // existing reinforcementSpecs FK invariant covers it.
+    wallBeamSpecs:         Object.freeze({ type: 'object|null',   required: true, default: null }),
   }),
   invariants: Object.freeze([
     Object.freeze({

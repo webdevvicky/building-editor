@@ -425,6 +425,28 @@ export default function BBSSpecPanel() {
 
       <div style={divider} />
 
+      {/* BBS-0.5 — Procurement: standard bar length (12 / 9 / 6 m). Default
+          flipped 6 → 12 on 2026-05-28 to match Indian TMT-market reality.
+          Per-project override here. */}
+      <div style={sectionHead}>Procurement</div>
+      <div style={fieldRow}>
+        <span style={lbl} title="Standard bar length used for byDiameter procurement piece counts in the BOQ.">
+          Standard bar length
+        </span>
+        <select
+          style={selectStyle}
+          value={defaults.standardBarLengthM ?? 12}
+          onKeyDown={e => e.stopPropagation()}
+          onChange={e => setProjectSettings({
+            bbsDefaults: { ...defaults, standardBarLengthM: Number(e.target.value) },
+          })}
+        >
+          <option value={12}>12 m (Indian market standard, default)</option>
+          <option value={9}>9 m</option>
+          <option value={6}>6 m (legacy)</option>
+        </select>
+      </div>
+
       <div style={sectionHead}>Project defaults</div>
       <div
         style={{

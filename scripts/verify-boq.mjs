@@ -1103,7 +1103,7 @@ s().setProjectSettings({
   },
   bbsDefaults: { COLUMN: 'COL_TEST', SLAB: null, FOOTING: null,
                  BEAM: { plinth: null, lintel: null, roof: null },
-                 standardBarLengthM: 6 },
+                 standardBarLengthM: 12 },   // 2026-05-28: default flipped 6 → 12 (Indian TMT-market reality)
 })
 const bbsG3 = (await import('../src/quantities/bbs.js')).computeBBSQuantities(s())
 check('Gap 3: byDiameter populated',
@@ -1115,18 +1115,18 @@ check('Gap 3: 12mm bucket has kg > 0 (longitudinal bars)',
 check('Gap 3: 8mm bucket has kg > 0 (stirrup bars)',
       (bbsG3.byDiameter[8]?.totalKg ?? 0) > 0,
       `got ${bbsG3.byDiameter[8]?.totalKg}`)
-check('Gap 3: pieces at 6m derived correctly',
-      bbsG3.byDiameter[12].pieces === Math.ceil(bbsG3.byDiameter[12].totalKg / (6 * 0.888)),
+check('Gap 3: pieces at 12m derived correctly',
+      bbsG3.byDiameter[12].pieces === Math.ceil(bbsG3.byDiameter[12].totalKg / (12 * 0.888)),
       `pieces=${bbsG3.byDiameter[12].pieces}`)
 check('Gap 3: standardBarLengthM round-trip',
-      bbsG3.standardBarLengthM === 6)
+      bbsG3.standardBarLengthM === 12)
 
 const linesG3 = getBoqLines(s(), {})
 const diaLines = linesG3.filter(l => l.category === 'steel_by_diameter')
 check('Gap 3: BOQ emits steel_by_diameter lines',
       diaLines.length >= 2, `got ${diaLines.length}`)
-check('Gap 3: each dia line label includes "Ø" and "× 6m"',
-      diaLines.every(l => l.label.includes('Ø') && l.label.includes('× 6m')),
+check('Gap 3: each dia line label includes "Ø" and "× 12m"',
+      diaLines.every(l => l.label.includes('Ø') && l.label.includes('× 12m')),
       diaLines.map(l => l.label).join(' | '))
 
 header('12. Gap 6 — Paint material aggregator (gallons by layer)')

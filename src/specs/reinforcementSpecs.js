@@ -27,10 +27,13 @@ export const STEEL_UNIT_WEIGHT_KG_PER_M = {
   32: 6.313,
 }
 
-// Standard procurement bar length (m). Default 6 m matches user prompt;
-// many sites prefer 12 m for crane-handled work. Override via
-// projectSettings.bbsDefaults.standardBarLengthM (single source).
-export const STANDARD_BAR_LENGTH_M = 6
+// Standard procurement bar length (m). Default 12 m matches Indian market
+// reality — TMT bars are sold in 12 m bundles (~45-55 kg each). 6 m and 9 m
+// cuts exist but at premium. Default flipped 6 → 12 on 2026-05-28 to align
+// with research-confirmed residential procurement. Override via
+// projectSettings.bbsDefaults.standardBarLengthM (single source) — the
+// BBSSpecPanel Procurement dropdown surfaces 12 / 9 / 6 m choices.
+export const STANDARD_BAR_LENGTH_M = 12
 
 // Allowed standard bar lengths (validation hint, no enforcement).
 export const STANDARD_BAR_LENGTHS_ALLOWED_M = Object.freeze([6, 9, 12])

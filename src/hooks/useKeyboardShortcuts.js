@@ -125,6 +125,14 @@ export function useKeyboardShortcuts() {
         closeDropdowns()
         return
       }
+      // BBS-5 — Shift+B opens the BBS Schedule panel. Bare B is unbound
+      // (Ctrl+B toggles BOQ — handled in the modifier section above).
+      if ((key === 'b' || key === 'B') && e.shiftKey && !mod) {
+        e.preventDefault()
+        useStore.getState().setTool?.('bbs_schedule')
+        closeDropdowns()
+        return
+      }
       // Phase W follow-up — bare J picks the Manual Join tool.
       if (key === 'j' || key === 'J') {
         e.preventDefault()

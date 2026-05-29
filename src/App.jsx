@@ -19,6 +19,7 @@ import PDFPagePickerModal from './components/PDFPagePickerModal'
 import FloorSwitcher from './components/FloorSwitcher'
 import FloorsManagerPanel from './components/FloorsManagerPanel'
 import BBSSpecPanel from './components/BBSSpecPanel'
+import BBSSchedulePanel from './components/BBSSchedulePanel'
 import PlumbingFixturePanel from './components/PlumbingFixturePanel'
 import ElectricalPointPanel from './components/ElectricalPointPanel'
 import HvacPanel from './components/HvacPanel'
@@ -55,6 +56,7 @@ export default function App() {
         <PDFPagePickerModal />
         <FloorsManagerPanel />
         <BBSSpecPanel />
+        <BBSSchedulePanel />
         <PlumbingFixturePanel />
         <ElectricalPointPanel />
         <HvacPanel />
