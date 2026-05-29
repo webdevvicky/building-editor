@@ -6,6 +6,120 @@ Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian sta
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
 
+## Phase BBS — Bar Bending Schedule + IS 2502 catalog (2026-05-28)
+
+New RebarGroup abstraction + per-element generators + IS 2502 cutting-
+length engine + BBSSchedulePanel UI. Replaces the legacy `computeBBSQuantities`
+aggregate-kg estimator with a proper bar-member schedule (mark / shape /
+cutting length / weight) following IS 2502:1963 + SP 34 + Chennai
+residential practice. Pure-function generators per element; ESTIMATE
+fallback preserved. **34 verify scripts now gate every commit** (+1:
+`verify-bbs`, 123 assertions across Bootstrap purity grep + Sections A
+catalog + B cutting-length hand-calc + C/C.2 column + D/D.2 footing+dowel
++ E slab real-geometry + F wall-derived beam + G backward-compat).
+
+### What landed
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | `src/specs/cuttingLength.js` (NEW) | IS 2502 catalog: bend deductions (1d/2d/3d/4d), 9d hooks, Fe500/M20/M25 Ld factors incl. seismic 1.3×Ld, crank 45°/0.42D/L4, `getIs2502Params(state)` deep-merge override. |
+| 2 | `src/bbs/types.js` (NEW) | RebarGroup shape + `ELEMENT_TYPE` / `REBAR_ROLE` / `SHAPE_CODE` / `REBAR_SOURCE` enums + `makeRebarGroup(...)` factory. Computed, never persisted. |
+| 3 | `src/bbs/index.js` (NEW) | `computeRebarGroups(state, opts)` entry point. Deterministic sort: floor seq → element type → element id → role → markId. |
+| 4 | `src/bbs/generators/columnRebar.js` (NEW) | LONGITUDINAL + STIRRUP + opt-in STIRRUP_ZONE (IS 13920 confinement). Rect + circular shapes. |
+| 5 | `src/bbs/generators/footingRebar.js` (NEW) | X_MESH + Y_MESH with own-dia Ld (fixes `max(xDia, yDia)` bug) + NEW dowel (L-shape 11, embed=Ld_compression, projection=lap). RAFT/STRIP/PILE deferred. |
+| 6 | `src/bbs/generators/slabRebar.js` (NEW) | MAIN + DIST + CRANK (shape 03, 45°, 0.42D, L/4) + opt-in EXTRA_TOP. Real span/width from `getRoomGeometry(centerline)`, aspect-ratio one-way/two-way with `spec.twoWay` override. |
+| 7 | `src/bbs/generators/beamRebar.js` (NEW) | TOP + BOTTOM + STIRRUP. Exterior-joint Ld + 9d hook; interior Ld/2. Wall-derived beams use `getRoomsForWall(...).length === 1` heuristic. |
+| 8 | `src/specs/resolution.js` | added `WALL_INSTANCE` tier for wall-derived beams (reads `state.walls[sourceWallId].wallBeamSpecs[beamClass]`). |
+| 9 | `src/schema/entities/wall.js` | added `wallBeamSpecs: object|null` (default null, no migration). |
+| 10 | `src/structuralSlice.js` | `setWallBeamSpec(wallId, beamClass, specId)` action. |
+| 11 | `src/store.js` | exposed `getRoomGeometry(roomId, mode)` as a store method (delegates to topology). |
+| 12 | `src/quantities/bbs.js` | slab loop switched from `Math.sqrt(area)` for both span+width to real per-room `getRoomGeometry` (span = longest edge, width = area/span). |
+| 13 | `src/components/BBSSchedulePanel.jsx` (NEW) | Indian 10-column site BBS format. Toolbar entry (Table2, Shift+B). Mounted in App.jsx. |
+| 14 | `src/components/BBSSpecPanel.jsx` | new Procurement section with 12/9/6 m bar-length dropdown. Default flipped 6 → 12 (Indian TMT market reality). |
+| 15 | `src/specs/catalogManifest.js` | registered cuttingLength.js as `is2502:` catalog. |
+| 16 | `scripts/verify-bbs.mjs` (NEW) | 123 assertions. |
+
+### Locked rules (Phase BBS)
+
+- **IS 2502 catalog is the SINGLE SOURCE** for every bend deduction,
+  hook allowance, lap, Ld, crank geometry, standard bar length.
+  `getIs2502Params(state)` is the only read point. No magic numbers
+  in `src/bbs/generators/*.js` — every constant comes from the
+  catalog. Bootstrap purity grep enforces.
+- **RebarGroup is a COMPUTED OBJECT, never persisted.**
+  `computeRebarGroups(state, opts)` regenerates deterministically
+  from state on every call. The legacy `computeBBSQuantities`
+  aggregate-kg path is untouched; both coexist.
+- **`wall.wallBeamSpecs` is the WALL_INSTANCE tier** for wall-derived
+  beam reinforcement override. Default null = inherit CLASS default.
+  Schema slot only — no migration on load. `resolveBeamReinforcementSpec`
+  reads it before CLASS for wall-derived beams.
+- **Slab span/width comes from `getRoomGeometry(roomId, 'centerline')`**
+  — never `Math.sqrt(area)`. Span = longest edge across all rooms in
+  the slab; width = area / span. Aspect-ratio one-way/two-way;
+  `spec.twoWay` is an explicit override.
+- **Footings emit dowels as a separate `REBAR_ROLE.DOWEL` group**,
+  cross-referencing the column type. L-shape (IS 2502 code '11').
+  Embed leg = Ld_compression; projection leg = lapLength.
+- **Footing per-bar Ld uses the BAR'S OWN DIAMETER** — fixes the
+  legacy `max(xDia, yDia)` bug. X mesh Ld is computed from
+  xBars.diaMm; Y mesh from yBars.diaMm.
+- **No legacy backward-compat tolerance.** Sections C + G of
+  `verify-bbs` assert hand-computed IS-correct values exactly via
+  `near(value, hand-computed, 0.1)`. Legacy `computeBBSQuantities`
+  produces DIFFERENT numbers due to its own bugs (see BE-Legacy-001)
+  — that delta is documented as a comment, not papered over with a
+  tolerance.
+- **IS 13920 confinement zones default OFF.**
+  `params.confinementZoneEnabled = false` matches Chennai residential
+  site practice (small contractors use uniform stirrup spacing).
+  Engineers opt in per project via
+  `projectSettings.is2502Params.confinementZoneEnabled = true`.
+- **Standard bar length default 12 m.** Reflects Indian TMT-market
+  reality. Flipped 6 → 12 on 2026-05-28. Per-project override via the
+  BBSSpecPanel Procurement dropdown (12 / 9 / 6 m). No migration;
+  existing projects with `bbsDefaults.standardBarLengthM` set keep
+  their stored value.
+- **RAFT / STRIP / PILE foundation BBS deferred.**
+  `generateFootingRebarGroups` returns `[]` for these types by
+  design. Tracked as BBS-FoundationTypes backlog.
+
+### Module map — Phase BBS additions
+
+```
+src/specs/cuttingLength.js (NEW) — IS 2502 catalog (CATALOG_VERSION exported)
+src/bbs/types.js (NEW) — RebarGroup shape + factory
+src/bbs/index.js (NEW) — computeRebarGroups entry point
+src/bbs/generators/columnRebar.js (NEW)
+src/bbs/generators/footingRebar.js (NEW)
+src/bbs/generators/slabRebar.js (NEW)
+src/bbs/generators/beamRebar.js (NEW)
+src/components/BBSSchedulePanel.jsx (NEW)
+src/specs/resolution.js — WALL_INSTANCE tier for wall-derived beam resolver
+src/schema/entities/wall.js — wallBeamSpecs slot (default null)
+src/structuralSlice.js — setWallBeamSpec action
+src/store.js — exposed getRoomGeometry as a store method
+src/quantities/bbs.js — slab loop uses real getRoomGeometry, not √area
+src/components/BBSSpecPanel.jsx — Procurement dropdown
+src/specs/catalogManifest.js — is2502 catalog registered
+scripts/verify-bbs.mjs (NEW) — 123 assertions
+```
+
+### Verify-script inventory addition
+
+```
+verify-bbs — 123 assertions across Bootstrap purity grep + Section A
+  IS 2502 catalog (24) + B cutting-length hand-calc (8) + C column
+  generator (14) + C.2 IS 13920 confinement (3) + D footing+dowel (12)
+  + D.2 RAFT/STRIP/PILE deferred (1) + E slab 20×10 real geometry (9)
+  + F wall-derived beam WALL_INSTANCE (4) + G backward-compat (5)
+  = 123 assertions.
+```
+
+Total verify-script count is now **34** (was 32 + Phase BBS adds 1;
+note Phase D + Phase BA were both counted at 32 in their respective
+sections — Phase BBS is the +1 over the most-recent 33 baseline).
+
 ## Phase D — Face-Aware Draw Reference (2026-05-28)
 
 Wall authoring now matches Indian / RERA tracing convention. The
@@ -3879,6 +3993,40 @@ when surfaced.
 - **BE-Cleanup-002 — `deleteWall` orphans MEP fixtures with `wallId` refs.** Plumbing fixtures, electrical points, HVAC indoor units, fire devices, and ELV devices that pin themselves to a specific wall via `wallId` are left dangling when that wall is deleted. `splitWall` already rebases MEP fixtures by `wallT` (see `structuralSlice.js:902-927`); `deleteWall` does no equivalent cascade. Mirror the room-cleanup pattern: strip `wallId` on each affected fixture (or delete the fixture entirely if its placement requires a wall — verify per-discipline), emit per-discipline validationEvents (`mep_<discipline>_orphaned_by_wall_delete`), and surface in the persistent-toast hint when fixtures were affected.
 
 - **BE-Excavation-001 — Excavation `buildingFootprintFt2` still uses centerline polygon sum.** With true built-up area now available via `getTotalBuiltUpAreaSft` (Phase BA, 2026-05-28), the bulk-excavation footprint at `src/quantities/excavation.js:45` (`sum(getRoomArea)` over valid rooms) is architecturally less accurate than the new outer-face calculation. A real excavation site is dug to the building's plinth footprint, including the band under external walls. Switching to built-up would change `bulkExcavationVolFt3` numbers and break the verify-boq byte-equality canary, so the swap is deferred until the BOQ regression seatbelt accommodates a one-shot rebaseline. When taking this on: re-source `buildingFootprintFt2` from `state.getTotalBuiltUpAreaSft(floorId)`, update verify-boq's expected excavation numbers, and document the migration in CLAUDE.md.
+
+- **BBS-5b** — BBSSchedulePanel Excel + PDF export deferred. Panel data
+  reads `computeRebarGroups(state, { floorId })` and could be serialized
+  via `excel.js` / `pdf.js` mirroring the existing BOQ pipeline. Marked
+  `TODO BBS-5b` in `BBSSchedulePanel.jsx`.
+
+- **BBS-FoundationTypes** — `generateFootingRebarGroups` returns `[]` for
+  RAFT / STRIP / PILE foundation types. Each needs its own geometry +
+  bar layout: RAFT = top + bottom mesh both ways; STRIP = continuous
+  linear bars along the wall length + transverse ties; PILE = shaft cage
+  (longitudinal + helical/spiral ties) + cap mesh. Each is a separate
+  generator file under `src/bbs/generators/`.
+
+- **BE-Legacy-001** — `FT_PER_MM` constant in
+  `src/specs/reinforcementSpecs.js` is `FT_PER_M / 1000 = 0.0003048`,
+  which is mathematically m/mm (not ft/mm). Used in
+  `computeColumnBBS`'s `lapFt = lapLengthMultiplier × diaMm × FT_PER_MM`
+  formula, this silently under-counts the column longitudinal lap by
+  ~10× (lap is treated as ~5d instead of 50d). The new RebarGroup
+  generators do NOT touch this path — they route through the catalog
+  `lapLengthMm(...)`. Fixing the legacy lap would shift `verify-boq`
+  steel_by_diameter and column-steel numbers everywhere; needs a
+  one-shot rebaseline. Defer until the legacy aggregator is sunset OR
+  until the next major BOQ rebaseline.
+
+- **BBS-RealPlan-001** — `verify-bbs.mjs` Sections C–G use synthetic
+  fixtures (one-column / one-room / fake-wall / 4-column array). No
+  generator has been run against the F1 stacked-rooms canary (in
+  verify-boq Phase W), the 2-floor multi-room fixture (verify-multifloor),
+  or the F1-realistic L-shape + T-junction (verify-building-area
+  Section K). Add a Section H to verify-bbs that builds each of those
+  existing real-plan canaries and invokes `computeRebarGroups`, asserting
+  group counts + kg totals + per-floor scope behavior. No new fixtures
+  needed.
 
 ---
 
