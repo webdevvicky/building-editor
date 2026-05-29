@@ -14,6 +14,9 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import { computeRebarGroups, ELEMENT_TYPE } from '../bbs/index.js'
+import { BBS_CATEGORY_ORDER, BBS_CATEGORY_LABEL } from '../bbs/types.js'
+import { concreteByBbsCategory } from '../bbs/concrete.js'
+import { exportBbsExcel, exportBbsPdf } from '../export/bbs.js'
 import { CATALOG_VERSION } from '../specs/cuttingLength.js'
 import { humanizeAssignmentSource } from '../specs/resolution.js'
 import { safeR2 } from '../lib/numbers.js'
@@ -178,8 +181,10 @@ const ELEMENT_TABS = [
   { id: ELEMENT_TYPE.COLUMN,  label: 'Columns' },
   { id: ELEMENT_TYPE.BEAM,    label: 'Beams' },
   { id: ELEMENT_TYPE.SLAB,    label: 'Slabs' },
+  { id: 'ABSTRACT', label: 'Abstract' },
   { id: 'SUMMARY', label: 'Summary' },
 ]
+const DIA_COLS = [8, 10, 12, 16, 20, 25]
 
 // ── helpers ──────────────────────────────────────────────────────────────
 function floorLabelOf(state, floorId) {
@@ -351,7 +356,9 @@ export default function BBSSchedulePanel() {
       </div>
 
       {/* Body */}
-      {selectedElement === 'SUMMARY' ? (
+      {selectedElement === 'ABSTRACT' ? (
+        <AbstractView result={result} />
+      ) : selectedElement === 'SUMMARY' ? (
         <SummaryView result={result} />
       ) : groups.length === 0 ? (
         <div style={emptyState}>
@@ -370,19 +377,83 @@ export default function BBSSchedulePanel() {
         />
       )}
 
-      {/* Summary by diameter — visible under every tab except 'SUMMARY' (which already shows it) */}
-      {selectedElement !== 'SUMMARY' && groups.length > 0 && (
+      {/* Summary by diameter — visible under every tab except SUMMARY/ABSTRACT */}
+      {selectedElement !== 'SUMMARY' && selectedElement !== 'ABSTRACT' && groups.length > 0 && (
         <>
           <div style={sectionHead}>Summary by Diameter</div>
           <DiameterSummary result={result} />
         </>
       )}
 
-      <div style={footerNote}>
-        {/* TODO BBS-5b: Excel + PDF export */}
-        Excel + PDF export — coming soon.
+      <div style={{ ...footerNote, display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <span>Export full schedule (detail sheets + abstract):</span>
+        <Button variant="secondary" disabled={groups.length === 0}
+          onClick={() => {
+            const opts = { generatedAt: new Date().toISOString() }
+            if (selectedFloor !== 'ALL') opts.floorId = selectedFloor
+            exportBbsExcel(useStore.getState(), opts)
+          }}>Excel</Button>
+        <Button variant="secondary" disabled={groups.length === 0}
+          onClick={() => {
+            const opts = { generatedAt: new Date().toISOString() }
+            if (selectedFloor !== 'ALL') opts.floorId = selectedFloor
+            exportBbsPdf(useStore.getState(), opts)
+          }}>PDF</Button>
       </div>
     </Modal>
+  )
+}
+
+// ── abstract view (Level 2) — category × diameter kg + concrete + ratio ──────
+function AbstractView({ result }) {
+  const byCat = result?.totals?.byBbsCategory ?? {}
+  const concrete = useMemo(
+    () => concreteByBbsCategory(useStore.getState(), byCat),
+    [byCat],
+  )
+  const cats = [
+    ...BBS_CATEGORY_ORDER.filter(c => byCat[c]),
+    ...Object.keys(byCat).filter(c => !BBS_CATEGORY_ORDER.includes(c)),
+  ]
+  if (cats.length === 0) return <div style={emptyState}>No bars scheduled in this scope.</div>
+  let grandKg = 0, grandM3 = 0
+  return (
+    <div style={summaryGrid}>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={thStyle}>Member</th>
+            {DIA_COLS.map(d => <th key={d} style={{ ...thStyle, textAlign: 'right' }}>Ø{d}</th>)}
+            <th style={{ ...thStyle, textAlign: 'right' }}>Total kg</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Conc m³</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>kg/m³</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cats.map(c => {
+            const ent = byCat[c]
+            const m3 = concrete[c] ?? 0
+            grandKg += ent.totalKg; grandM3 += m3
+            return (
+              <tr key={c}>
+                <td style={tdStyle}>{BBS_CATEGORY_LABEL[c] ?? c}</td>
+                {DIA_COLS.map(d => <td key={d} style={tdNumStyle}>{safeR2(ent.byDiaKg?.[d] ?? 0).toFixed(1)}</td>)}
+                <td style={{ ...tdNumStyle, fontWeight: 'var(--weight-semibold)' }}>{safeR2(ent.totalKg).toFixed(1)}</td>
+                <td style={tdNumStyle}>{m3 > 0 ? safeR2(m3).toFixed(2) : '—'}</td>
+                <td style={tdNumStyle}>{m3 > 0 ? safeR2(ent.totalKg / m3).toFixed(0) : '—'}</td>
+              </tr>
+            )
+          })}
+          <tr>
+            <td style={{ ...tdStyle, fontWeight: 'var(--weight-bold)' }}>GRAND TOTAL</td>
+            {DIA_COLS.map(d => <td key={d} style={tdNumStyle} />)}
+            <td style={{ ...tdNumStyle, fontWeight: 'var(--weight-bold)' }}>{safeR2(grandKg).toFixed(1)}</td>
+            <td style={{ ...tdNumStyle, fontWeight: 'var(--weight-bold)' }}>{grandM3 > 0 ? safeR2(grandM3).toFixed(2) : '—'}</td>
+            <td style={{ ...tdNumStyle, fontWeight: 'var(--weight-bold)' }}>{grandM3 > 0 ? safeR2(grandKg / grandM3).toFixed(0) : '—'}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   )
 }
 
