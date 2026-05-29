@@ -69,8 +69,8 @@ recent first.
   unaffected — points to the face-mode buffer path specifically.
 - **Repro (to confirm)**: set Drawing-to = Inside, draw a wall chain, click a
   second point — chain does not extend.
-- **Not yet root-caused** (logged as reported; needs an in-app repro pass).
+</details>
 
-> Both are scheduled as demo blockers (fix before the in-canvas MD demo).
-> Neither touches the BBS engine. P0 today is the BBS footing fix + site-practice
-> allowance mode (see plan); these two are queued right behind.
+> Both demo blockers resolved 2026-05-29 (this run). Neither touches the BBS
+> engine. Live in-canvas confirmation of the 3-click chain + badge position is
+> the user's final demo check; the build + verify guards cover regression.
