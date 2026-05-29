@@ -23,7 +23,7 @@ export const foundationSchema = Object.freeze({
   fields: Object.freeze({
     id:                  Object.freeze({ type: 'uuid',        required: true,  generator: 'uid' }),
     ifcGlobalId:         Object.freeze({ type: 'ifcGuid',     required: true,  generator: 'uidIfc' }),
-    type:                Object.freeze({ type: 'string',      required: true,  oneOf: Object.freeze(['ISOLATED', 'COMBINED', 'RAFT', 'STRIP', 'PILE']) }),
+    type:                Object.freeze({ type: 'string',      required: true,  oneOf: Object.freeze(['ISOLATED', 'COMBINED', 'RAFT', 'STRIP', 'PILE', 'STRAP']) }),
     columnIds:           Object.freeze({ type: 'array',       required: true,  default: () => [], itemType: 'string' }),
     wallIds:             Object.freeze({ type: 'array',       required: true,  default: () => [], itemType: 'string' }),
     geometry:            Object.freeze({ type: 'object|null', required: true,  default: () => ({}) }),

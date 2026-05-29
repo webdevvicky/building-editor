@@ -135,6 +135,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   columnTypes: DEFAULT_COLUMN_TYPES,
 
   beamDimensions: {
+    tie:    { widthIn: 9,  depthIn: 12 },   // BBS-categories phase — grade/tie band
     plinth: { widthIn: 9,  depthIn: 12 },
     lintel: { widthIn: 9,  depthIn: 6  },
     roof:   { widthIn: 9,  depthIn: 15 },
@@ -226,10 +227,18 @@ export const DEFAULT_PROJECT_SETTINGS = {
     SLAB:    null,
     FOOTING: null,
     BEAM: {
+      tie:    null,   // BBS-categories phase — grade/tie band beam
       plinth: null,
       lintel: null,
       roof:   null,
     },
+    // BBS-categories phase (2026-05-29) — new element project-default specs.
+    // null = kg/m³ estimate (and, since these elements are opt-in, no BBS
+    // groups at all). Keeps every existing verify green by default.
+    SUNSHADE:  null,
+    LOFT:      null,
+    STAIRCASE: null,
+    STRAP:     null,
     // Gap 3 — standard bar length (m) for the per-Ø procurement rollup.
     // 6m matches user spec; 12m allowed for crane-handled work.
     standardBarLengthM: STANDARD_BAR_LENGTH_M,
@@ -1260,6 +1269,77 @@ export const createStructuralSlice = (set, get, uid) => ({
           [wallId]: { ...wall, wallBeamSpecs: hasAny ? next : null },
         },
       }
+    })
+  },
+
+  // ── BBS-categories phase setters (2026-05-29) ───────────────────────────────
+  // Sub/super column segment override. null = auto-derive (when split enabled).
+  setColumnPosition: (columnId, position) => {
+    get()._save()
+    set(state => {
+      const col = state.columns[columnId]
+      if (!col) return {}
+      return { columns: { ...state.columns, [columnId]: { ...col, position: position ?? null } } }
+    })
+  },
+
+  // Tie/grade band beam opt-in for a wall (BBS-only). true/false/null.
+  setWallTieBeam: (wallId, hasTieBeam) => {
+    get()._save()
+    set(state => {
+      const wall = state.walls[wallId]
+      if (!wall) return {}
+      return { walls: { ...state.walls, [wallId]: { ...wall, hasTieBeam } } }
+    })
+  },
+
+  // Loft attribute on a wall. partial merges into { enabled, widthFt, depthFt,
+  // heightFt }; pass null to clear the loft entirely.
+  setWallLoft: (wallId, partial) => {
+    get()._save()
+    set(state => {
+      const wall = state.walls[wallId]
+      if (!wall) return {}
+      const next = partial === null ? null : { ...(wall.loft ?? {}), ...partial }
+      return { walls: { ...state.walls, [wallId]: { ...wall, loft: next } } }
+    })
+  },
+
+  setWallLoftSpec: (wallId, specId) => {
+    get()._save()
+    set(state => {
+      const wall = state.walls[wallId]
+      if (!wall) return {}
+      return { walls: { ...state.walls, [wallId]: { ...wall, loftSpecId: specId ?? null } } }
+    })
+  },
+
+  // Per-opening sunshade reinforcement spec override.
+  setOpeningSunshadeSpec: (wallId, openingId, specId) => {
+    get()._save()
+    set(state => {
+      const wall = state.walls[wallId]
+      if (!wall) return {}
+      return {
+        walls: {
+          ...state.walls,
+          [wallId]: {
+            ...wall,
+            openings: wall.openings.map(o =>
+              o.id === openingId ? { ...o, sunshadeSpecId: specId ?? null } : o),
+          },
+        },
+      }
+    })
+  },
+
+  // Staircase instance reinforcement spec override.
+  setStaircaseReinforcementSpec: (staircaseId, specId) => {
+    get()._save()
+    set(state => {
+      const s = state.staircases[staircaseId]
+      if (!s) return {}
+      return { staircases: { ...state.staircases, [staircaseId]: { ...s, reinforcementSpecId: specId ?? null } } }
     })
   },
 

@@ -36,7 +36,10 @@ import {
   ftToMm,
 } from '../../specs/cuttingLength.js'
 import { ELEMENT_TYPE, REBAR_ROLE, SHAPE_CODE, makeRebarGroup } from '../types.js'
+import { buildStrapFootingGroups } from './strapFootingRebar.js'
 
+// RAFT / STRIP / PILE remain deferred (dedicated generators). STRAP is now
+// built (BBS-categories phase) via strapFootingRebar.js.
 const DEFERRED_FOUNDATION_TYPES = new Set(['RAFT', 'STRIP', 'PILE'])
 
 // ── Public entry ────────────────────────────────────────────────────────────
@@ -48,6 +51,7 @@ export function generateFootingRebarGroups(ctx, descriptor) {
   if (descriptor.kind === 'FOUNDATION_ENTITY') {
     const foundation = descriptor.foundation
     if (!foundation) return []
+    if (foundation.type === 'STRAP') return buildStrapFootingGroups(state, params, foundation)
     if (DEFERRED_FOUNDATION_TYPES.has(foundation.type)) return []
     return _buildForFoundationEntity(state, params, foundation)
   }

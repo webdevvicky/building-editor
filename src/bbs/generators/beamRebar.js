@@ -34,20 +34,20 @@ import {
   MM_PER_IN,
 } from '../../specs/cuttingLength.js'
 import { resolveBeamEndpoint } from '../../topology/beams.js'
-import { ELEMENT_TYPE, REBAR_ROLE, SHAPE_CODE, makeRebarGroup } from '../types.js'
+import {
+  ELEMENT_TYPE, REBAR_ROLE, SHAPE_CODE, makeRebarGroup,
+  bbsCategoryForBeamClass, beamBehaviorForClass, getBarMarkPrefix,
+} from '../types.js'
 
 // Beam label — kept short for schedule table column width.
 //   Explicit:     'B-<idSlice>'
 //   Wall-derived: '<CLS>-<wallIdSlice>'  (CLS ∈ PLI / LIN / ROO)
-function _beamLabelFor(beam) {
-  if (beam.source === 'WALL_DERIVED') {
-    const cls = String(beam.beamClass ?? beam.level ?? 'BEM')
-      .toUpperCase().replace(/\s+/g, '').slice(0, 3)
-    const wallSlice = String(beam.sourceWallId ?? '').slice(0, 4)
-    return wallSlice ? `${cls}-${wallSlice}` : cls
-  }
-  const idSlice = String(beam.id ?? '').slice(0, 4)
-  return idSlice ? `B-${idSlice}` : 'B'
+function _beamLabelFor(beam, bbsCategory) {
+  const prefix = getBarMarkPrefix(bbsCategory)   // PB/HB/RB/TB/B per registry
+  const slice = beam.source === 'WALL_DERIVED'
+    ? String(beam.sourceWallId ?? '').slice(0, 4)
+    : String(beam.id ?? '').slice(0, 4)
+  return slice ? `${prefix}-${slice}` : prefix
 }
 
 // Exterior-joint detection. Wall-derived: external wall iff exactly one
@@ -93,8 +93,14 @@ export function generateBeamRebarGroups(ctx, beam) {
   const widthIn = dims.widthIn, depthIn = dims.depthIn
   if (widthIn <= 0 || depthIn <= 0) return []
 
+  // Band vs frame behaviour (IS 4326 bands = tie/lintel → uniform links, no
+  // IS 13920 confinement). beamBehavior + bbsCategory stamped on every group.
+  const beamBehavior = beamBehaviorForClass(beamClass)
+  const bbsCategory  = bbsCategoryForBeamClass(beamClass)
+  const isBand       = beamBehavior === 'BAND'
+
   const lengthMm  = ftToMm(lengthFt)
-  const beamLabel = _beamLabelFor(beam)
+  const beamLabel = _beamLabelFor(beam, bbsCategory)
   const floorId   = _floorIdFor(state, beam)
   const elementId = beam.id
   const steelGrade = params.defaultSteelGrade
@@ -139,7 +145,9 @@ export function generateBeamRebarGroups(ctx, beam) {
     specId,
     specSource,
     steelGrade,
+    bbsCategory,
     meta: {
+      beamBehavior,
       description:    'Beam top bars (anchorage at ends)',
       parentMark:     beamLabel,
       anchorFromMm:   Math.round(anchorFromTopMm),
@@ -174,7 +182,9 @@ export function generateBeamRebarGroups(ctx, beam) {
     specId,
     specSource,
     steelGrade,
+    bbsCategory,
     meta: {
+      beamBehavior,
       description:    'Beam bottom bars (anchorage at ends)',
       parentMark:     beamLabel,
       anchorFromMm:   Math.round(anchorFromBotMm),
@@ -196,7 +206,7 @@ export function generateBeamRebarGroups(ctx, beam) {
   const totalLengthIn = lengthFt * 12
   const specSpacingIn = spec.stirrupSpacingIn
 
-  if (params.confinementZoneEnabled) {
+  if (params.confinementZoneEnabled && !isBand) {
     // IS 13920 Cl 6.3.5 — confinement zone per end = 2 × beam depth (default).
     const zoneLengthIn = (params.beamConfinementLengthDepthFactor ?? 2) * depthIn
     const zoneSpacingMm = Math.min(
@@ -234,7 +244,9 @@ export function generateBeamRebarGroups(ctx, beam) {
         specId,
         specSource,
         steelGrade,
+        bbsCategory,
         meta: {
+          beamBehavior,
           description:   'Beam stirrups (IS 13920 confinement zone at ends)',
           parentMark:    beamLabel,
           spacingIn:     zoneSpacingIn,
@@ -261,7 +273,9 @@ export function generateBeamRebarGroups(ctx, beam) {
         specId,
         specSource,
         steelGrade,
+        bbsCategory,
         meta: {
+          beamBehavior,
           description: 'Beam stirrups (mid span, uniform spacing)',
           parentMark:  beamLabel,
           spacingIn:   specSpacingIn,
@@ -291,7 +305,9 @@ export function generateBeamRebarGroups(ctx, beam) {
         specId,
         specSource,
         steelGrade,
+        bbsCategory,
         meta: {
+          beamBehavior,
           description: 'Beam stirrups (uniform spacing)',
           parentMark:  beamLabel,
           spacingIn:   specSpacingIn,

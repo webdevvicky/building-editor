@@ -29,8 +29,8 @@
 // All linear dimensions in this module are in mm unless suffixed _ft.
 // All bend deductions multiply diameter (d), not an absolute length.
 
-export const CATALOG_VERSION = '2026-05-28-IS-2502-V1'
-export const CATALOG_SOURCE  = 'IS 2502:1963 + IS 456:2000 + IS 13920:2016 + SP 34:1987'
+export const CATALOG_VERSION = '2026-05-29-IS-2502-V2'
+export const CATALOG_SOURCE  = 'IS 2502:1963 + IS 456:2000 + IS 13920:2016 + IS 4326:2013 + SP 34:1987'
 
 // ── Default IS 2502 parameter catalog ──────────────────────────────────────
 // Every BBS computation reads through getIs2502Params(state) which deep-merges
@@ -83,6 +83,13 @@ export const DEFAULT_IS2502_PARAMS = Object.freeze({
     Fe500_M25_tension:     48.5,
     Fe500_M25_compression: 38.8,
     Fe415_M20_tension:     47.0,
+    // Fe550D (BBS-categories phase 2026-05-29). Ld = φ·(0.87·550)/(4·τbd).
+    // M20 τbd(deformed) = 1.92 MPa → 62.3d; compression 0.8× = 49.8d.
+    // M25 τbd(deformed) = 2.24 MPa → 53.4d; compression 0.8× = 42.7d.
+    Fe550_M20_tension:     62.3,
+    Fe550_M20_compression: 49.8,
+    Fe550_M25_tension:     53.4,
+    Fe550_M25_compression: 42.7,
     simplified_tension:    50,    // legacy site shorthand
     simplified_compression: 40,
   }),
@@ -94,6 +101,8 @@ export const DEFAULT_IS2502_PARAMS = Object.freeze({
     Fe500_M20_nonseismic:  56.6,
     Fe500_M20_seismic:     73.6,  // 1.3 × 56.6
     Fe415_M20_nonseismic:  47.0,
+    Fe550_M20_nonseismic:  62.3,
+    Fe550_M20_seismic:     81.0,  // 1.3 × 62.3
     simplified:            50,    // legacy site shorthand
   }),
 
@@ -138,6 +147,52 @@ export const DEFAULT_IS2502_PARAMS = Object.freeze({
   beamConfinementMaxSpacingMm:  100,
   beamConfinementDFactor:       0.25,
   beamConfinementBarFactor:     8,
+
+  // ── BBS-categories phase (2026-05-29) — element-specific anchorage /
+  // geometry FACTORS. These are IS-derived multipliers only; the bar
+  // dia/count/spacing for each element live in reinforcementSpecs (per the
+  // locked rule: specs are per-element, this catalog holds IS factors).
+
+  // Sunshade / chajja (cantilever above an opening). Top steel only. Main
+  // bars anchor INTO the lintel band by a development length; the cantilever
+  // bar runs the projection + a down-turn at the free edge (small hook).
+  // factor × Ld_tension(mainDia) embedded into the lintel.
+  sunshadeAnchorageIntoLintelFactor: 1.0,
+  // Free-edge down-turn of the top bar = factor × slab(sunshade) thickness.
+  sunshadeEdgeTurnFactor:            1.0,
+
+  // Loft (RCC shelf cast into wall). Top + bottom bars embed into the wall
+  // for bearing. Embed = max(loftEmbedMinMm, factor × Ld_tension(dia)).
+  loftEmbedMinMm:                    230,   // ~9in min bearing into masonry/RCC
+  loftEmbedFactor:                   1.0,   // × Ld_tension
+
+  // Staircase waist slab. Main bars run the inclined going and anchor INTO
+  // the landing slab/beam by a development length at each end.
+  staircaseLandingAnchorageFactor:   1.0,   // × Ld_tension(mainDia)
+
+  // Strap footing. Strap-beam top/bottom bars anchor OVER the two pads by a
+  // development length past each pad face.
+  strapBeamAnchorageFactor:          1.0,   // × Ld_tension(barDia)
+
+  // Sub/super structure column split. OFF by default — a single column emits
+  // one LONGITUDINAL group (today's behaviour, keeps verify-bbs Section C
+  // green). When true, base-floor columns split into a SUB stub (footing-top →
+  // grade beam) + SUPER run(s), reported as separate abstract categories.
+  subSuperColumnSplitEnabled:        false,
+
+  // Sub/super structure column. The sub-column (footing-top → grade beam)
+  // longitudinal bars lap with the dowels below and the super-column bars
+  // above. Lap = factor × lap length.
+  subColumnLapFactor:                1.0,   // × lap length at the grade-beam transition
+  // Default grade-beam soffit level above footing top, as a fraction of the
+  // base-floor plinth height, when no explicit level is given. The sub-column
+  // segment spans footing-top → grade-beam soffit. 1.0 = full plinth height.
+  gradeBeamLevelPlinthFraction:      1.0,
+
+  // RCC seismic bands (tie + lintel) per IS 4326. Bands run continuous along
+  // walls; site practice (Chennai residential) uses UNIFORM links — no IS
+  // 13920 confinement zone. Continuity/corner anchorage = factor × Ld.
+  bandBeamCornerAnchorageFactor:     1.0,   // × Ld_tension at band ends/corners
 
   // Steel grade label (passed through to RebarGroup output for the
   // schedule table). Pure metadata.

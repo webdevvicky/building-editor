@@ -29,6 +29,9 @@ export const staircaseSchema = Object.freeze({
     toFloorId:       Object.freeze({ type: 'ref',         required: true,  default: 'F1' }),
     floorId:         Object.freeze({ type: 'ref',         required: true,  default: 'F1' }),
     hasHandrail:     Object.freeze({ type: 'boolean|null', required: true,  default: null }),
+    // BBS-categories phase — instance reinforcement spec override.
+    // null = inherit bbsDefaults.STAIRCASE (and → ESTIMATE / no BBS if unset).
+    reinforcementSpecId: Object.freeze({ type: 'string|null', required: true, default: null }),
     meta:            Object.freeze({ type: 'object|null', required: true,  default: null }),
   }),
   invariants: Object.freeze([

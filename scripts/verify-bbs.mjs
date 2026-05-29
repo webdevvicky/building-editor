@@ -549,6 +549,213 @@ reset()
   ok('byDiameter.12.byCategory.column > 0', newOut.totals.byDiameter[12].byCategory.column > 0)
 }
 
+// ── helper: load a one-wall project (BBS-categories sections) ────────────────
+function loadWallProject({ wall = {}, settings = {}, staircases = {}, foundations = {} }) {
+  s().loadProject({
+    nodes: {
+      n1: { id: 'n1', x: 0,   y: 0, floorIds: ['F1'] },
+      n2: { id: 'n2', x: 240, y: 0, floorIds: ['F1'] },
+    },
+    walls: {
+      w1: {
+        id: 'w1', n1: 'n1', n2: 'n2', floorId: 'F1', thickness: 9, height: 120,
+        materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual: false, openings: [],
+        ...wall,
+      },
+    },
+    rooms: {}, stamps: {}, columns: {}, beams: {}, slabs: {},
+    staircases, foundations,
+    projectSettings: undefined, unit: 'inch',
+  })
+  s().setDrawReference?.('centerline')
+  if (Object.keys(settings).length) s().setProjectSettings(settings)
+}
+
+// ── Section H — Tie / grade band beam (IS 4326) ──────────────────────────────
+header('H. Tie / grade band beam — wall.hasTieBeam, band behaviour')
+{
+  loadWallProject({
+    wall: { hasTieBeam: true },
+    settings: {
+      is2502Params: { confinementZoneEnabled: true },  // must NOT add zones to a band
+      reinforcementSpecs: { TIE: { id: 'TIE', label: 'Tie', elementType: 'BEAM',
+        topBars: { count: 2, diaMm: 12 }, bottomBars: { count: 2, diaMm: 12 },
+        stirrupBarDiaMm: 8, stirrupSpacingIn: 8, coverMm: 30 } },
+      bbsDefaults: { BEAM: { tie: 'TIE', plinth: null, lintel: null, roof: null } },
+    },
+  })
+  const out = computeRebarGroups(s())
+  const tie = out.groups.filter(g => g.meta?.bbsCategory === 'TIE_BEAM')
+  ok('Tie band emits groups', tie.length >= 3, `got ${tie.length}`)
+  ok('Tie TOP present (Ø12)', tie.some(g => g.role === REBAR_ROLE.TOP && g.diaMm === 12))
+  ok('Tie STIRRUP present (Ø8)', tie.some(g => g.role === REBAR_ROLE.STIRRUP && g.diaMm === 8))
+  ok('Tie beamBehavior = BAND', tie.every(g => g.meta?.beamBehavior === 'BAND'))
+  ok('Tie band has NO confinement zone (uniform links despite flag)',
+     !tie.some(g => g.role === REBAR_ROLE.STIRRUP_ZONE))
+  ok('Tie markId prefix = TB', tie.every(g => g.markId.startsWith('TB')))
+  ok('Tie rolls into byBbsCategory.TIE_BEAM', !!out.totals.byBbsCategory.TIE_BEAM)
+}
+
+// ── Section I — Lintel / head band beam ──────────────────────────────────────
+header('I. Lintel / head band beam — wall-derived, band behaviour')
+{
+  loadWallProject({
+    wall: { hasLintelBeam: true },
+    settings: {
+      reinforcementSpecs: { LIN: { id: 'LIN', label: 'Lintel', elementType: 'BEAM',
+        topBars: { count: 2, diaMm: 8 }, bottomBars: { count: 2, diaMm: 8 },
+        stirrupBarDiaMm: 8, stirrupSpacingIn: 6, coverMm: 30 } },
+      bbsDefaults: { BEAM: { tie: null, plinth: null, lintel: 'LIN', roof: null } },
+    },
+  })
+  const out = computeRebarGroups(s())
+  const lin = out.groups.filter(g => g.meta?.bbsCategory === 'LINTEL_BEAM')
+  ok('Lintel band emits groups', lin.length >= 3, `got ${lin.length}`)
+  ok('Lintel beamBehavior = BAND', lin.length > 0 && lin.every(g => g.meta?.beamBehavior === 'BAND'))
+  ok('Lintel markId prefix = HB', lin.length > 0 && lin.every(g => g.markId.startsWith('HB')))
+  ok('Lintel rolls into byBbsCategory.LINTEL_BEAM', !!out.totals.byBbsCategory.LINTEL_BEAM)
+}
+
+// ── Section J — Sunshade / chajja ────────────────────────────────────────────
+header('J. Sunshade / chajja — top steel L-bar anchored into lintel')
+{
+  loadWallProject({
+    wall: { openings: [{ id: 'op1', type: 'window', width: 48, height: 48, offset: 24,
+      orient: 0, hasSunshade: true, subtype: 'WINDOW', subtypeSource: 'HEURISTIC' }] },
+    settings: {
+      sunshadeSettings: { enabled: true, projectionFt: 1.5, thicknessIn: 3 },
+      reinforcementSpecs: { SS: { id: 'SS', label: 'SS', elementType: 'SUNSHADE',
+        mainBarDiaMm: 8, mainBarSpacingIn: 6, distBarDiaMm: 8, distBarSpacingIn: 8, coverMm: 20 } },
+      bbsDefaults: { SUNSHADE: 'SS' },
+    },
+  })
+  const out = computeRebarGroups(s())
+  const ss = out.groups.filter(g => g.elementType === ELEMENT_TYPE.SUNSHADE)
+  const main = ss.find(g => g.role === REBAR_ROLE.MAIN)
+  ok('Sunshade emits MAIN + DIST', ss.length >= 2, `got ${ss.length}`)
+  ok('Sunshade MAIN is L-bar Ø8', main?.shapeCode === SHAPE_CODE.L_BAR && main?.diaMm === 8)
+  ok('Sunshade MAIN anchored into lintel (anchorageMm > 0)', (main?.meta?.anchorageMm ?? 0) > 0)
+  ok('Sunshade bbsCategory = SUNSHADE', ss.every(g => g.meta?.bbsCategory === 'SUNSHADE'))
+  ok('Sunshade markId prefix = CH', ss.every(g => g.markId.startsWith('CH')))
+  ok('Sunshade weight > 0', ss.reduce((a, g) => a + g.totalWeightKg, 0) > 0)
+}
+
+// ── Section K — Loft ─────────────────────────────────────────────────────────
+header('K. Loft — top + bottom mat embedded into wall')
+{
+  loadWallProject({
+    wall: { loft: { enabled: true, widthFt: 8, depthFt: 2, heightFt: 7 } },
+    settings: {
+      reinforcementSpecs: { LF: { id: 'LF', label: 'Loft', elementType: 'LOFT',
+        mainBarDiaMm: 8, mainBarSpacingIn: 8, distBarDiaMm: 8, distBarSpacingIn: 8, coverMm: 20 } },
+      bbsDefaults: { LOFT: 'LF' },
+    },
+  })
+  const out = computeRebarGroups(s())
+  const lf = out.groups.filter(g => g.elementType === ELEMENT_TYPE.LOFT)
+  ok('Loft emits TOP + BOTTOM + DIST', lf.length >= 3, `got ${lf.length}`)
+  ok('Loft has TOP and BOTTOM', lf.some(g => g.role === REBAR_ROLE.TOP) && lf.some(g => g.role === REBAR_ROLE.BOTTOM))
+  ok('Loft main embedded into wall (L-bar, embedMm > 0)',
+     lf.some(g => g.shapeCode === SHAPE_CODE.L_BAR && (g.meta?.embedMm ?? 0) > 0))
+  ok('Loft bbsCategory = LOFT', lf.every(g => g.meta?.bbsCategory === 'LOFT'))
+  ok('Loft markId prefix = LF', lf.every(g => g.markId.startsWith('LF')))
+}
+
+// ── Section L — Staircase (dog-legged waist slab) ────────────────────────────
+header('L. Staircase — waist + dist + landing (ESTIMATE-grade)')
+{
+  loadWallProject({
+    staircases: { st1: { id: 'st1', type: 'DOG_LEGGED', flightCount: 2, stepsPerFlight: 9,
+      treadIn: 10, riserIn: 6.5, waistSlabIn: 6, landingFtWidth: 4, landingFtLength: 4,
+      flightWidthFt: 3.5, grade: 'M20', fromFloorId: 'F1', toFloorId: 'F1', floorId: 'F1' } },
+    settings: {
+      reinforcementSpecs: { ST: { id: 'ST', label: 'Stair', elementType: 'STAIRCASE',
+        waistMainBarDiaMm: 12, waistMainSpacingIn: 5, distBarDiaMm: 8, distBarSpacingIn: 6, coverMm: 20 } },
+      bbsDefaults: { STAIRCASE: 'ST' },
+    },
+  })
+  const out = computeRebarGroups(s())
+  const st = out.groups.filter(g => g.elementType === ELEMENT_TYPE.STAIRCASE)
+  ok('Staircase emits WAIST + DIST + LANDING', st.length >= 3, `got ${st.length}`)
+  ok('Staircase WAIST present (Ø12)', st.some(g => g.role === REBAR_ROLE.WAIST && g.diaMm === 12))
+  ok('Staircase LANDING present', st.some(g => g.role === REBAR_ROLE.LANDING))
+  ok('Staircase bbsCategory = STAIRCASE', st.every(g => g.meta?.bbsCategory === 'STAIRCASE'))
+  ok('Staircase markId prefix = ST', st.every(g => g.markId.startsWith('ST')))
+  const stKg = st.reduce((a, g) => a + g.totalWeightKg, 0)
+  ok('Staircase total in sane band (40–160 kg)', stKg > 40 && stKg < 160, `got ${stKg.toFixed(1)}kg`)
+}
+
+// ── Section M — Strap / eccentric footing ────────────────────────────────────
+header('M. Strap footing — 2 pads + strap beam (top primary)')
+{
+  loadWallProject({
+    foundations: { f1: { id: 'f1', type: 'STRAP', columnIds: [], wallIds: [],
+      geometry: { padA: { lengthFt: 4, widthFt: 4 }, padB: { lengthFt: 5, widthFt: 5 },
+        strap: { widthIn: 9, depthIn: 18, lengthFt: 6 } },
+      grade: 'M20', pccDepthFt: 0.16, plumDepthFt: 0, floorId: 'F1', label: 'EF1',
+      reinforcementSpecId: 'STR' } },
+    settings: {
+      reinforcementSpecs: { STR: { id: 'STR', label: 'Strap', elementType: 'STRAP',
+        pad: { barDiaMm: 10, barSpacingIn: 5 },
+        strap: { topBars: { count: 3, diaMm: 16 }, bottomBars: { count: 3, diaMm: 16 },
+          sideBars: { count: 2, diaMm: 12 }, stirrupBarDiaMm: 8, stirrupSpacingIn: 6 },
+        coverMm: 30, padCoverMm: 60 } },
+      bbsDefaults: { STRAP: 'STR' },
+    },
+  })
+  const out = computeRebarGroups(s())
+  const sf = out.groups.filter(g => g.meta?.bbsCategory === 'STRAP_FOOTING')
+  ok('Strap emits pad mesh + strap beam groups', sf.length >= 6, `got ${sf.length}`)
+  ok('Strap pad mesh present (Ø10)', sf.some(g => g.role === REBAR_ROLE.X_MESH && g.diaMm === 10))
+  ok('Strap top primary bars present (Ø16)', sf.some(g => g.role === REBAR_ROLE.TOP && g.diaMm === 16))
+  ok('Strap side/mid bars present (Ø12)', sf.some(g => g.role === REBAR_ROLE.MID && g.diaMm === 12))
+  ok('Strap stirrups present (Ø8 closed)', sf.some(g => g.role === REBAR_ROLE.STIRRUP && g.shapeCode === SHAPE_CODE.CLOSED_STIRRUP))
+  ok('Strap markId prefix = SF', sf.every(g => g.markId.startsWith('SF') || g.markId.startsWith('EF')))
+}
+
+// ── Section N — Sub / super structure column split ───────────────────────────
+header('N. Sub/super column — per-segment split, one column entity')
+reset()
+{
+  s().setProjectSettings({
+    is2502Params: { subSuperColumnSplitEnabled: true },
+    heights: { plinthHeightFt: 2, floorHeightFt: 10 },
+    floors: [{ id: 'F1', label: 'GF', sequence: 0, plinthHeightFt: 2, floorHeightFt: 10, meta: null }],
+    reinforcementSpecs: { C1: { id: 'C1', label: 'C1', elementType: 'COLUMN',
+      longitudinalBarCount: 6, longitudinalBarDiaMm: 12, stirrupBarDiaMm: 8,
+      stirrupSpacingIn: 6, coverMm: 25, lapLengthMultiplier: 50 } },
+    bbsDefaults: { COLUMN: 'C1' },
+    columnTypes: [{ id: 'C1', label: 'C1', shape: 'rect', widthIn: 9, depthIn: 12,
+      footingLengthFt: 4, footingWidthFt: 4, footingDepthFt: 1.5 }],
+  })
+  const cid = s().addColumn(0, 0)
+  s().setColumnType(cid, 'C1')
+  const out = computeRebarGroups(s())
+  const sub   = out.groups.filter(g => g.meta?.bbsCategory === 'SUB_COLUMN')
+  const sup   = out.groups.filter(g => g.meta?.bbsCategory === 'SUPER_COLUMN')
+  ok('Auto-split emits SUB_COLUMN groups', sub.length >= 1, `got ${sub.length}`)
+  ok('Auto-split emits SUPER_COLUMN groups', sup.length >= 1, `got ${sup.length}`)
+  ok('SUB segmentType = AUTO_SUB', sub.every(g => g.meta?.segmentType === 'AUTO_SUB'))
+  ok('SUPER segmentType = AUTO_SUPER', sup.every(g => g.meta?.segmentType === 'AUTO_SUPER'))
+  ok('SUB markId prefix = SC', sub.every(g => g.markId.startsWith('SC')))
+  // Split adds one lap at the grade transition (sub bar laps dowel + super
+  // bar laps sub) → split kg is modestly ABOVE the single-lap flat path. The
+  // backward-compat invariant lives on the DEFAULT (non-split) path (Section G).
+  const splitKg = [...sub, ...sup].reduce((a, g) => a + g.totalWeightKg, 0)
+  s().setProjectSettings({ is2502Params: { subSuperColumnSplitEnabled: false } })
+  const flat = computeRebarGroups(s())
+  const flatKg = flat.totals.byCategory.column
+  ok('Split kg ≥ flat (one extra lap at grade transition is correct)',
+     splitKg >= flatKg && (splitKg - flatKg) < 10,
+     `split=${splitKg.toFixed(2)} flat=${flatKg.toFixed(2)}`)
+  // Forced position
+  s().setProjectSettings({ is2502Params: { subSuperColumnSplitEnabled: false } })
+  s().setColumnPosition(cid, 'SUB')
+  const forced = computeRebarGroups(s())
+  ok('Forced position → FORCED_SUB segmentType',
+     forced.groups.some(g => g.meta?.segmentType === 'FORCED_SUB' && g.meta?.bbsCategory === 'SUB_COLUMN'))
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
 console.log(`BBS verification: ${pass} passed, ${fail} failed`)

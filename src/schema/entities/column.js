@@ -21,6 +21,10 @@ export const columnSchema = Object.freeze({
     topFloorId:          Object.freeze({ type: 'ref',         required: true,  default: 'F1' }),
     classification:      Object.freeze({ type: 'string|null', required: true,  default: null }),
     reinforcementSpecId: Object.freeze({ type: 'string|null', required: true,  default: null }),
+    // BBS-categories phase — sub/super segment override. null = auto-derive
+    // (footing-top→grade-beam = SUB, above = SUPER) when split enabled;
+    // 'SUB'/'SUPER' forces the whole column into one abstract category.
+    position:            Object.freeze({ type: 'string|null', required: true,  default: null, oneOf: Object.freeze([null, 'SUB', 'SUPER']) }),
     meta:                Object.freeze({ type: 'object|null', required: true,  default: null }),
   }),
   invariants: Object.freeze([]),

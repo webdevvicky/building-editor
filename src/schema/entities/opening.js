@@ -31,6 +31,10 @@ export const openingSchema = Object.freeze({
                                    oneOf: Object.freeze(['EXPLICIT', 'HEURISTIC']) }),
     hardwareSetId:     Object.freeze({ type: 'string|null', default: null }),
     hardwareOverrides: Object.freeze({ type: 'object|null', default: null }),
+    // BBS-categories phase — per-opening sunshade reinforcement spec override.
+    // null = inherit bbsDefaults.SUNSHADE. Sunshade BBS only emits when
+    // hasSunshade === true AND a spec resolves (default → no BBS impact).
+    sunshadeSpecId:    Object.freeze({ type: 'string|null', default: null }),
   }),
   invariants: Object.freeze([
     Object.freeze({

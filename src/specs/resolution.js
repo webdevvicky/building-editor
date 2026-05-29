@@ -180,6 +180,61 @@ export function resolveFootingReinforcementSpec(state, opts) {
   return makeEstimate()
 }
 
+// ── Sunshade resolver (BBS-categories phase) ─────────────────────────────────
+// instance (opening.sunshadeSpecId) → project default (bbsDefaults.SUNSHADE)
+//                                   → ESTIMATE
+export function resolveSunshadeReinforcementSpec(state, opening) {
+  if (!opening) return makeEstimate()
+  const defaults = defaultsOf(state)
+  const instanceSpec = lookupSpec(state, opening.sunshadeSpecId)
+  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  const defaultSpec = lookupSpec(state, defaults.SUNSHADE)
+  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  return makeEstimate()
+}
+
+// ── Loft resolver ────────────────────────────────────────────────────────────
+// instance (wall.loftSpecId) → project default (bbsDefaults.LOFT) → ESTIMATE
+export function resolveLoftReinforcementSpec(state, wall) {
+  if (!wall) return makeEstimate()
+  const defaults = defaultsOf(state)
+  const instanceSpec = lookupSpec(state, wall.loftSpecId)
+  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  const defaultSpec = lookupSpec(state, defaults.LOFT)
+  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  return makeEstimate()
+}
+
+// ── Staircase resolver ───────────────────────────────────────────────────────
+// instance (staircase.reinforcementSpecId) → project default
+//          (bbsDefaults.STAIRCASE) → ESTIMATE
+export function resolveStaircaseReinforcementSpec(state, staircaseOrId) {
+  let stair = staircaseOrId
+  if (typeof staircaseOrId === 'string') stair = state.staircases?.[staircaseOrId] ?? null
+  if (!stair) return makeEstimate()
+  const defaults = defaultsOf(state)
+  const instanceSpec = lookupSpec(state, stair.reinforcementSpecId)
+  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  const defaultSpec = lookupSpec(state, defaults.STAIRCASE)
+  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  return makeEstimate()
+}
+
+// ── Strap-footing resolver ───────────────────────────────────────────────────
+// instance (foundation.reinforcementSpecId — a STRAP-shape spec carrying both
+//           pad + strap layout) → project default (bbsDefaults.STRAP) → ESTIMATE
+export function resolveStrapReinforcementSpec(state, foundationOrId) {
+  let f = foundationOrId
+  if (typeof foundationOrId === 'string') f = state.foundations?.[foundationOrId] ?? null
+  if (!f) return makeEstimate()
+  const defaults = defaultsOf(state)
+  const instanceSpec = lookupSpec(state, f.reinforcementSpecId)
+  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  const defaultSpec = lookupSpec(state, defaults.STRAP)
+  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  return makeEstimate()
+}
+
 // Human label for a resolution source — used by panels, BOQ labels, exports.
 export function humanizeAssignmentSource(source) {
   switch (source) {

@@ -120,6 +120,83 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     coverMm: 20,
     twoWay: true,
   },
+
+  // ── BBS-categories phase (2026-05-29) ──────────────────────────────────────
+  // Tie/grade beam + lintel/head band beams reuse the BEAM spec shape (they
+  // resolve via bbsDefaults.BEAM[beamClass]); beamClass 'tie' / 'lintel'.
+  // Reference: Karthick M-City — grade beam 9"×12" 2T+2B Ø12 + Ø8@8";
+  // lintel 9"×6" 2T+2B Ø8 + Ø8@6".
+  TIE_BEAM_STD: {
+    id: 'TIE_BEAM_STD',
+    label: 'Tie / Grade Beam (2T12 + 2B12 + 8mm @ 8", band)',
+    elementType: 'BEAM',
+    topBars:    { count: 2, diaMm: 12 },
+    bottomBars: { count: 2, diaMm: 12 },
+    stirrupBarDiaMm: 8,
+    stirrupSpacingIn: 8,
+    coverMm: 30,
+  },
+  LINTEL_BAND_STD: {
+    id: 'LINTEL_BAND_STD',
+    label: 'Lintel / Head Band (2T8 + 2B8 + 8mm @ 6", band)',
+    elementType: 'BEAM',
+    topBars:    { count: 2, diaMm: 8 },
+    bottomBars: { count: 2, diaMm: 8 },
+    stirrupBarDiaMm: 8,
+    stirrupSpacingIn: 6,
+    coverMm: 30,
+  },
+  // Sunshade / chajja — top steel only (cantilever). Ø8 @6" main + Ø8 dist.
+  SUNSHADE_STD: {
+    id: 'SUNSHADE_STD',
+    label: 'Sunshade (8mm @ 6" main top + 8mm dist)',
+    elementType: 'SUNSHADE',
+    mainBarDiaMm: 8,
+    mainBarSpacingIn: 6,
+    distBarDiaMm: 8,
+    distBarSpacingIn: 8,
+    coverMm: 20,
+  },
+  // Loft — light mat, top + bottom Ø8 + distribution.
+  LOFT_STD: {
+    id: 'LOFT_STD',
+    label: 'Loft (8mm @ 8" both faces + 8mm dist)',
+    elementType: 'LOFT',
+    mainBarDiaMm: 8,
+    mainBarSpacingIn: 8,
+    distBarDiaMm: 8,
+    distBarSpacingIn: 8,
+    coverMm: 20,
+  },
+  // Staircase waist slab — Ø12 @125 main + Ø8 @150 dist (refined per research).
+  STAIRCASE_STD: {
+    id: 'STAIRCASE_STD',
+    label: 'Staircase waist (12mm @ 5" main + 8mm @ 6" dist)',
+    elementType: 'STAIRCASE',
+    waistMainBarDiaMm: 12,
+    waistMainSpacingIn: 5,
+    distBarDiaMm: 8,
+    distBarSpacingIn: 6,
+    coverMm: 20,
+  },
+  // Strap (eccentric) footing — pad bottom mesh + strap beam (top-primary).
+  // Reference: Karthick EF1–EF6 — pad mesh Ø10, strap top Ø12/16, bottom Ø16,
+  // mid Ø12×2, Ø8 stirrups.
+  STRAP_STD: {
+    id: 'STRAP_STD',
+    label: 'Strap footing (pad Ø10 mesh + strap 3T16/3B16/2-Ø12 + Ø8 links)',
+    elementType: 'STRAP',
+    pad:   { barDiaMm: 10, barSpacingIn: 5 },
+    strap: {
+      topBars:    { count: 3, diaMm: 16 },
+      bottomBars: { count: 3, diaMm: 16 },
+      sideBars:   { count: 2, diaMm: 12 },
+      stirrupBarDiaMm: 8,
+      stirrupSpacingIn: 6,
+    },
+    coverMm: 30,
+    padCoverMm: 60,
+  },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

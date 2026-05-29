@@ -28,15 +28,21 @@ import { generateColumnRebarGroups } from './generators/columnRebar.js'
 import { generateBeamRebarGroups }   from './generators/beamRebar.js'
 import { generateFootingRebarGroups } from './generators/footingRebar.js'
 import { generateSlabRebarGroups }   from './generators/slabRebar.js'
-import { getIs2502Params } from '../specs/cuttingLength.js'
+import { generateSunshadeRebarGroups } from './generators/sunshadeRebar.js'
+import { generateLoftRebarGroups }   from './generators/loftRebar.js'
+import { generateStaircaseRebarGroups } from './generators/staircaseRebar.js'
+import { getIs2502Params, CATALOG_VERSION } from '../specs/cuttingLength.js'
 import { ELEMENT_TYPE, REBAR_ROLE } from './types.js'
 
 // Site-order for elements within a floor — matches construction sequence.
 const ELEMENT_ORDER = Object.freeze({
-  [ELEMENT_TYPE.FOOTING]: 0,
-  [ELEMENT_TYPE.COLUMN]:  1,
-  [ELEMENT_TYPE.BEAM]:    2,
-  [ELEMENT_TYPE.SLAB]:    3,
+  [ELEMENT_TYPE.FOOTING]:   0,
+  [ELEMENT_TYPE.COLUMN]:    1,
+  [ELEMENT_TYPE.BEAM]:      2,
+  [ELEMENT_TYPE.SUNSHADE]:  3,
+  [ELEMENT_TYPE.LOFT]:      4,
+  [ELEMENT_TYPE.STAIRCASE]: 5,
+  [ELEMENT_TYPE.SLAB]:      6,
 })
 
 // Role-order for bars within an element — schedule convention.
@@ -45,14 +51,18 @@ const ROLE_ORDER = Object.freeze({
   [REBAR_ROLE.X_MESH]:       1,
   [REBAR_ROLE.Y_MESH]:       2,
   [REBAR_ROLE.LONGITUDINAL]: 3,
-  [REBAR_ROLE.TOP]:          4,
-  [REBAR_ROLE.BOTTOM]:       5,
-  [REBAR_ROLE.CRANK]:        6,
-  [REBAR_ROLE.EXTRA_TOP]:    7,
-  [REBAR_ROLE.DIST]:         8,
-  [REBAR_ROLE.DOWEL]:        9,
-  [REBAR_ROLE.STIRRUP]:      10,
-  [REBAR_ROLE.STIRRUP_ZONE]: 11,
+  [REBAR_ROLE.WAIST]:        4,
+  [REBAR_ROLE.TOP]:          5,
+  [REBAR_ROLE.BOTTOM]:       6,
+  [REBAR_ROLE.MID]:          7,
+  [REBAR_ROLE.CRANK]:        8,
+  [REBAR_ROLE.EXTRA_TOP]:    9,
+  [REBAR_ROLE.TREAD]:        10,
+  [REBAR_ROLE.LANDING]:      11,
+  [REBAR_ROLE.DIST]:         12,
+  [REBAR_ROLE.DOWEL]:        13,
+  [REBAR_ROLE.STIRRUP]:      14,
+  [REBAR_ROLE.STIRRUP_ZONE]: 15,
 })
 
 function _floorSequence(state) {
@@ -162,6 +172,52 @@ export function computeRebarGroups(state, opts = {}) {
     if (groups && groups.length) all.push(...groups)
   }
 
+  // ── Tie / grade band beams (BBS-only, derived from walls opted in via
+  // wall.hasTieBeam). Synthesized as wall-derived band beams — NOT added to
+  // BEAM_LEVEL_REGISTRY, so the legacy BOQ / masonry pipeline is untouched.
+  for (const wall of Object.values(state.walls ?? {})) {
+    if (wall.hasTieBeam !== true) continue
+    if (wall.isVirtual || wall.isPlot) continue
+    if (ctx.floorIdFilter && wall.floorId !== ctx.floorIdFilter) continue
+    const n1 = state.nodes?.[wall.n1], n2 = state.nodes?.[wall.n2]
+    if (!n1 || !n2) continue
+    const tieBeam = {
+      id: `tie_${wall.id}`,
+      source: 'WALL_DERIVED',
+      beamClass: 'tie',
+      level: 'tie',
+      sourceWallId: wall.id,
+      floorId: wall.floorId,
+      endpoints: { from: { type: 'POINT', x: n1.x, y: n1.y }, to: { type: 'POINT', x: n2.x, y: n2.y } },
+    }
+    const groups = generateBeamRebarGroups(ctx, tieBeam)
+    if (groups && groups.length) all.push(...groups)
+  }
+
+  // ── Sunshades (per window opening with hasSunshade). ─────────────────────
+  for (const wall of Object.values(state.walls ?? {})) {
+    if (ctx.floorIdFilter && wall.floorId !== ctx.floorIdFilter) continue
+    for (const opening of (wall.openings ?? [])) {
+      const groups = generateSunshadeRebarGroups(ctx, { wall, opening })
+      if (groups && groups.length) all.push(...groups)
+    }
+  }
+
+  // ── Lofts (per wall with loft.enabled). ──────────────────────────────────
+  for (const wall of Object.values(state.walls ?? {})) {
+    if (ctx.floorIdFilter && wall.floorId !== ctx.floorIdFilter) continue
+    const groups = generateLoftRebarGroups(ctx, wall)
+    if (groups && groups.length) all.push(...groups)
+  }
+
+  // ── Staircases. Span floors — count once at project level; when a floor
+  // filter is set, attribute to the staircase's footprint floor only. ───────
+  for (const stair of Object.values(state.staircases ?? {})) {
+    if (ctx.floorIdFilter && stair.floorId !== ctx.floorIdFilter) continue
+    const groups = generateStaircaseRebarGroups(ctx, stair)
+    if (groups && groups.length) all.push(...groups)
+  }
+
   const sorted = _sortRebarGroups(all, floorSeq)
   return _summarize(sorted, params, state)
 }
@@ -176,6 +232,10 @@ function _summarize(groups, params, state) {
   }
   const byCategory = { column: 0, beam: 0, footing: 0, slab: 0 }
   const byDia = {}
+  // Level-2 abstract roll-up — finer taxonomy (sub/super column, tie/plinth/
+  // lintel/roof beam, isolated/strap footing, roof/floor slab). ADDITIVE: the
+  // elementType-keyed byCategory above is unchanged (backward-compat invariant).
+  const byBbsCategory = {}
   let totalWeightKg = 0
 
   for (const g of groups) {
@@ -193,6 +253,18 @@ function _summarize(groups, params, state) {
     }
     byDia[g.diaMm].totalKg += g.totalWeightKg
     byDia[g.diaMm].byCategory[catKey] += g.totalWeightKg
+
+    // Abstract category — generator-stamped meta.bbsCategory wins; fall back to
+    // the coarse elementType-derived category for any group that predates the
+    // BBS-categories phase.
+    const absCat = g.meta?.bbsCategory ?? _fallbackBbsCategory(g.elementType)
+    if (!byBbsCategory[absCat]) {
+      byBbsCategory[absCat] = { category: absCat, totalKg: 0, byDiaKg: {}, byDiaLengthM: {} }
+    }
+    const ent = byBbsCategory[absCat]
+    ent.totalKg += g.totalWeightKg
+    ent.byDiaKg[g.diaMm] = (ent.byDiaKg[g.diaMm] ?? 0) + g.totalWeightKg
+    ent.byDiaLengthM[g.diaMm] = (ent.byDiaLengthM[g.diaMm] ?? 0) + g.totalLengthM
   }
 
   const standardBarLengthM = state?.projectSettings?.bbsDefaults?.standardBarLengthM ?? params.standardBarLengthM
@@ -219,9 +291,10 @@ function _summarize(groups, params, state) {
       totalWeightKg,
       byCategory,
       byDiameter,
+      byBbsCategory,
     },
     standardBarLengthM,
-    paramsVersion: params?.__version ?? null,
+    paramsVersion: CATALOG_VERSION,
   }
 }
 
@@ -235,6 +308,21 @@ function _categoryFor(elementType) {
   }
 }
 
+// Coarse fallback when a group lacks meta.bbsCategory (pre-BBS-categories
+// generators). New generators stamp a finer category that supersedes this.
+function _fallbackBbsCategory(elementType) {
+  switch (elementType) {
+    case ELEMENT_TYPE.COLUMN:    return 'COLUMN'
+    case ELEMENT_TYPE.BEAM:      return 'BEAM'
+    case ELEMENT_TYPE.FOOTING:   return 'FOOTING'
+    case ELEMENT_TYPE.SLAB:      return 'SLAB'
+    case ELEMENT_TYPE.SUNSHADE:  return 'SUNSHADE'
+    case ELEMENT_TYPE.LOFT:      return 'LOFT'
+    case ELEMENT_TYPE.STAIRCASE: return 'STAIRCASE'
+    default:                     return 'OTHER'
+  }
+}
+
 function _emptyOutput() {
   return {
     groups: [],
@@ -242,9 +330,9 @@ function _emptyOutput() {
       [ELEMENT_TYPE.COLUMN]: {}, [ELEMENT_TYPE.BEAM]: {},
       [ELEMENT_TYPE.FOOTING]: {}, [ELEMENT_TYPE.SLAB]: {},
     },
-    totals: { totalWeightKg: 0, byCategory: { column: 0, beam: 0, footing: 0, slab: 0 }, byDiameter: {} },
+    totals: { totalWeightKg: 0, byCategory: { column: 0, beam: 0, footing: 0, slab: 0 }, byDiameter: {}, byBbsCategory: {} },
     standardBarLengthM: 12,
-    paramsVersion: null,
+    paramsVersion: CATALOG_VERSION,
   }
 }
 

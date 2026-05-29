@@ -37,6 +37,7 @@ import {
   REBAR_ROLE,
   SHAPE_CODE,
   makeRebarGroup,
+  bbsCategoryForSlabRole,
 } from '../types.js'
 
 const DEFAULT_SLAB_THICKNESS_IN_FALLBACK = 5
@@ -123,6 +124,7 @@ export function generateSlabRebarGroups(ctx, slab) {
     specId:      resolved.specId,
     specSource:  resolved.source,
     steelGrade:  params.defaultSteelGrade,
+    bbsCategory: bbsCategoryForSlabRole(slab.role),
   }
 
   const groups = []
