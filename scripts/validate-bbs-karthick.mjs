@@ -42,7 +42,7 @@ const rows = []
   const padFt = 3.606 + 2 * (60 / MM_PER_FT)
   s().addFoundation('ISOLATED', { columnIds: [], geometry: { lengthFt: padFt, widthFt: padFt }, floorId: 'F1', label: 'F1' })
   const g = computeRebarGroups(s()).groups.find(x => x.role === 'X_MESH')
-  rows.push(['Footing mesh F1 Ø10', 4.106, ft(g.cuttingLengthMm), 'c/b', 'engine adds 2×Ld(56.6d=3.71ft); workbook 2×0.25ft hooks → footing bar over-counted'])
+  rows.push(['Footing mesh F1 Ø10', 4.106, ft(g.cuttingLengthMm), 'fixed', 'BE-Footing-Ld-001 fixed: bar = pad − 2×cover + 2×9d hooks (was pad + 2×Ld). Now within ±5%.'])
 }
 // Bar 2 — Column main C2 Ø12: workbook cut 12.968 (a11 + lap1.968=50d)
 {

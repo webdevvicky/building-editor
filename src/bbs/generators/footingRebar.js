@@ -30,7 +30,6 @@ import {
 import {
   computeStraightBarCuttingLengthMm,
   computeLBarCuttingLengthMm,
-  developmentLengthMm,
   developmentLengthCompressionMm,
   lapLengthMm,
   ftToMm,
@@ -172,35 +171,23 @@ function _buildMeshGroups({
 }) {
   const widthMm  = ftToMm(widthFt)
   const lengthMm = ftToMm(lengthFt)
+  const coverMm  = spec.coverMm ?? 40
 
-  // Each bar's Ld uses its OWN diameter (fixes the legacy maxDia bug).
-  const devLengthMmX = developmentLengthMm({
-    diaMm:    spec.xBars.diaMm,
-    gradeKey: params.defaultGradeKey,
-    params,
-  })
-  const devLengthMmY = developmentLengthMm({
-    diaMm:    spec.yBars.diaMm,
-    gradeKey: params.defaultGradeKey,
-    params,
-  })
-
-  // X bars run across the WIDTH (length = widthMm + 2 × Ld_x).
-  const xBarLengthMm = widthMm + 2 * devLengthMmX
+  // BE-Footing-Ld-001 fix (2026-05-29): a footing mesh bar SPANS the pad — its
+  // length is the pad dimension minus cover each side, plus a standard end hook
+  // (bent up). Development length is SATISFIED BY that span, it is NOT added to
+  // it. Pre-fix the engine added 2×Ld and over-counted footing steel ~88%/bar.
+  // End hooks come from the cutting-length engine (hookEndCount: 2 → 2×9d in
+  // IS_STRICT; flat 0.25ft in SITE_PRACTICE via the params hook allowance).
+  const xClearMm = Math.max(0, widthMm  - 2 * coverMm)   // X bars span the WIDTH
+  const yClearMm = Math.max(0, lengthMm - 2 * coverMm)   // Y bars span the LENGTH
+  const hookXMm = params.hookAllowance9d * spec.xBars.diaMm
+  const hookYMm = params.hookAllowance9d * spec.yBars.diaMm
   const xCuttingMm = computeStraightBarCuttingLengthMm({
-    lengthMm:     xBarLengthMm,
-    diaMm:        spec.xBars.diaMm,
-    hookEndCount: 0,
-    params,
+    lengthMm: xClearMm, diaMm: spec.xBars.diaMm, hookEndCount: 2, params,
   })
-
-  // Y bars run across the LENGTH (length = lengthMm + 2 × Ld_y).
-  const yBarLengthMm = lengthMm + 2 * devLengthMmY
   const yCuttingMm = computeStraightBarCuttingLengthMm({
-    lengthMm:     yBarLengthMm,
-    diaMm:        spec.yBars.diaMm,
-    hookEndCount: 0,
-    params,
+    lengthMm: yClearMm, diaMm: spec.yBars.diaMm, hookEndCount: 2, params,
   })
 
   const xGroup = makeRebarGroup({
@@ -212,16 +199,17 @@ function _buildMeshGroups({
     diaMm:            spec.xBars.diaMm,
     shapeCode:        SHAPE_CODE.STRAIGHT,
     bendAnglesDeg:    [],
-    nominalDimensions: { A: Math.round(widthMm), B: Math.round(devLengthMmX) },
+    nominalDimensions: { A: Math.round(xClearMm), B: Math.round(hookXMm) },
     cuttingLengthMm:  xCuttingMm,
     count:            spec.xBars.count * footingCount,
     specId,
     specSource,
     steelGrade:       params.defaultSteelGrade,
     meta: {
-      description:        'Footing X-direction bottom mesh (per bar Ld at each end)',
-      perBarDevLengthMm:  Math.round(devLengthMmX),
-      parentMark:         footingLabel,
+      description:  'Footing X-direction bottom mesh (spans pad − 2×cover + end hooks)',
+      clearSpanMm:  Math.round(xClearMm),
+      endHookMm:    Math.round(hookXMm),
+      parentMark:   footingLabel,
       footingCount,
     },
   })
@@ -235,16 +223,17 @@ function _buildMeshGroups({
     diaMm:            spec.yBars.diaMm,
     shapeCode:        SHAPE_CODE.STRAIGHT,
     bendAnglesDeg:    [],
-    nominalDimensions: { A: Math.round(lengthMm), B: Math.round(devLengthMmY) },
+    nominalDimensions: { A: Math.round(yClearMm), B: Math.round(hookYMm) },
     cuttingLengthMm:  yCuttingMm,
     count:            spec.yBars.count * footingCount,
     specId,
     specSource,
     steelGrade:       params.defaultSteelGrade,
     meta: {
-      description:        'Footing Y-direction bottom mesh (per bar Ld at each end)',
-      perBarDevLengthMm:  Math.round(devLengthMmY),
-      parentMark:         footingLabel,
+      description:  'Footing Y-direction bottom mesh (spans pad − 2×cover + end hooks)',
+      clearSpanMm:  Math.round(yClearMm),
+      endHookMm:    Math.round(hookYMm),
+      parentMark:   footingLabel,
       footingCount,
     },
   })

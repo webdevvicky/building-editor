@@ -53,29 +53,33 @@ export function buildStrapFootingGroups(state, params, foundation) {
   // ── Pad bottom mesh (both pads, X + Y). ─────────────────────────────────────
   const padDia = spec.pad?.barDiaMm ?? 10
   const padSpacingIn = spec.pad?.barSpacingIn ?? 5
-  const padLd = developmentLengthMm({ diaMm: padDia, gradeKey: params.defaultGradeKey, params })
+  const padCoverMm = spec.padCoverMm ?? 60
+  const padHookMm = params.hookAllowance9d * padDia
   const addPad = (pad, tag) => {
     const lFt = pad.lengthFt ?? 0, wFt = pad.widthFt ?? 0
     if (lFt <= 0 || wFt <= 0) return
     const lMm = ftToMm(lFt), wMm = ftToMm(wFt)
-    // X bars span width, laid across length; Y bars span length, laid across width.
-    const xCut = computeStraightBarCuttingLengthMm({ lengthMm: wMm + 2 * padLd, diaMm: padDia, hookEndCount: 0, params })
-    const yCut = computeStraightBarCuttingLengthMm({ lengthMm: lMm + 2 * padLd, diaMm: padDia, hookEndCount: 0, params })
+    // BE-Footing-Ld-001 fix: pad mesh bar spans the pad − 2×cover + end hooks
+    // (NOT pad + 2×Ld). X bars span width; Y bars span length.
+    const xClear = Math.max(0, wMm - 2 * padCoverMm)
+    const yClear = Math.max(0, lMm - 2 * padCoverMm)
+    const xCut = computeStraightBarCuttingLengthMm({ lengthMm: xClear, diaMm: padDia, hookEndCount: 2, params })
+    const yCut = computeStraightBarCuttingLengthMm({ lengthMm: yClear, diaMm: padDia, hookEndCount: 2, params })
     const nX = Math.floor((lFt * 12) / padSpacingIn) + 1
     const nY = Math.floor((wFt * 12) / padSpacingIn) + 1
     groups.push(makeRebarGroup({
       markId: `${baseLabel}-${tag}X`, elementType: ELEMENT_TYPE.FOOTING, elementId, floorId,
       role: REBAR_ROLE.X_MESH, diaMm: padDia, shapeCode: SHAPE_CODE.STRAIGHT, bendAnglesDeg: [],
-      nominalDimensions: { A: Math.round(wMm), B: Math.round(padLd) }, cuttingLengthMm: xCut, count: nX,
+      nominalDimensions: { A: Math.round(xClear), B: Math.round(padHookMm) }, cuttingLengthMm: xCut, count: nX,
       specId: resolved.specId, specSource: resolved.source, steelGrade,
-      meta: { ...catMeta, description: `Strap ${tag} pad X mesh` },
+      meta: { ...catMeta, description: `Strap ${tag} pad X mesh (spans pad − 2×cover + hooks)` },
     }))
     groups.push(makeRebarGroup({
       markId: `${baseLabel}-${tag}Y`, elementType: ELEMENT_TYPE.FOOTING, elementId, floorId,
       role: REBAR_ROLE.Y_MESH, diaMm: padDia, shapeCode: SHAPE_CODE.STRAIGHT, bendAnglesDeg: [],
-      nominalDimensions: { A: Math.round(lMm), B: Math.round(padLd) }, cuttingLengthMm: yCut, count: nY,
+      nominalDimensions: { A: Math.round(yClear), B: Math.round(padHookMm) }, cuttingLengthMm: yCut, count: nY,
       specId: resolved.specId, specSource: resolved.source, steelGrade,
-      meta: { ...catMeta, description: `Strap ${tag} pad Y mesh` },
+      meta: { ...catMeta, description: `Strap ${tag} pad Y mesh (spans pad − 2×cover + hooks)` },
     }))
   }
   addPad(padA, 'A')

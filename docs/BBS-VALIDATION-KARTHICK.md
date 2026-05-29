@@ -45,7 +45,7 @@ mismatch, (b) IS-interpretation difference, (c) engine bug, (d) reference wrong,
 
 | Bar | Workbook (ft) | Engine (ft) | Δ% | Class | Cause |
 |---|---|---|---|---|---|
-| Footing mesh F1 Ø10 | 4.106 | 7.714 | **+88%** | **c** | engine adds `2×Ld` (56.6d=3.71ft); a footing bar should span the pad (≈ pad−2cover + hooks). **Over-counts footing steel.** |
+| Footing mesh F1 Ø10 | 4.106 | **4.196** | **+2%** ✓ | **FIXED** | BE-Footing-Ld-001 fixed 2026-05-29: bar = pad − 2×cover + 2×9d hooks (was pad + 2×Ld, +88%). Now within ±5%. |
 | Column main C2 Ø12 | 12.968 | 13.228 | +2% | b | engine lap 56.6d (2.23ft) vs workbook 50d (1.968ft) |
 | Roof beam top B8 Ø16 | 33.054 | 34.525 | +4% | b | engine Ld anchorage per end (interior=Ld/2) vs workbook flat 0.75ft bends |
 | Roof beam stirrup Ø8 (9×15) | 3.813 | 3.475 | −9% | b | engine `2(w+d)+2·9d−4·2d` (IS 2502) vs workbook `2(a+b)+2×0.26248` flat hook |
@@ -114,11 +114,12 @@ per-bar set won't line up 1:1.
 
 ## Punch list (prioritised — for the NEXT phase, not fixed here)
 
-1. **BE-Footing-Ld-001 (HIGH)** — footing mesh bar length = `padDim + 2×Ld`
-   over-counts by ~88%/bar. Should be `padDim − 2×cover + standard end hook`
-   (the bar spans the pad; Ld is *satisfied by* that span, not added to it).
-   Same issue affects strap-footing pad mesh. `src/bbs/generators/footingRebar.js`
-   `_buildMeshGroups` + `strapFootingRebar.js`.
+1. **BE-Footing-Ld-001 (HIGH) — ✅ FIXED 2026-05-29.** Footing mesh bar was
+   `padDim + 2×Ld` (~+88%/bar); now `padDim − 2×cover + 2×9d end hooks` (the bar
+   spans the pad; Ld is *satisfied by* that span). Applied to both
+   `footingRebar.js::_buildMeshGroups` and `strapFootingRebar.js::addPad`.
+   Per-bar now +2% vs workbook (within ±5%). verify-bbs Section D updated with a
+   regression guard (`X_MESH < 1800mm`, NOT pad + 2×Ld).
 2. **Site-practice allowance mode (MEDIUM)** — add a project toggle that swaps
    the IS 2502-strict allowances for the site convention (50d lap via the
    existing `simplified` lapKey; flat hook/bend allowances). Lets the BBS match
