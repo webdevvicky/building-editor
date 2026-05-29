@@ -28,7 +28,7 @@ import { resolveBeamReinforcementSpec } from '../../specs/resolution.js'
 import {
   computeStraightBarCuttingLengthMm,
   computeStirrupCuttingLengthMm,
-  developmentLengthMm,
+  allowanceMm,
   ftToMm,
   inToMm,
   MM_PER_IN,
@@ -105,29 +105,27 @@ export function generateBeamRebarGroups(ctx, beam) {
   const elementId = beam.id
   const steelGrade = params.defaultSteelGrade
 
-  // ── Anchorage ─────────────────────────────────────────────────────────────
+  // ── Anchorage (via allowanceMm — Ld+hook in IS_STRICT, flat ft in SITE) ────
+  // The exterior anchor folds the IS exterior 9d hook in, so the cut below uses
+  // hookEndCount:0 and stays byte-identical to the prior form in IS_STRICT.
   const topDia = spec.topBars.diaMm
   const botDia = spec.bottomBars.diaMm
-  const topLdMm = developmentLengthMm({ diaMm: topDia, gradeKey: params.defaultGradeKey, params })
-  const botLdMm = developmentLengthMm({ diaMm: botDia, gradeKey: params.defaultGradeKey, params })
-
   const isExtFrom = _isExteriorJoint(state, beam, 'from')
   const isExtTo   = _isExteriorJoint(state, beam, 'to')
 
-  const anchorFromTopMm = isExtFrom ? topLdMm : topLdMm * 0.5
-  const anchorToTopMm   = isExtTo   ? topLdMm : topLdMm * 0.5
-  const anchorFromBotMm = isExtFrom ? botLdMm : botLdMm * 0.5
-  const anchorToBotMm   = isExtTo   ? botLdMm : botLdMm * 0.5
+  const anchorFromTopMm = allowanceMm({ kind: isExtFrom ? 'beamTopAnchorExterior' : 'beamTopAnchorInterior', diaMm: topDia, params })
+  const anchorToTopMm   = allowanceMm({ kind: isExtTo   ? 'beamTopAnchorExterior' : 'beamTopAnchorInterior', diaMm: topDia, params })
+  const anchorFromBotMm = allowanceMm({ kind: isExtFrom ? 'beamBottomAnchorExterior' : 'beamBottomAnchorInterior', diaMm: botDia, params })
+  const anchorToBotMm   = allowanceMm({ kind: isExtTo   ? 'beamBottomAnchorExterior' : 'beamBottomAnchorInterior', diaMm: botDia, params })
 
   const groups = []
 
   // ── Group 1 — TOP bars ────────────────────────────────────────────────────
   const topTotalMm = lengthMm + anchorFromTopMm + anchorToTopMm
-  const topHookEndCount = (isExtFrom ? 1 : 0) + (isExtTo ? 1 : 0)
   const topCuttingLengthMm = computeStraightBarCuttingLengthMm({
     lengthMm:     topTotalMm,
     diaMm:        topDia,
-    hookEndCount: topHookEndCount,
+    hookEndCount: 0,   // exterior 9d hook folded into anchorMm (IS_STRICT)
     params,
   })
   groups.push(makeRebarGroup({
@@ -160,11 +158,10 @@ export function generateBeamRebarGroups(ctx, beam) {
 
   // ── Group 2 — BOTTOM bars ─────────────────────────────────────────────────
   const botTotalMm = lengthMm + anchorFromBotMm + anchorToBotMm
-  const botHookEndCount = (isExtFrom ? 1 : 0) + (isExtTo ? 1 : 0)
   const botCuttingLengthMm = computeStraightBarCuttingLengthMm({
     lengthMm:     botTotalMm,
     diaMm:        botDia,
-    hookEndCount: botHookEndCount,
+    hookEndCount: 0,   // exterior 9d hook folded into anchorMm (IS_STRICT)
     params,
   })
   groups.push(makeRebarGroup({

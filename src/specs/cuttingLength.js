@@ -199,26 +199,99 @@ export const DEFAULT_IS2502_PARAMS = Object.freeze({
   defaultSteelGrade:            'Fe500D',
 })
 
+// ── SITE_PRACTICE allowance preset ───────────────────────────────────────────
+// Indian site BBS shorthand (extracted from the Karthick M-City workbook):
+// 50d lap, NO bend deductions, FLAT ft hook/bend allowances per bar role.
+// Merged UNDER the user's is2502Params (user overrides still win) only when
+// projectSettings.bbsAllowanceMode === 'SITE_PRACTICE'. IS_STRICT (default)
+// never touches this. This is the expansion point for future regional presets
+// (KARNATAKA_PWD, BANGALORE_STANDARD) — add a preset + a mode value.
+export const SITE_PRACTICE_PARAMS = Object.freeze({
+  lapLengthFactor: Object.freeze({
+    Fe500_M20_nonseismic: 50, Fe500_M20_seismic: 50,
+    Fe415_M20_nonseismic: 50,
+    Fe550_M20_nonseismic: 50, Fe550_M20_seismic: 50,
+    simplified: 50,
+  }),
+  // Site practice doesn't subtract IS 2502 bend deductions.
+  bendDeductionPerBend: Object.freeze({ 45: 0, 90: 0, 135: 0, 180: 0 }),
+  // Flat ft allowances by bar role (replace dia-based 9d hooks / Ld anchorage).
+  flatAllowancesFt: Object.freeze({
+    stirrupHookFt:       0.26248,  // workbook stirrup hook term (≈80 mm)
+    footingHookFt:       0.25,     // 3" footing bar end hook
+    beamTopBendFt:       0.75,     // 9" top-rod end bend
+    beamBottomBendFt:    0.5,      // 6" bottom-rod end bend
+    sunshadeAnchorageFt: 0.167,    // 2" anchorage into lintel
+  }),
+})
+
 // ── Single read point for params ────────────────────────────────────────────
-// Deep-merges projectSettings.is2502Params over DEFAULT_IS2502_PARAMS.
-// Nested object overrides are merged shallowly (one level deep — sufficient
-// for every existing factor; arrays / functions replaced wholesale).
-//
-// Pure function of state.projectSettings — no caching here. Callers that
-// hit this in a tight loop should pull the resolved params once outside.
+// Deep-merges (DEFAULT → [SITE_PRACTICE if mode] → user is2502Params). Nested
+// object overrides merge one level deep. Stamps `allowanceMode` so the
+// allowanceMm() resolver can switch. Pure function of state.projectSettings.
 export function getIs2502Params(state) {
-  const overrides = state?.projectSettings?.is2502Params ?? {}
+  const mode = state?.projectSettings?.bbsAllowanceMode === 'SITE_PRACTICE'
+    ? 'SITE_PRACTICE' : 'IS_STRICT'
+  const layers = mode === 'SITE_PRACTICE'
+    ? [SITE_PRACTICE_PARAMS, state?.projectSettings?.is2502Params ?? {}]
+    : [state?.projectSettings?.is2502Params ?? {}]
   const merged = { ...DEFAULT_IS2502_PARAMS }
-  for (const [k, v] of Object.entries(overrides)) {
-    const defaultVal = DEFAULT_IS2502_PARAMS[k]
-    if (defaultVal && typeof defaultVal === 'object' && !Array.isArray(defaultVal) &&
-        v && typeof v === 'object' && !Array.isArray(v)) {
-      merged[k] = { ...defaultVal, ...v }
-    } else {
-      merged[k] = v
+  for (const overrides of layers) {
+    for (const [k, v] of Object.entries(overrides)) {
+      const dv = merged[k]
+      if (dv && typeof dv === 'object' && !Array.isArray(dv) &&
+          v && typeof v === 'object' && !Array.isArray(v)) {
+        merged[k] = { ...dv, ...v }
+      } else {
+        merged[k] = v
+      }
     }
   }
+  merged.allowanceMode = mode
   return merged
+}
+
+// ── Allowance resolver (CLOSED kind enum, mode is the ONLY switch) ───────────
+// Generators call allowanceMm({ kind, diaMm, params }) for hooks / bends /
+// anchorage / lap — they NEVER inspect params.allowanceMode themselves. This is
+// the single place the IS_STRICT ↔ SITE_PRACTICE convention difference lives.
+//   IS_STRICT     → dia-based: 9d hooks, Ld anchorage, 56.6d lap.
+//   SITE_PRACTICE → flat ft per role + 50d lap (via the merged factors).
+// Adding a regional preset = a new SITE-style params block + a mode value;
+// the kind enum stays closed.
+export function allowanceMm({ kind, diaMm, params }) {
+  if (!params || !diaMm) return 0
+  const site = params.allowanceMode === 'SITE_PRACTICE'
+  const flat = params.flatAllowancesFt ?? {}
+  const d9 = params.hookAllowance9d * diaMm
+  switch (kind) {
+    case 'lap':
+      // lap factor is already swapped to 50 by the SITE merge.
+      return lapLengthMm({ diaMm, lapKey: params.defaultLapKey, params })
+    case 'stirrupHook':
+      return site ? (flat.stirrupHookFt ?? 0.26248) * MM_PER_FT : d9
+    case 'footingHook':
+      return site ? (flat.footingHookFt ?? 0.25) * MM_PER_FT : d9
+    // Beam anchorage folds the IS exterior 9d hook into the exterior anchor so
+    // the generator can drop hookEndCount and stay byte-identical in IS_STRICT.
+    case 'beamTopAnchorExterior':
+      return site ? (flat.beamTopBendFt ?? 0.75) * MM_PER_FT
+                  : developmentLengthMm({ diaMm, params }) + d9
+    case 'beamTopAnchorInterior':
+      return site ? (flat.beamTopBendFt ?? 0.75) * MM_PER_FT
+                  : developmentLengthMm({ diaMm, params }) * 0.5
+    case 'beamBottomAnchorExterior':
+      return site ? (flat.beamBottomBendFt ?? 0.5) * MM_PER_FT
+                  : developmentLengthMm({ diaMm, params }) + d9
+    case 'beamBottomAnchorInterior':
+      return site ? (flat.beamBottomBendFt ?? 0.5) * MM_PER_FT
+                  : developmentLengthMm({ diaMm, params }) * 0.5
+    case 'sunshadeAnchorage':
+      return site ? (flat.sunshadeAnchorageFt ?? 0.167) * MM_PER_FT
+                  : (params.sunshadeAnchorageIntoLintelFactor ?? 1) * developmentLengthMm({ diaMm, params })
+    default:
+      return 0
+  }
 }
 
 // ── IS 1786 unit weight ─────────────────────────────────────────────────────
@@ -284,12 +357,15 @@ export function computeCuttingLengthMm({
 //
 // netWidthMm / netDepthMm are INSIDE the stirrup (already cover-deducted).
 export function computeStirrupCuttingLengthMm({ netWidthMm, netDepthMm, diaMm, params }) {
-  const sides = [netWidthMm, netDepthMm, netWidthMm, netDepthMm]
+  // Hook allowance routed through allowanceMm (9d in IS_STRICT, flat ft in
+  // SITE_PRACTICE). Added as explicit segments with hookEndCount:0 so the
+  // IS_STRICT result is byte-identical to the prior hookEndCount:2 form.
+  const hook = allowanceMm({ kind: 'stirrupHook', diaMm, params })
   return computeCuttingLengthMm({
-    straightSegmentsMm: sides,
+    straightSegmentsMm: [netWidthMm, netDepthMm, netWidthMm, netDepthMm, hook, hook],
     bendAnglesDeg:      [90, 90, 90, 90],
     diaMm,
-    hookEndCount:       2,
+    hookEndCount:       0,
     params,
   })
 }

@@ -762,6 +762,75 @@ reset()
      forced.groups.some(g => g.meta?.segmentType === 'FORCED_SUB' && g.meta?.bbsCategory === 'SUB_COLUMN'))
 }
 
+// ── Section O — SITE_PRACTICE allowance mode (±2% vs Karthick workbook) ──────
+header('O. SITE_PRACTICE mode — 5 representative bars within ±2% of workbook')
+const FT_MM = 304.8
+const within2pct = (engMm, wbFt) => Math.abs((engMm / FT_MM - wbFt) / wbFt) <= 0.02
+{
+  // Bar 1 — Footing mesh Ø10. Workbook 4.106 ft. SITE: pad−2cover + 2×0.25ft.
+  reset()
+  s().setProjectSettings({
+    bbsAllowanceMode: 'SITE_PRACTICE',
+    reinforcementSpecs: { F: { id: 'F', label: 'F', elementType: 'FOOTING', xBars: { count: 6, diaMm: 10 }, yBars: { count: 6, diaMm: 10 }, developmentLengthMultiplier: 50, coverMm: 60 } },
+    bbsDefaults: { FOOTING: 'F' },
+  })
+  s().addFoundation('ISOLATED', { columnIds: [], geometry: { lengthFt: 3.606 + 2 * (60 / FT_MM), widthFt: 3.606 + 2 * (60 / FT_MM) }, floorId: 'F1', label: 'F1' })
+  const x = computeRebarGroups(s()).groups.find(g => g.role === REBAR_ROLE.X_MESH)
+  ok('SITE footing mesh Ø10 within ±2% of 4.106 ft', within2pct(x.cuttingLengthMm, 4.106), `got ${(x.cuttingLengthMm / FT_MM).toFixed(3)}ft`)
+
+  // Bar 2 — Column main Ø12. Workbook 12.968 ft (a11 + 50d lap).
+  reset()
+  s().setProjectSettings({
+    bbsAllowanceMode: 'SITE_PRACTICE',
+    heights: { plinthHeightFt: 0, floorHeightFt: 11 },
+    floors: [{ id: 'F1', label: 'GF', sequence: 0, plinthHeightFt: 0, floorHeightFt: 11, meta: null }],
+    slabSettings: { mainThicknessIn: 0, sunkenDepthIn: 0, autoSunkenRoomTypes: [] },
+    reinforcementSpecs: { C: { id: 'C', label: 'C2', elementType: 'COLUMN', longitudinalBarCount: 8, longitudinalBarDiaMm: 12, stirrupBarDiaMm: 8, stirrupSpacingIn: 7, coverMm: 40, lapLengthMultiplier: 50 } },
+    bbsDefaults: { COLUMN: 'C' },
+    columnTypes: [{ id: 'C2', label: 'C2', shape: 'rect', widthIn: 9, depthIn: 15, footingLengthFt: 4, footingWidthFt: 4, footingDepthFt: 1.5 }],
+  })
+  const cid = s().addColumn(0, 0); s().setColumnType(cid, 'C2')
+  const L = computeRebarGroups(s()).groups.find(g => g.role === REBAR_ROLE.LONGITUDINAL)
+  ok('SITE column main Ø12 within ±2% of 12.968 ft', within2pct(L.cuttingLengthMm, 12.968), `got ${(L.cuttingLengthMm / FT_MM).toFixed(3)}ft`)
+
+  // Bars 3 + 4 — Beam top Ø16 (33.054) + stirrup Ø8 9×15 (3.813), SITE mode.
+  reset()
+  s().loadProject({
+    nodes: { n1: { id: 'n1', x: 0, y: 0, floorIds: ['F1'] }, n2: { id: 'n2', x: 31.554 * 12, y: 0, floorIds: ['F1'] } },
+    walls: { w1: { id: 'w1', n1: 'n1', n2: 'n2', floorId: 'F1', thickness: 9, height: 120, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual: false, openings: [], hasRoofBeam: true } },
+    rooms: {}, stamps: {}, columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {}, projectSettings: undefined, unit: 'inch',
+  })
+  s().setProjectSettings({
+    bbsAllowanceMode: 'SITE_PRACTICE',
+    beamDimensions: { tie: { widthIn: 9, depthIn: 15 }, plinth: { widthIn: 9, depthIn: 4 }, lintel: { widthIn: 9, depthIn: 6 }, roof: { widthIn: 9, depthIn: 15 } },
+    reinforcementSpecs: { RB: { id: 'RB', label: 'RB', elementType: 'BEAM', topBars: { count: 2, diaMm: 16 }, bottomBars: { count: 2, diaMm: 16 }, stirrupBarDiaMm: 8, stirrupSpacingIn: 8, coverMm: 30 } },
+    bbsDefaults: { BEAM: { tie: null, plinth: null, lintel: null, roof: 'RB' } },
+  })
+  const G = computeRebarGroups(s()).groups
+  const T = G.find(g => g.role === REBAR_ROLE.TOP)
+  const St = G.find(g => g.role === REBAR_ROLE.STIRRUP)
+  ok('SITE beam top Ø16 within ±2% of 33.054 ft', within2pct(T.cuttingLengthMm, 33.054), `got ${(T.cuttingLengthMm / FT_MM).toFixed(3)}ft`)
+  ok('SITE beam stirrup Ø8 within ±2% of 3.813 ft', within2pct(St.cuttingLengthMm, 3.813), `got ${(St.cuttingLengthMm / FT_MM).toFixed(3)}ft`)
+
+  // Bar 5 — Sunshade: documented model difference (axis), stays outside ±2%
+  // even in SITE mode — NOT forced (P2 backlog). Assert it is still divergent.
+  reset()
+  s().loadProject({
+    nodes: { n1: { id: 'n1', x: 0, y: 0, floorIds: ['F1'] }, n2: { id: 'n2', x: 240, y: 0, floorIds: ['F1'] } },
+    walls: { w1: { id: 'w1', n1: 'n1', n2: 'n2', floorId: 'F1', thickness: 9, height: 120, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual: false, openings: [{ id: 'op1', type: 'window', width: 4.384 * 12, height: 48, offset: 24, orient: 0, hasSunshade: true, subtype: 'WINDOW', subtypeSource: 'HEURISTIC' }] } },
+    rooms: {}, stamps: {}, columns: {}, beams: {}, slabs: {}, staircases: {}, foundations: {}, projectSettings: undefined, unit: 'inch',
+  })
+  s().setProjectSettings({
+    bbsAllowanceMode: 'SITE_PRACTICE',
+    sunshadeSettings: { enabled: true, projectionFt: 1.5, thicknessIn: 3 },
+    reinforcementSpecs: { SS: { id: 'SS', label: 'SS', elementType: 'SUNSHADE', mainBarDiaMm: 8, mainBarSpacingIn: 6, distBarDiaMm: 8, distBarSpacingIn: 8, coverMm: 20 } },
+    bbsDefaults: { SUNSHADE: 'SS' },
+  })
+  const M = computeRebarGroups(s()).groups.find(g => g.role === REBAR_ROLE.MAIN)
+  ok('SITE sunshade is a documented model difference (NOT within ±2% — P2 backlog)',
+     !!M && !within2pct(M.cuttingLengthMm, 4.551), `got ${(M.cuttingLengthMm / FT_MM).toFixed(3)}ft vs 4.551 (bar-axis diff)`)
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))
 console.log(`BBS verification: ${pass} passed, ${fail} failed`)

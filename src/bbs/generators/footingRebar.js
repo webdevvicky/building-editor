@@ -32,6 +32,7 @@ import {
   computeLBarCuttingLengthMm,
   developmentLengthCompressionMm,
   lapLengthMm,
+  allowanceMm,
   ftToMm,
 } from '../../specs/cuttingLength.js'
 import { ELEMENT_TYPE, REBAR_ROLE, SHAPE_CODE, makeRebarGroup } from '../types.js'
@@ -181,13 +182,14 @@ function _buildMeshGroups({
   // IS_STRICT; flat 0.25ft in SITE_PRACTICE via the params hook allowance).
   const xClearMm = Math.max(0, widthMm  - 2 * coverMm)   // X bars span the WIDTH
   const yClearMm = Math.max(0, lengthMm - 2 * coverMm)   // Y bars span the LENGTH
-  const hookXMm = params.hookAllowance9d * spec.xBars.diaMm
-  const hookYMm = params.hookAllowance9d * spec.yBars.diaMm
+  // End hook via allowanceMm (9d in IS_STRICT, flat 0.25ft in SITE_PRACTICE).
+  const hookXMm = allowanceMm({ kind: 'footingHook', diaMm: spec.xBars.diaMm, params })
+  const hookYMm = allowanceMm({ kind: 'footingHook', diaMm: spec.yBars.diaMm, params })
   const xCuttingMm = computeStraightBarCuttingLengthMm({
-    lengthMm: xClearMm, diaMm: spec.xBars.diaMm, hookEndCount: 2, params,
+    lengthMm: xClearMm + 2 * hookXMm, diaMm: spec.xBars.diaMm, hookEndCount: 0, params,
   })
   const yCuttingMm = computeStraightBarCuttingLengthMm({
-    lengthMm: yClearMm, diaMm: spec.yBars.diaMm, hookEndCount: 2, params,
+    lengthMm: yClearMm + 2 * hookYMm, diaMm: spec.yBars.diaMm, hookEndCount: 0, params,
   })
 
   const xGroup = makeRebarGroup({

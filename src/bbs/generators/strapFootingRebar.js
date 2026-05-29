@@ -21,6 +21,7 @@ import {
   computeStraightBarCuttingLengthMm,
   computeStirrupCuttingLengthMm,
   developmentLengthMm,
+  allowanceMm,
   ftToMm,
   inToMm,
 } from '../../specs/cuttingLength.js'
@@ -54,17 +55,17 @@ export function buildStrapFootingGroups(state, params, foundation) {
   const padDia = spec.pad?.barDiaMm ?? 10
   const padSpacingIn = spec.pad?.barSpacingIn ?? 5
   const padCoverMm = spec.padCoverMm ?? 60
-  const padHookMm = params.hookAllowance9d * padDia
+  const padHookMm = allowanceMm({ kind: 'footingHook', diaMm: padDia, params })
   const addPad = (pad, tag) => {
     const lFt = pad.lengthFt ?? 0, wFt = pad.widthFt ?? 0
     if (lFt <= 0 || wFt <= 0) return
     const lMm = ftToMm(lFt), wMm = ftToMm(wFt)
     // BE-Footing-Ld-001 fix: pad mesh bar spans the pad − 2×cover + end hooks
-    // (NOT pad + 2×Ld). X bars span width; Y bars span length.
+    // (NOT pad + 2×Ld). Hook via allowanceMm (9d IS / flat 0.25ft site).
     const xClear = Math.max(0, wMm - 2 * padCoverMm)
     const yClear = Math.max(0, lMm - 2 * padCoverMm)
-    const xCut = computeStraightBarCuttingLengthMm({ lengthMm: xClear, diaMm: padDia, hookEndCount: 2, params })
-    const yCut = computeStraightBarCuttingLengthMm({ lengthMm: yClear, diaMm: padDia, hookEndCount: 2, params })
+    const xCut = computeStraightBarCuttingLengthMm({ lengthMm: xClear + 2 * padHookMm, diaMm: padDia, hookEndCount: 0, params })
+    const yCut = computeStraightBarCuttingLengthMm({ lengthMm: yClear + 2 * padHookMm, diaMm: padDia, hookEndCount: 0, params })
     const nX = Math.floor((lFt * 12) / padSpacingIn) + 1
     const nY = Math.floor((wFt * 12) / padSpacingIn) + 1
     groups.push(makeRebarGroup({

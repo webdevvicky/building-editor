@@ -16,45 +16,48 @@ while our engine uses **strict IS 2502** (56.6d lap, dia-based `n·d` bend
 deductions, 9d hooks, full development-length anchorage). Our numbers run a few
 percent *heavier* on laps/anchorage — which is the IS-correct direction.
 
-**Two things block a clean "matches professional reference" claim:**
-1. **One real over-count bug** — footing mesh bars (PART 1, +88% per bar). The
-   engine adds `2×Ld` to the pad dimension; a footing bar physically spans the
-   pad (≈ pad − 2·cover + small hooks). Punch-list item **BE-Footing-Ld-001**.
-2. **The Karthick `TOTAL` sheet is not a usable gold standard** — it is a hand
-   roll-up that does **not** reconcile to its own detail sheets (footing detail
-   sums to ~707 kg vs TOTAL 833.8), the **Grade/Plinth row is `#REF!`**, and the
-   **Tie-Beam total cell is 0** while its diameter cells sum to 1038 kg. So a
-   per-category ±5% comparison against TOTAL is not meaningful in either
-   direction. Per-**bar** detail (where the workbook is internally exact) is the
-   real validation surface.
+**P0 status (2026-05-29): both blockers resolved.**
+1. **BE-Footing-Ld-001 — ✅ FIXED.** Footing mesh bar now spans the pad
+   (`pad − 2×cover + 2 hooks`), not `pad + 2×Ld`. Per-bar +88% → +2% (IS) / 0%
+   (site).
+2. **SITE_PRACTICE allowance mode — ✅ SHIPPED.** A single project switch
+   (`bbsAllowanceMode`, default `IS_STRICT`) flips IS 2502-strict conventions to
+   the flat site conventions a contractor's hand BBS uses (50d lap, flat ft
+   hooks/bends, no bend deductions) via a centralized `allowanceMm()` resolver
+   (closed `kind` enum, mode-only switch). In SITE_PRACTICE the engine
+   reproduces the workbook bars to **±2%**; IS_STRICT stays IS-correct and
+   byte-identical (verify-bbs 176/176, all 34 scripts green).
 
-**Is it ready to show an MD as "matches professional reference"? Not yet — but
-close on the fundamentals.** The cutting-length engine is trustworthy; with the
-footing fix + an optional "site-practice allowance" mode (50d lap, flat hooks)
-it would track a site BBS within a few percent. Today, show it as "IS 2502-
-strict; reconciles to reference per-bar within convention; punch list below."
+The Karthick `TOTAL` sheet is still **not a usable per-category gold standard**
+— a hand roll-up that doesn't reconcile to its own detail sheets (footing
+detail ~707 kg vs TOTAL 833.8), the **Grade/Plinth row is `#REF!`**, the
+**Tie-Beam total cell is 0**. Per-**bar** detail is the validation surface.
+
+**Ready to show an MD?** Yes — as **"defaults to IS-correct, matches site
+convention on demand."** IS_STRICT for engineering rigour; SITE_PRACTICE to
+reproduce the contractor's BBS within ±2% per bar.
 
 ---
 
-## PART 1 — per-bar cutting length (the real signal)
+## PART 1 — per-bar cutting length, BOTH modes (the MD-facing proof)
 
-Each row builds a single-element fixture matching a representative reference bar
-and compares the engine's cutting length to the workbook's. Classes: (a) input
-mismatch, (b) IS-interpretation difference, (c) engine bug, (d) reference wrong,
-(e) scope/model difference.
+Each bar is built as a single-element fixture and run in both modes vs the
+workbook. Class: (b) IS-interpretation, (e) scope/model difference.
 
-| Bar | Workbook (ft) | Engine (ft) | Δ% | Class | Cause |
-|---|---|---|---|---|---|
-| Footing mesh F1 Ø10 | 4.106 | **4.196** | **+2%** ✓ | **FIXED** | BE-Footing-Ld-001 fixed 2026-05-29: bar = pad − 2×cover + 2×9d hooks (was pad + 2×Ld, +88%). Now within ±5%. |
-| Column main C2 Ø12 | 12.968 | 13.228 | +2% | b | engine lap 56.6d (2.23ft) vs workbook 50d (1.968ft) |
-| Roof beam top B8 Ø16 | 33.054 | 34.525 | +4% | b | engine Ld anchorage per end (interior=Ld/2) vs workbook flat 0.75ft bends |
-| Roof beam stirrup Ø8 (9×15) | 3.813 | 3.475 | −9% | b | engine `2(w+d)+2·9d−4·2d` (IS 2502) vs workbook `2(a+b)+2×0.26248` flat hook |
-| Sunshade main Ø8 | 4.551 | 3.183 | −30% | e | different bar model: engine MAIN = cantilever along projection (+Ld into lintel); workbook MAIN runs the window width |
+| Bar | Workbook (ft) | IS_STRICT | ISΔ% | SITE_PRACTICE | SITEΔ% | Note |
+|---|---|---|---|---|---|---|
+| Footing mesh F1 Ø10 | 4.106 | 4.197 | +2% | **4.106** | **0.0%** | ✓ site exact (BE-Footing-Ld-001 fixed) |
+| Column main C2 Ø12 | 12.968 | 13.228 | +2% | **12.969** | **0.0%** | ✓ site exact (50d lap) |
+| Roof beam top B8 Ø16 | 33.054 | 34.525 | +4% | **33.054** | **0.0%** | ✓ site exact (flat 0.75ft bends) |
+| Roof beam stirrup Ø8 9×15 | 3.813 | 3.475 | −9% | **3.738** | **−2.0%** | ✓ site within ±2% (flat hook) |
+| Sunshade main Ø8 | 4.551 | 3.183 | −30% | 3.236 | −28.9% | (e) bar-axis model diff — P2, not forced |
 
-**Reading:** 3 of 5 bars within ±10% (column, beam, stirrup) — the core math is
-right. The footing bar (+88%) is the one genuine bug. The sunshade (−30%) is a
-modelling choice difference, not an error (the two BBSs define the "main" bar
-along different axes; total chajja steel is comparable but bar-by-bar differs).
+**Reading:** in SITE_PRACTICE, 4 of 5 bars land **0.0% to −2.0%** — the engine
+reproduces the hand BBS on demand. IS_STRICT runs a few % heavier (the
+IS-correct direction). Sunshade stays a documented model difference in both
+modes (P2 backlog — bar-axis convention, not an error). verify-bbs Section O
+asserts the ±2% site-mode result on every commit; this table is produced by
+`scripts/validate-bbs-karthick.mjs` (both modes side by side).
 
 ---
 
@@ -120,11 +123,12 @@ per-bar set won't line up 1:1.
    `footingRebar.js::_buildMeshGroups` and `strapFootingRebar.js::addPad`.
    Per-bar now +2% vs workbook (within ±5%). verify-bbs Section D updated with a
    regression guard (`X_MESH < 1800mm`, NOT pad + 2×Ld).
-2. **Site-practice allowance mode (MEDIUM)** — add a project toggle that swaps
-   the IS 2502-strict allowances for the site convention (50d lap via the
-   existing `simplified` lapKey; flat hook/bend allowances). Lets the BBS match
-   a contractor's hand BBS within a few percent when desired. Decision 3 already
-   exposes the lap key; this generalises it to hooks/anchorage.
+2. **Site-practice allowance mode — ✅ SHIPPED 2026-05-29.** `bbsAllowanceMode`
+   project setting (IS_STRICT default | SITE_PRACTICE) + centralized
+   `allowanceMm({kind,diaMm,params})` resolver (closed kind enum, mode-only
+   switch — generators never inspect mode). SITE_PRACTICE = 50d lap, flat ft
+   hooks/bends, no bend deductions. Reproduces the workbook to ±2% per bar
+   (PART 1). BBSSpecPanel toggle. verify-bbs Section O guards it.
 3. **Beam curtailed/extra bars (MEDIUM)** — add EXTRA_TOP/EXTRA_BOT (curtailed)
    bar roles to `beamRebar.js`; both reference workbooks schedule them.
 4. **Sunshade bar-axis convention (LOW)** — reconcile our cantilever-along-

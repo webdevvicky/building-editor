@@ -244,6 +244,12 @@ export const DEFAULT_PROJECT_SETTINGS = {
     standardBarLengthM: STANDARD_BAR_LENGTH_M,
   },
 
+  // BBS allowance convention. IS_STRICT (default) = full IS 2502 (9d hooks,
+  // 56.6d lap, dia-based bend deductions, Ld anchorage). SITE_PRACTICE = flat
+  // ft allowances + 50d lap matching a contractor's hand BBS. Toggling
+  // recomputes all RebarGroups (computed state — no trace change).
+  bbsAllowanceMode: 'IS_STRICT',
+
   // ── Gap 1 — Project metadata (Excel cover + PDF cover) ───────────────────
   projectMeta: {
     projectTitle: '',
@@ -1341,6 +1347,14 @@ export const createStructuralSlice = (set, get, uid) => ({
       if (!s) return {}
       return { staircases: { ...state.staircases, [staircaseId]: { ...s, reinforcementSpecId: specId ?? null } } }
     })
+  },
+
+  // BBS allowance mode switch (IS_STRICT | SITE_PRACTICE). Single toggle;
+  // re-derives every RebarGroup on next computeRebarGroups call.
+  setBbsAllowanceMode: (mode) => {
+    const m = mode === 'SITE_PRACTICE' ? 'SITE_PRACTICE' : 'IS_STRICT'
+    get()._save()
+    set(state => ({ projectSettings: { ...state.projectSettings, bbsAllowanceMode: m } }))
   },
 
   // Rev 2 future-ready slot — programmatic override of the balcony-railing-edge
