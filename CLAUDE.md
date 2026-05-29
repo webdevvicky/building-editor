@@ -192,6 +192,15 @@ concrete m³ + kg/m³ ratio; new Abstract tab + `src/bbs/concrete.js`), L3
   source. `verify-bbs-export` asserts Level 2 = reduce(Level 1).
 - **RAFT / STRIP / PILE foundation BBS still deferred** (STRAP now built).
 
+### Next-phase requirement (signed off 2026-05-29)
+
+- **BBS-UI-Enablement** — because every new category is engine-level
+  default-inert (opt-in), the input UI (Reinforcement Library tab — separate
+  phase) MUST make category enablement explicit and obvious (e.g. clear
+  per-category toggles + "not enabled" empty-state hints in BBSSchedulePanel),
+  otherwise users will assume the new categories "don't work". Owner sign-off
+  recorded; track as a hard requirement of the Reinforcement Library phase.
+
 ## Phase D — Face-Aware Draw Reference (2026-05-28)
 
 Wall authoring now matches Indian / RERA tracing convention. The
