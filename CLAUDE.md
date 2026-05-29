@@ -192,6 +192,29 @@ concrete m³ + kg/m³ ratio; new Abstract tab + `src/bbs/concrete.js`), L3
   source. `verify-bbs-export` asserts Level 2 = reduce(Level 1).
 - **RAFT / STRIP / PILE foundation BBS still deferred** (STRAP now built).
 
+### P0 follow-up (2026-05-29) — footing fix + SITE_PRACTICE allowance mode
+
+- **BE-Footing-Ld-001 — FIXED.** Footing/strap-pad mesh bar = `padDim − 2×cover
+  + 2 end hooks`, NOT `padDim + 2×Ld` (was over-counting ~88%/bar). The bar
+  spans the pad; Ld is satisfied by that span. `footingRebar.js::_buildMeshGroups`
+  + `strapFootingRebar.js::addPad`. verify-bbs Section D has a regression guard
+  (`X_MESH < 1800mm`).
+- **`projectSettings.bbsAllowanceMode ∈ 'IS_STRICT' | 'SITE_PRACTICE'`** (default
+  IS_STRICT) is the convention switch. IS_STRICT = full IS 2502 (9d hooks, 56.6d
+  lap, dia-based bend deductions, Ld anchorage). SITE_PRACTICE = flat ft
+  allowances + 50d lap matching a contractor's hand BBS (reproduces the Karthick
+  workbook to ±2% per bar). `setBbsAllowanceMode(mode)` action.
+- **`allowanceMm({ kind, diaMm, params })` in `cuttingLength.js` is the SINGLE
+  switch point** for every hook / bend / anchorage / lap. **Closed `kind` enum;
+  mode is the only switch; generators NEVER inspect `params.allowanceMode`.**
+  This is the expansion point for future regional presets (KARNATAKA_PWD,
+  BANGALORE_STANDARD) — add a SITE-style params block + a mode value, never a
+  scattered `if (mode)` in a generator. `getIs2502Params` deep-merges
+  `SITE_PRACTICE_PARAMS` UNDER the user's `is2502Params` (user overrides win)
+  and stamps `allowanceMode`. verify-bbs Section O asserts ±2% in SITE mode;
+  IS_STRICT stays byte-identical (exterior 9d hook folded into the anchor so
+  `hookEndCount` drops to 0).
+
 ### Next-phase requirement (signed off 2026-05-29)
 
 - **BBS-UI-Enablement** — because every new category is engine-level
