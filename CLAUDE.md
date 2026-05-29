@@ -120,6 +120,78 @@ Total verify-script count is now **34** (was 32 + Phase BBS adds 1;
 note Phase D + Phase BA were both counted at 32 in their respective
 sections — Phase BBS is the +1 over the most-recent 33 baseline).
 
+## Phase BBS-Categories — 6 missing categories + sub/super column + 3-level output (2026-05-29)
+
+Extends Phase BBS with the six element categories real Indian residential BBS
+covers but the four-generator engine lacked, plus the sub/super column split
+and the three deliverable output levels. Validated against two reference
+workbooks in the repo root (`BBS- Karthick M-City (1).xlsx`, `SELVAKUMAR
+(1).xlsx`). **34 verify scripts now gate every commit** (+1 `verify-bbs-export`;
+`verify-bbs` extended with Sections H–N → 168 assertions). Research +
+citations in `docs/BBS-CATEGORIES-RESEARCH.md`; build report in
+`docs/BBS-FULL-MORNING-REPORT.md`.
+
+### What landed
+
+| Category | Source / model fit |
+|---|---|
+| Tie / grade band beam | `wall.hasTieBeam` → BBS-only synthesized band beam (NOT in `BEAM_LEVEL_REGISTRY`). beamClass `tie`, `beamBehavior:BAND`. |
+| Lintel / head band beam | existing wall-derived `lintel` beam → `beamBehavior:BAND`, IS 4326. |
+| Sunshade / chajja | per window `opening.hasSunshade` + `sunshadeSettings`; top L-bar anchored into lintel + dist. `sunshadeRebar.js`. |
+| Loft | `wall.loft = {enabled,widthFt,depthFt,heightFt}`; top+bottom mat + dist embedded into wall. `loftRebar.js`. |
+| Staircase | staircase entity → waist + dist + landing (ESTIMATE-grade). `staircaseRebar.js`. |
+| Strap footing | foundation `type:'STRAP'`; 2 pads + strap beam (top-primary). `strapFootingRebar.js`. |
+| Sub/super column | per-segment split of ONE column entity; `column.position` + `meta.segmentType`. |
+
+Output: L1 per-bar detail rows, L2 `byBbsCategory` abstract (category × Ø kg +
+concrete m³ + kg/m³ ratio; new Abstract tab + `src/bbs/concrete.js`), L3
+`src/export/bbs.js` Excel (TOTAL + per-category sheets) + PDF.
+
+### Locked rules (Phase BBS-Categories)
+
+- **Every new category is DEFAULT-INERT (opt-in).** Tie via `wall.hasTieBeam`
+  (default null); sub/super via `is2502Params.subSuperColumnSplitEnabled`
+  (default false); sunshade/loft/staircase/strap emit only when their
+  `bbsDefaults.{SUNSHADE,LOFT,STAIRCASE,STRAP}` (or `bbsDefaults.BEAM.tie`)
+  spec is set. Guarantees zero drift on `verify-boq` byte-equality + every
+  existing project. Engineers opt in per project.
+- **Tie beam is BBS-only — never added to `BEAM_LEVEL_REGISTRY`.** Adding it
+  there would feed `getDerivedWallBeams` → masonry deduction + beam RCC BOQ +
+  canvas and shift `verify-boq`. It is synthesized inside `computeRebarGroups`
+  only (`wall.hasTieBeam` walk) with `beamDimensions.tie` (default 9×12).
+- **`meta.bbsCategory` is the Level-2 taxonomy** (`BBS_CATEGORY` in
+  `bbs/types.js`); the existing elementType-keyed `byCategory` rollup is
+  UNCHANGED (backward-compat). `byBbsCategory` is purely additive. Generators
+  stamp `meta.bbsCategory`; `makeRebarGroup` accepts a top-level `bbsCategory`
+  arg that merges into meta.
+- **`getBarMarkPrefix(bbsCategory)` is the single mark-prefix registry**
+  (F/SF/SC/C/TB/PB/HB/RB/B/CH/LF/ST/S). Auto-generated marks use it; entity
+  grid-labels (`C1`, `EF1`) legitimately override for columns + strap footings
+  (reference convention).
+- **`meta.beamBehavior ∈ FRAME|BAND`** on every beam group (FRAME=plinth/roof,
+  BAND=tie/lintel). Band beams skip IS 13920 confinement (uniform links per
+  IS 4326 / Chennai practice) regardless of `confinementZoneEnabled`.
+- **Sub/super is PER-SEGMENT, one column entity.** ONE `column.id` → SUB + SUPER
+  RebarGroups; `meta.segmentType ∈ AUTO_SUB|AUTO_SUPER|FORCED_SUB|FORCED_SUPER`.
+  Split adds one lap at the grade transition → split kg > single-lap flat
+  (physically correct). The backward-compat invariant lives on the default
+  (non-split) path.
+- **Default lap stays 56.6d (IS 456 code), not 50d (site).** 50d available via
+  the `simplified` lapKey; Fe550D Ld/lap factors added (CATALOG_VERSION → V2).
+- **Element anchorage factors are catalog constants** in `cuttingLength.js`
+  (`sunshadeAnchorageIntoLintelFactor`, `loftEmbedFactor/MinMm`,
+  `staircaseLandingAnchorageFactor`, `strapBeamAnchorageFactor`,
+  `subColumnLapFactor`, `bandBeamCornerAnchorageFactor`,
+  `gradeBeamLevelPlinthFraction`) — no magic numbers in generators.
+- **Concrete-per-category** (`src/bbs/concrete.js`, for the kg/m³ ratio) is
+  computed from stored geometry, NOT the legacy aggregators (avoids the STRAP
+  edge case). Column/beam concrete is split into fine categories ∝ steel kg.
+- **Export builders are PURE.** `buildBbsWorkbookModel(state, opts)` has no
+  `Date`/file-I/O (Node-testable); `exportBbsExcel`/`exportBbsPdf` add
+  serialization. All three levels reduce over `computeRebarGroups` — single
+  source. `verify-bbs-export` asserts Level 2 = reduce(Level 1).
+- **RAFT / STRIP / PILE foundation BBS still deferred** (STRAP now built).
+
 ## Phase D — Face-Aware Draw Reference (2026-05-28)
 
 Wall authoring now matches Indian / RERA tracing convention. The
