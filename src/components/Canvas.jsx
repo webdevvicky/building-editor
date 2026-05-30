@@ -1219,7 +1219,12 @@ export default function Canvas() {
       }}>
         <span style={{ color: '#555' }}>Length</span>
         <div style={{ width: 72 }}>
+          {/* key={drawStartId} remounts the input on every new segment so
+              autoFocus re-fires (with select-all) — the length box is ready
+              for the next wall without a manual click. drawStartId advances
+              per segment (setDrawStart(endNodeId)). */}
           <FeetInchesInput
+            key={drawStartId}
             value={hasLock ? parsedLength : null}
             onCommit={ft => setLockedLength(ft > 0 ? ft : '')}
             min={0}
