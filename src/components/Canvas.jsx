@@ -1205,10 +1205,14 @@ export default function Canvas() {
       </div>
     )}
 
-    {/* Length input panel */}
+    {/* Length input panel — stacked ABOVE the chain-drawing help bar
+        (which stays at bottom:80). Both share left:50% centering; the help
+        bar renders in both draw states, so it keeps the bottom anchor and
+        the input sits above it. Fixes BE-DrawHelpOverlay-001 (help bar was
+        painting over this input at the identical bottom:80 position). */}
     {activeTool === 'draw' && drawStartId && (
       <div style={{
-        position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+        position: 'absolute', bottom: 128, left: '50%', transform: 'translateX(-50%)',
         background: '#fff', border: '1px solid #ccc', borderRadius: 8,
         padding: '8px 14px', zIndex: 20, display: 'flex', alignItems: 'center',
         gap: 8, fontSize: 13, boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
