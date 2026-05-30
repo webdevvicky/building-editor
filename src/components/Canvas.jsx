@@ -1224,6 +1224,7 @@ export default function Canvas() {
             onCommit={ft => setLockedLength(ft > 0 ? ft : '')}
             min={0}
             placeholder="free"
+            autoFocus
           />
         </div>
         {lockedLength !== '' && (
