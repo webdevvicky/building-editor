@@ -55,6 +55,7 @@
 //   bootstrap grep-checks for forbidden imports.
 
 import { getFloorWallPerimeterGraph } from './adjacency.js'
+import { getOrderedWallJunctions } from './junctions.js'
 
 const DEFAULT_FLOOR_ID = 'F1'
 
@@ -354,17 +355,45 @@ export function findFaceContainingEdge(state, wallId, clickPoint) {
   // perp = (-dy, dx). side = perp · (P - midpoint).
   //   side > 0 → P on LEFT of (n1 → n2). Start traversal from (n1 → n2).
   //   side < 0 → P on RIGHT of (n1 → n2). Start traversal from (n2 → n1).
+  // T-junctions lie ON the n1→n2 centerline (INV-W3), so the wall-level
+  // perpendicular is identical for every sub-span segment — side is exact.
+  const dx = b.x - a.x, dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
   const midX = (a.x + b.x) / 2
   const midY = (a.y + b.y) / 2
-  const dx = b.x - a.x, dy = b.y - a.y
   const perpDx = -dy, perpDy = dx
-  const toClickX = clickPoint.x - midX
-  const toClickY = clickPoint.y - midY
-  const side = perpDx * toClickX + perpDy * toClickY
+  const side = perpDx * (clickPoint.x - midX) + perpDy * (clickPoint.y - midY)
+
+  // Phase W (BE-FaceLookup-001): the room boundary may be a SUB-SPAN of this
+  // full-length wall between two T-junctions. byEdgeSide is keyed per expanded
+  // SEGMENT (consecutive face.nodeOrder entries), so resolve the segment
+  // NEAREST the click and key off ITS node pair — NOT wall.n1/n2, which are
+  // never a graph-adjacent pair on a junctioned wall (the lookup would miss).
+  let segFrom = wall.n1, segTo = wall.n2
+  const chain = [wall.n1, ...getOrderedWallJunctions(state, wallId).map(j => j.nodeId), wall.n2]
+  if (chain.length > 2 && len2 > 0) {
+    const tOf = (nid) => {
+      const n = state.nodes?.[nid]
+      if (!n) return 0
+      const t = ((n.x - a.x) * dx + (n.y - a.y) * dy) / len2
+      return t < 0 ? 0 : t > 1 ? 1 : t
+    }
+    let ct = ((clickPoint.x - a.x) * dx + (clickPoint.y - a.y) * dy) / len2
+    ct = ct < 0 ? 0 : ct > 1 ? 1 : ct
+    const ts = chain.map(tOf)
+    let k = 0
+    for (let i = 0; i < chain.length - 1; i++) {
+      // half-open [ts[i], ts[i+1]); last segment inclusive of 1. Deterministic
+      // tie-break: a click exactly at a junction's t binds to the LATER segment.
+      if (ct >= ts[i] && (ct < ts[i + 1] || i === chain.length - 2)) { k = i; break }
+    }
+    segFrom = chain[k]
+    segTo   = chain[k + 1]
+  }
 
   const key = side >= 0
-    ? `${wallId}:${wall.n1}→${wall.n2}`
-    : `${wallId}:${wall.n2}→${wall.n1}`
+    ? `${wallId}:${segFrom}→${segTo}`
+    : `${wallId}:${segTo}→${segFrom}`
 
   if (cell.hoverCache.has(key)) return cell.hoverCache.get(key)
   const face = cell.byEdgeSide.get(key) ?? null

@@ -132,7 +132,6 @@ const TOOL_CURSOR = {
   rect_room:     'crosshair',
   split:         'crosshair',
   select:        'default',
-  room:          'default',
   room_detect:   'pointer',
   join_walls:    'pointer',
   stairs:        'crosshair',
@@ -246,7 +245,6 @@ export default function Canvas() {
   const selectedOpening = useStore(s => s.selectedOpening)
   const selectOpening   = useStore(s => s.selectOpening)
   const selectedStampId = useStore(s => s.selectedStampId)
-  const pendingWallIds = useStore(s => s.pendingWallIds)
   const drawVirtual    = useStore(s => s.drawVirtual)
   const showDimensions = useStore(s => s.showDimensions)
   const unit           = useStore(s => s.unit)
@@ -274,7 +272,7 @@ export default function Canvas() {
   const setTool = useStore(s => s.setTool)
   const {
     getOrCreateNode, addWall, setDrawStart, selectWall, deleteWall,
-    splitWall, joinWalls, togglePendingWall, cancelAction,
+    splitWall, joinWalls, cancelAction,
     addStamp, deleteStamp, selectStamp, moveStamp,
     toggleWallMultiSelect, selectRoom,
     detectFaceFromWallClick, createRoomFromFace,
@@ -934,7 +932,15 @@ export default function Canvas() {
     const store = useStore.getState()
     store._runAtomically(() => {
       const st = useStore.getState()
-      const nodeIds = conv.points.map(p => st.getOrCreateNode(p.x, p.y))
+      // Face modes (inside_face / outside_face) use the bounded conversion
+      // join so a corner shared with an independently-drawn chain collapses
+      // onto the existing node rather than a sub-tolerance-gap near-duplicate
+      // (which topology would read as an open loop). Centerline draw keeps
+      // the exact-4"-snap getOrCreateNode path.
+      const useFaceJoin = drawReference !== 'centerline'
+      const nodeIds = conv.points.map(p =>
+        useFaceJoin ? st.getOrCreateNodeFaceJoin(p.x, p.y) : st.getOrCreateNode(p.x, p.y)
+      )
       const N = nodeIds.length
       const edgeCount = closed ? N : N - 1
       for (let i = 0; i < edgeCount; i++) {
@@ -972,8 +978,6 @@ export default function Canvas() {
       splitWall(wallId, pt.x, pt.y)
       return
     }
-    if (activeTool === 'room') { e.stopPropagation(); togglePendingWall(wallId) }
-
     if (activeTool === 'room_detect') {
       e.stopPropagation()
       const raw = screenToWorldRaw(e.clientX, e.clientY, getRect(), pan, zoom)
@@ -988,17 +992,42 @@ export default function Canvas() {
         toast.info('Room already exists — selected')
         return
       }
-      const result = createRoomFromFace(face)
-      if (result?.error === 'overlap') {
-        toast.warning(`Cannot create — overlaps existing room "${result.conflictName}"`)
-      } else if (result?.alreadyExists) {
+      // Create + smart-MEP-on-create in ONE history frame (one undo step).
+      // Folded from the retired manual Room tool (RoomPanel.handleSave) so the
+      // single face-detect Room tool keeps Area-2D smart defaults. Re-entrant
+      // _runAtomically shares createRoomFromFace's inner batch.
+      const store = useStore.getState()
+      store._runAtomically(() => {
+        const result = createRoomFromFace(face)
+        if (result?.error === 'overlap') {
+          toast.warning(`Cannot create — overlaps existing room "${result.conflictName}"`)
+          return
+        }
+        if (result?.alreadyExists) { selectRoom(result.roomId); return }
+        if (!result?.roomId)       { toast.error('Could not create room'); return }
         selectRoom(result.roomId)
-      } else if (result?.roomId) {
-        selectRoom(result.roomId)
-        toast.success('Room created from detected face')
-      } else {
-        toast.error('Could not create room')
-      }
+        const st = useStore.getState()
+        const autoOn = st.projectSettings?.autoMepDefaultsEnabled !== false
+        if (autoOn) {
+          const added = st.applyRoomMepDefaults?.(result.roomId, {
+            plumbing:   suggestPlumbingFixturesForRoom(st, result.roomId),
+            electrical: suggestElectricalPointsForRoom(st, result.roomId),
+            hvac:       suggestHvacUnitsForRoom(st, result.roomId),
+            fire:       suggestFireDevicesForRoom(st, result.roomId),
+            elv:        suggestElvDevicesForRoom(st, result.roomId),
+          }) ?? {}
+          const count = (added.plumbing?.length ?? 0) + (added.electrical?.length ?? 0)
+                      + (added.hvac?.length ?? 0) + (added.fire?.length ?? 0) + (added.elv?.length ?? 0)
+          toast.action(`Room created${count ? ` with ${count} MEP item${count === 1 ? '' : 's'}` : ''}.`, {
+            label: 'Undo',
+            onClick: () => useStore.getState().undo?.(),
+            duration: 6000,
+          })
+        } else {
+          window.dispatchEvent(new CustomEvent('mep:room-created', { detail: { roomId: result.roomId } }))
+          toast.success('Room created from detected face')
+        }
+      })
     }
 
     // Phase W follow-up — join_walls click handler. One-click flow
@@ -1105,7 +1134,7 @@ export default function Canvas() {
   }
 
   const svgCursor     = isPanning || spaceDown ? 'grab' : (TOOL_CURSOR[activeTool] || 'default')
-  const wallHitCursor = ['select', 'split', 'room', 'room_detect', 'join_walls'].includes(activeTool) ? 'pointer' : 'default'
+  const wallHitCursor = ['select', 'split', 'room_detect', 'join_walls'].includes(activeTool) ? 'pointer' : 'default'
   const zoomPct       = Math.round(zoom * 100)
 
   // Phase 1.9 — per-floor visibility. Single-floor projects auto-match (everything tagged 'F1').
@@ -1602,19 +1631,16 @@ export default function Canvas() {
           if (!a || !b) return null
           const isSelected      = wall.id === selectedWallId
           const isMultiSelected = selectedWallIds.includes(wall.id)
-          const isPending       = pendingWallIds.includes(wall.id)
           const isHovered       = wall.id === hoveredWallId
           const isVirtual       = wall.isVirtual ?? false
           const isSelectedAny   = isSelected || isMultiSelected
-          const color = isPending       ? '#27ae60'
-                      : isSelectedAny   ? 'var(--color-primary)'
+          const color = isSelectedAny   ? 'var(--color-primary)'
                       : wall.isPlot     ? '#a0522d'
                       : isVirtual       ? '#888'
                       : '#333'
           const thickPx = Math.max(2, (wall.thickness ?? DEFAULT_WALL_THICK_IN) * PX_PER_INCH)
           const baseStroke = isVirtual ? 1.5 : thickPx
           const strokeW = isSelectedAny ? baseStroke + 2
-                        : isPending     ? baseStroke + 2
                         : baseStroke
           const glowW   = baseStroke + 6
           const dashArray = isVirtual ? '8 5' : undefined
@@ -1742,7 +1768,7 @@ export default function Canvas() {
                   </g>
                 )
               })}
-              {(isHovered || isSelected || isMultiSelected || isPending || showDimensions) && (
+              {(isHovered || isSelected || isMultiSelected || showDimensions) && (
                 <text x={mx + perpX} y={my + perpY}
                   textAnchor="middle" dominantBaseline="middle"
                   fontSize={11} fontWeight={isHovered || isSelected ? '700' : '500'}
@@ -2144,31 +2170,6 @@ export default function Canvas() {
               style={{ pointerEvents: 'none' }}
             />
           )
-        })()}
-
-        {/* Room-mode corner indicators */}
-        {activeTool === 'room' && pendingWallIds.length > 0 && (() => {
-          const connections = {}
-          pendingWallIds.forEach(wid => {
-            const w = walls[wid]; if (!w) return
-            connections[w.n1] = (connections[w.n1] || 0) + 1
-            connections[w.n2] = (connections[w.n2] || 0) + 1
-          })
-          return Object.entries(connections).map(([nodeId, count]) => {
-            const node = nodes[nodeId]; if (!node) return null
-            const closed = count >= 2
-            const nx = sx(node.x), ny = sy(node.y)
-            return (
-              <g key={nodeId} style={{ pointerEvents: 'none' }}>
-                <circle cx={nx} cy={ny} r={9} fill={closed ? '#27ae60' : '#e74c3c'} opacity={0.2}/>
-                <circle cx={nx} cy={ny} r={6} fill={closed ? '#27ae60' : '#e74c3c'} stroke="#fff" strokeWidth={2}/>
-                <text x={nx} y={ny} textAnchor="middle" dominantBaseline="middle"
-                  fontSize={8} fill="#fff" fontWeight="700">
-                  {closed ? '✓' : '!'}
-                </text>
-              </g>
-            )
-          })
         })()}
 
         {/* Live opening preview on selected wall */}

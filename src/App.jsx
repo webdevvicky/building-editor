@@ -1,6 +1,5 @@
 import Canvas from './components/Canvas'
 import Toolbar from './components/Toolbar'
-import RoomPanel from './components/RoomPanel'
 import BOQPanel from './components/BOQPanel'
 import OpeningPanel from './components/OpeningPanel'
 import OpeningDetailPanel from './components/OpeningDetailPanel'
@@ -41,7 +40,6 @@ export default function App() {
       <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
         <Toolbar />
         <FloorSwitcher />
-        <RoomPanel />
         <OpeningPanel />
         <OpeningDetailPanel />
         <StampPanel />

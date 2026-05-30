@@ -22,6 +22,9 @@
 //   L — Acute-angle open chain (very-acute corners + short terminal segment)
 //   M — Zig-zag alternating reflex/convex chain (135°→45°→135° stress)
 //   N — Closure-in-face-space ordering (closure detected on face buffer, not post-conversion)
+//   O — Face-mode separate-wall corner join (Issue 2: false open-loop bug)
+//   P — Joint reuses the EXACT existing node id (no sub-pixel duplicate)
+//   Q — Inside-face 10×10 trace yields 100 ft² carpet (Issue 3: ~11% drift)
 //
 // Run via:
 //   node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-draw-reference.mjs
@@ -86,6 +89,31 @@ function detectAndCreateRooms(type = 'OTHER', floorId) {
   })
   for (const f of ordered) s().createRoomFromFace(f, { type })
   return ordered.length
+}
+// Mirror of Canvas.jsx::_commitFaceChain commit path. Converts a face
+// chain to centerline and creates nodes via the bounded face-join
+// (getOrCreateNodeFaceJoin) for non-centerline modes — exactly the
+// production commit path. Returns { collapsed, nodeIds }.
+function commitFaceChain(facePts, closed, drawReference = 'inside_face') {
+  const snapRefs = facePts.map(() => 'face')
+  const conv = convertFacePointsToCenterline(facePts, snapRefs, { drawReference, closed })
+  if (conv.collapsed) return { collapsed: true, nodeIds: [] }
+  const useFaceJoin = drawReference !== 'centerline'
+  const nodeIds = []
+  s()._runAtomically(() => {
+    const ids = conv.points.map(p =>
+      useFaceJoin ? s().getOrCreateNodeFaceJoin(p.x, p.y) : s().getOrCreateNode(p.x, p.y)
+    )
+    const N = ids.length
+    const edgeCount = closed ? N : N - 1
+    for (let i = 0; i < edgeCount; i++) {
+      const a = ids[i], b = ids[(i + 1) % N]
+      if (a === b) continue
+      s().addWall(a, b)
+    }
+    nodeIds.push(...ids)
+  })
+  return { collapsed: false, nodeIds }
 }
 
 // ── Bootstrap — module purity ─────────────────────────────────────────
@@ -673,6 +701,108 @@ header('Section N — Closure detection runs on FACE buffer, not post-conversion
        fs.readFileSync(path.join(fileURLToPath(import.meta.url), '..', '..', 'src/draw/faceToCenterline.js'), 'utf-8')
      ),
      'header comment must reference the closure-in-face-space ordering rule')
+}
+
+// ── Section O — Face-mode separate-wall corner join ───────────────────
+
+header('Section O — Separate-wall corner join (Issue 2: false open loop)')
+{
+  reset()
+  s().setDrawReference('inside_face')
+  // Author a 10×10 room as FOUR SEPARATE single-segment walls in
+  // inside_face mode — the exact F1-retrace pattern that previously left
+  // non-shared corner nodes (each corner endpoint perpendicular-projected
+  // in a different direction, diverging by halfThickness·√2 > SNAP_IN) and
+  // a false "open loop". Inside-face corners of a 10×10 room:
+  const SW = { x: 0,      y: 0      }
+  const SE = { x: 10*FT,  y: 0      }
+  const NE = { x: 10*FT,  y: 10*FT  }
+  const NW = { x: 0,      y: 10*FT  }
+  commitFaceChain([SW, SE], false)   // bottom edge
+  commitFaceChain([SE, NE], false)   // right edge
+  commitFaceChain([NE, NW], false)   // top edge
+  commitFaceChain([NW, SW], false)   // left edge
+
+  const walls = Object.values(s().walls)
+  ok('O.1 four walls created', walls.length === 4, `got ${walls.length}`)
+  const cornerNodes = Object.values(s().nodes).filter(n => (n.kind ?? 'CORNER') === 'CORNER')
+  ok('O.2 exactly 4 corner nodes (joints reused, no near-duplicates)',
+     cornerNodes.length === 4, `got ${cornerNodes.length}`)
+  // Each corner must be degree-2 (used by exactly 2 walls) → closed loop.
+  const deg = {}
+  for (const w of walls) { deg[w.n1] = (deg[w.n1] || 0) + 1; deg[w.n2] = (deg[w.n2] || 0) + 1 }
+  const degVals = Object.values(deg)
+  const openCorners = degVals.filter(d => d < 2).length
+  ok('O.3 zero open corners (loop topologically closed)',
+     openCorners === 0 && degVals.length === 4,
+     `open=${openCorners} nodes=${degVals.length}`)
+  // Topology must enumerate exactly one interior face.
+  const faces = enumerateFloorFaces(s(), 'F1')
+  ok('O.4 topology enumerates exactly 1 interior face',
+     faces.length === 1, `got ${faces.length}`)
+  ok('O.5 verifyIntegrity passes', verifyIntegrity(s()).valid)
+  // The (now-closed) loop converts to a Room. Separate-wall joints place
+  // the shared node at a single-edge perpendicular projection (not the true
+  // miter), so the polygon carries up to ~halfThickness corner imprecision
+  // — BOUNDED, and far better than the pre-fix open loop / duplicate nodes.
+  const created = detectAndCreateRooms('BEDROOM', 'F1')
+  ok('O.6 one room created from the now-closed separate-wall loop',
+     created === 1, `got ${created}`)
+  const carpetSep = computeCarpetAreaSft(s(), 'F1').areaSft
+  ok('O.7 separate-wall room carpet within 10% of 100 (bounded corner imprecision)',
+     Math.abs(carpetSep - 100) <= 10, `carpet=${carpetSep}`)
+}
+
+// ── Section P — Joint reuses exact node id (no sub-pixel duplicate) ────
+
+header('Section P — Joint reuses EXACT node id (no sub-pixel duplicate)')
+{
+  reset()
+  s().setDrawReference('inside_face')
+  // Commit the bottom edge first.
+  commitFaceChain([{ x: 0, y: 0 }, { x: 10*FT, y: 0 }], false)
+  const bottomWall = Object.values(s().walls)[0]
+  const sharedCornerNodeId = bottomWall.n2   // SE corner node from chain 1
+  const nodeCountAfter1 = Object.values(s().nodes).length
+  ok('P.1 first edge committed: 2 nodes', nodeCountAfter1 === 2, `got ${nodeCountAfter1}`)
+  // Commit the right edge starting at the SAME architectural corner (SE).
+  commitFaceChain([{ x: 10*FT, y: 0 }, { x: 10*FT, y: 10*FT }], false)
+  const nodeCountAfter2 = Object.values(s().nodes).length
+  ok('P.2 second edge adds exactly 1 node (joint reused, not duplicated)',
+     nodeCountAfter2 === 3, `got ${nodeCountAfter2}`)
+  const rightWall = Object.values(s().walls).find(w => w.id !== bottomWall.id)
+  const joinShared = rightWall &&
+    (rightWall.n1 === sharedCornerNodeId || rightWall.n2 === sharedCornerNodeId)
+  ok('P.3 right wall references the EXACT existing SE node id (no near-duplicate)',
+     joinShared,
+     `right=(${rightWall?.n1},${rightWall?.n2}) shared=${sharedCornerNodeId}`)
+}
+
+// ── Section Q — Inside-face 10×10 trace yields 100 ft² carpet ──────────
+
+header('Section Q — Inside-face 10×10 trace = 100 ft² carpet (Issue 3)')
+{
+  reset()
+  s().setDrawReference('inside_face')
+  // Author the 10×10 room as a SINGLE closed face chain (mitered corners)
+  // through the same face-join commit path the canvas uses. Closed chain →
+  // miter intersections → clean centerline 10.75×10.75 → clear_internal 100.
+  const facePts = [
+    { x: 0,      y: 0      },
+    { x: 10*FT,  y: 0      },
+    { x: 10*FT,  y: 10*FT  },
+    { x: 0,      y: 10*FT  },
+  ]
+  const res = commitFaceChain(facePts, true)
+  ok('Q.1 closed face chain committed (not collapsed)', !res.collapsed)
+  ok('Q.2 exactly 4 corner nodes + 4 walls',
+     Object.values(s().nodes).filter(n => (n.kind ?? 'CORNER') === 'CORNER').length === 4 &&
+     Object.values(s().walls).length === 4)
+  const created = detectAndCreateRooms('BEDROOM', 'F1')
+  ok('Q.3 exactly one room detected from the closed loop', created === 1, `got ${created}`)
+  const carpet = computeCarpetAreaSft(s(), 'F1').areaSft
+  ok('Q.4 carpet = 100 ft² ±0.5% (inside-face 10×10 = 100 clear, no ~11% inflation)',
+     Math.abs(carpet - 100) <= 0.5, `carpet=${carpet}`)
 }
 
 // ── Final integrity check ─────────────────────────────────────────────

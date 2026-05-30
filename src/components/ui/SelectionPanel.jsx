@@ -1,5 +1,5 @@
 // SelectionPanel — locked wrapper for every selection-driven side panel
-// (OpeningPanel, RoomPanel, ColumnPanel, MEP panels, etc.).
+// (OpeningPanel, ColumnPanel, RoomDetailPanel, MEP panels, etc.).
 //
 // Locks in:
 //   - position { top: 56, left: 16 } so all selection panels share the

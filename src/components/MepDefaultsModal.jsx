@@ -2,8 +2,9 @@
 // IS-2065 plumbing + IS-732 electrical defaults (HVAC/fire/ELV wire in
 // later phases).
 //
-// Listens for the `mep:room-created` window event dispatched from RoomPanel
-// after a successful saveRoom(). The event detail carries `{ roomId }`.
+// Listens for the `mep:room-created` window event dispatched from the
+// room_detect tool's create handler (Canvas) when autoMepDefaultsEnabled is
+// off, after a successful room creation. The event detail carries `{ roomId }`.
 //
 // Suggestion modules are owned by the engines subagent; we probe each
 // dynamically and only render a discipline group when its module exists

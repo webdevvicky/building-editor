@@ -12,6 +12,13 @@
 //   D — Multi-floor isolation.
 //   E — BOQ canary: rect_room-created rooms vs createRoomFromFace-created
 //       rooms on the same wall topology must produce identical BOQ output.
+//   F — Virtual-wall room detection (Bug A fix).
+//   G — Delete-then-redraw canary (Bug B fix).
+//   H — Sub-span face detection (BE-FaceLookup-001): a room bounded by a
+//       SUB-SPAN of a full-length wall carrying mid-span T-junctions must be
+//       detected via findFaceContainingEdge (the lookup keyed off wall.n1/n2
+//       missed before the fix because that pair is never graph-adjacent on a
+//       junctioned wall).
 //
 // Run via:
 //   node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-room-detection.mjs
@@ -689,6 +696,165 @@ const jsonAfter    = JSON.stringify(fingerprintAfter)
 ok('delete-then-redraw canary: BOQ matches baseline byte-identical',
    jsonBaseline === jsonAfter,
    jsonBaseline === jsonAfter ? '' : `DRIFT — baseline=${jsonBaseline.slice(0,180)} after=${jsonAfter.slice(0,180)}`)
+
+// ── Section H — Sub-span face detection (BE-FaceLookup-001) ──────────────
+
+header('Section H — Sub-span face detection (BE-FaceLookup-001)')
+
+// Fixture: a 20ft × 10ft outer rectangle split into two 10×10 rooms by a
+// vertical partition at x=10ft (120in). Drawing the partition lands its
+// endpoints MID-SPAN on the full-length bottom and top walls, so each
+// auto-forms a T-junction (Phase W — the walls are NOT split; they stay
+// single full-length entities with one junction each).
+//
+//   bottom wall: (0,0)→(240,0)   — gets T-junction T_b at (120,0)
+//   top wall:    (240,120)→(0,120) — gets T-junction T_t at (120,120)
+//   partition:   (120,0)→(120,120)
+//
+// The LEFT room is bounded by the SUB-SPAN (0,0)→(120,0) of the bottom wall
+// (and the SUB-SPAN (120,120)→(0,120) of the top wall). Before the fix,
+// findFaceContainingEdge keyed byEdgeSide off wall.n1/n2 = (0,0)/(240,0),
+// which is never a graph-adjacent pair on the junctioned wall → lookup
+// missed → returned null. The fix resolves the segment nearest the click.
+
+reset()
+{
+  // Outer 20×10 rectangle (centerline inches).
+  const bottomWallId = addWallAt(0,      0,      20*FT, 0)       // (0,0)→(240,0)
+  const rightWallId  = addWallAt(20*FT,  0,      20*FT, 10*FT)   // (240,0)→(240,120)
+  const topWallId    = addWallAt(20*FT,  10*FT,  0,     10*FT)   // (240,120)→(0,120)
+  const leftWallId   = addWallAt(0,      10*FT,  0,     0)       // (0,120)→(0,0)
+  // Vertical partition — endpoints land mid-span → auto T-junctions.
+  const partitionId  = addWallAt(10*FT,  0,      10*FT, 10*FT)   // (120,0)→(120,120)
+
+  ok('5 walls created (outer rect + partition)',
+     !!bottomWallId && !!rightWallId && !!topWallId && !!leftWallId && !!partitionId,
+     `bottom=${bottomWallId} right=${rightWallId} top=${topWallId} left=${leftWallId} part=${partitionId}`)
+
+  // H.1 — exactly 2 interior faces, each ≈ 100 ft².
+  const faces = enumerateFloorFaces(s(), 'F1')
+  ok('H.1 enumerateFloorFaces returns exactly 2 interior faces',
+     faces.length === 2, `got ${faces.length}`)
+  if (faces.length === 2) {
+    const areas = faces.map(f => f.signedAreaFt2).sort((a, b) => a - b)
+    ok('H.1 both faces signedAreaFt2 ≈ 100',
+       Math.abs(areas[0] - 100) < 0.5 && Math.abs(areas[1] - 100) < 0.5,
+       `areas=[${areas.join(', ')}]`)
+  }
+
+  // H.2 — bottom + top walls stay ONE entity each with exactly one junction
+  // (proves no split occurred).
+  const bottomWall = s().walls[bottomWallId]
+  const topWall    = s().walls[topWallId]
+  ok('H.2 bottom wall is one entity with exactly one junction',
+     (bottomWall?.junctions?.length ?? 0) === 1,
+     `junctions=${JSON.stringify(bottomWall?.junctions)}`)
+  ok('H.2 top wall is one entity with exactly one junction',
+     (topWall?.junctions?.length ?? 0) === 1,
+     `junctions=${JSON.stringify(topWall?.junctions)}`)
+
+  const T_b = bottomWall?.junctions?.[0] ?? null
+  const T_t = topWall?.junctions?.[0] ?? null
+
+  // H.3 — left-half click (interior, above bottom wall) → NON-NULL LEFT face
+  // ≈ 100 ft², wallIds = {bottom, partition, top, left}. THE FIX PROOF.
+  const leftFace = findFaceContainingEdge(s(), bottomWallId, { x: 60, y: 30 })
+  ok('H.3 left-half click returns a NON-NULL face (BE-FaceLookup-001 fix proof)',
+     leftFace != null,
+     leftFace ? `area=${leftFace.signedAreaFt2}` : 'returned null (regression!)')
+  if (leftFace) {
+    ok('H.3 left face area ≈ 100 ft²',
+       Math.abs(leftFace.signedAreaFt2 - 100) < 0.5, `area=${leftFace.signedAreaFt2}`)
+    const expected = new Set([bottomWallId, partitionId, topWallId, leftWallId])
+    const got = new Set(leftFace.wallIds)
+    const setsEqual = expected.size === got.size &&
+      [...expected].every(w => got.has(w))
+    ok('H.3 left face wallIds = {bottom, partition, top, left}',
+       setsEqual, `wallIds=${JSON.stringify(leftFace.wallIds)} expected=${JSON.stringify([...expected])}`)
+  }
+
+  // H.4 — right-half click (interior) → RIGHT face (includes right wall),
+  // a DIFFERENT face object than the left face.
+  const rightFace = findFaceContainingEdge(s(), bottomWallId, { x: 180, y: 30 })
+  ok('H.4 right-half click returns a NON-NULL face',
+     rightFace != null,
+     rightFace ? `area=${rightFace.signedAreaFt2}` : 'null')
+  if (rightFace) {
+    ok('H.4 right face area ≈ 100 ft²',
+       Math.abs(rightFace.signedAreaFt2 - 100) < 0.5, `area=${rightFace.signedAreaFt2}`)
+    ok('H.4 right face includes the right wall',
+       rightFace.wallIds.includes(rightWallId),
+       `wallIds=${JSON.stringify(rightFace.wallIds)}`)
+    ok('H.4 right face is a DIFFERENT object than the left face',
+       leftFace != null && rightFace !== leftFace)
+  }
+
+  // H.5 — side determinism: click BELOW the bottom wall (exterior side) → null.
+  const belowFace = findFaceContainingEdge(s(), bottomWallId, { x: 60, y: -30 })
+  ok('H.5 below-wall (exterior) click returns null (no enclosing face)',
+     belowFace === null, `got ${belowFace == null ? 'null' : 'a face'}`)
+
+  // H.6 — createRoomFromFace(leftFace) succeeds; area ≈ 100; nodeOrder has
+  // length 4 and INCLUDES both T-junction node ids (proves the junction is
+  // threaded as a polygon vertex).
+  if (leftFace) {
+    const created = s().createRoomFromFace(leftFace, { type: 'OTHER' })
+    ok('H.6 createRoomFromFace(leftFace) succeeds',
+       !!created?.roomId && !created?.error, JSON.stringify(created))
+    if (created?.roomId) {
+      const area = s().getRoomArea(created.roomId)
+      ok('H.6 created room area ≈ 100 ft²',
+         Math.abs(area - 100) < 0.5, `area=${area}`)
+      const room = s().rooms[created.roomId]
+      const no = room?.nodeOrder ?? []
+      ok('H.6 created room nodeOrder length === 4',
+         no.length === 4, `nodeOrder=${JSON.stringify(no)}`)
+      ok('H.6 created room nodeOrder INCLUDES both T-junction node ids',
+         T_b != null && T_t != null && no.includes(T_b) && no.includes(T_t),
+         `nodeOrder=${JSON.stringify(no)} T_b=${T_b} T_t=${T_t}`)
+    }
+  }
+
+  // H.7 — ambiguous click exactly at the junction x (x=120): returns a
+  // NON-NULL valid face, and the SAME face on a repeated call (deterministic).
+  // Per the half-open tie-break it binds to the later/right segment; we only
+  // assert non-null + stable + valid (don't over-specify which side).
+  const ambig1 = findFaceContainingEdge(s(), bottomWallId, { x: 120, y: 30 })
+  const ambig2 = findFaceContainingEdge(s(), bottomWallId, { x: 120, y: 30 })
+  ok('H.7 junction-x ambiguous click returns a NON-NULL face',
+     ambig1 != null, ambig1 ? `area=${ambig1.signedAreaFt2}` : 'null')
+  ok('H.7 junction-x ambiguous click is deterministic (same face on repeat)',
+     ambig1 === ambig2)
+  ok('H.7 junction-x face is valid (area ≈ 100 ft²)',
+     ambig1 != null && Math.abs(ambig1.signedAreaFt2 - 100) < 0.5,
+     ambig1 ? `area=${ambig1.signedAreaFt2}` : 'null')
+
+  // H.9 — integrity holds for the sub-span fixture (walls stay valid
+  // full entities). (Asserted here while the fixture is live.)
+  ok('H.9 verifyIntegrity valid for sub-span fixture',
+     verifyIntegrity(s()).valid)
+}
+
+// H.8 — non-junctioned parity: a plain single 10×10 room (4 walls, no
+// partition) still detects via findFaceContainingEdge on the interior side,
+// confirming junction-free walls take the byte-identical path.
+reset()
+{
+  const b = addWallAt(0,      0,      10*FT, 0)
+  addWallAt(10*FT,  0,      10*FT, 10*FT)
+  addWallAt(10*FT,  10*FT,  0,     10*FT)
+  addWallAt(0,      10*FT,  0,     0)
+  const plain = s().walls[b]
+  ok('H.8 plain wall has no junctions',
+     (plain?.junctions?.length ?? 0) === 0,
+     `junctions=${JSON.stringify(plain?.junctions)}`)
+  const face = findFaceContainingEdge(s(), b, { x: 5*FT, y: 1*FT })
+  ok('H.8 non-junctioned wall interior click returns a NON-NULL face',
+     face != null, face ? `area=${face.signedAreaFt2}` : 'null')
+  ok('H.8 non-junctioned face area ≈ 100 ft²',
+     face != null && Math.abs(face.signedAreaFt2 - 100) < 0.5,
+     face ? `area=${face.signedAreaFt2}` : 'null')
+}
 
 // ── Summary ─────────────────────────────────────────────────────────────
 

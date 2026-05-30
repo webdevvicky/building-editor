@@ -6,6 +6,80 @@ Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian sta
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
 
+## Phase RoomConverge — Face-selection room tool + sub-span fix (2026-05-30)
+
+The legacy manual wall-selection Room tool (`'room'` toolId, `RoomPanel.jsx`,
+`togglePendingWall`) was **RETIRED** — deleted outright (greenfield rule:
+removed, not deprecated, no compatibility shim). Its closure metric predated
+Phase W: it counted only each selected wall's `n1`/`n2` endpoints, so a room
+bounded by a **SUB-SPAN** of a full-length wall (whose endpoints lie OUTSIDE
+the room) was falsely reported "open" and the Save gate blocked creation.
+`saveRoom` itself was already sub-span-correct (`computeNodeOrderForWallIds`
+→ `enumerateFloorFaces` performs an exact wallId-set match) — only the UI gate
+was wrong. Room creation now converges on the **face graph** as the single
+authoritative path.
+
+### What landed
+
+- **`room_detect` is now the single Room tool.** Relabeled "Room", bound to
+  bare `R` (the old `room` tool's binding); `Shift+A` retired. One
+  click-to-detect-and-create flow: click a wall in a closed loop →
+  smallest enclosing face on the cursor's side → `createRoomFromFace`.
+- **Smart-MEP-on-create folded into the `room_detect` click handler.** The
+  auto-MEP logic previously in `RoomPanel.handleSave` now runs atomically
+  inside the room_detect creation (one undo frame): auto-applies the
+  suggested fixtures when `autoMepDefaultsEnabled`, otherwise dispatches the
+  `mep:room-created` window event so `MepDefaultsModal` can offer the
+  checkbox lists.
+- **`rect_room` (Shift+R) is unchanged** — the atomic rectangle-room create
+  path keeps its existing behavior.
+
+### Bug ledger
+
+- **BE-DrawCorners-001** — the 2026-05-30 morning corner-divergence fix
+  (`store.js` `getOrCreateNodeFaceJoin` + `findNearbyCornerNode`, a ~8in
+  bounded CORNER-reuse join, wired into `_commitFaceChain` +
+  `addRectangleRoom`; `verify-draw-reference` Sections O/P/Q). It fixes a
+  REAL, DISTINCT bug class: independently-drawn `inside_face` / `outside_face`
+  wall chains whose shared corner is perpendicular-projected in two
+  directions diverge by ~`halfThickness·√2` > `SNAP_IN`, producing two
+  distinct nodes and a genuine open loop. It is harmless to T-junctions
+  (filters `kind === 'CORNER'`). **HONEST CORRECTION:** this fix is
+  ORTHOGONAL to room-boundary detection and did NOT fix the reported
+  manual-Room-Tool open-corner screenshot — that symptom was the
+  pre-Phase-W endpoint-counting closure gate (now removed). Keep
+  BE-DrawCorners-001; it guards its own scenario.
+- **BE-FaceLookup-001 — FIXED** — `findFaceContainingEdge` (`faces.js`)
+  built its `byEdgeSide` lookup key from the FULL wall endpoints `n1→n2`,
+  but `byEdgeSide` is keyed per expanded **SEGMENT** (consecutive
+  `nodeOrder` entries). On a junctioned full-length wall, `n1→n2` is never
+  graph-adjacent, so `room_detect` returned `null` for any room bounded by
+  a SUB-SPAN — including the reported screenshot. Fixed by resolving the
+  segment nearest the click via `getOrderedWallJunctions` and keying off
+  that segment's node pair. Read-only lookup change; non-junctioned walls
+  stay byte-identical. Guarded by a `verify-room-detection.mjs` sub-span
+  section.
+
+### Locked rules (Phase RoomConverge)
+
+- **Canvas/UI verify discipline.** For any canvas/UI flow, the verify
+  section MUST drive the actual user-facing entry point with realistic
+  state (T-junctions, multiple walls, multiple rooms) — not just the
+  internal kernel. This closes the "verify green / canvas broken" gap
+  class.
+- **Single source of truth over layered fallbacks.** When two mechanisms
+  can solve the same problem, prefer one authoritative path over defensive
+  duplication. Layered fallbacks accumulate as confusion-debt. This is why
+  Option A — converge on the face graph — was chosen over Option C — keep
+  both the manual and the face tools.
+- **Phase W contract (make it impossible to miss).** ONE WALL = ONE
+  FULL-LENGTH ENTITY. T-junctions are first-class (`wall.junctions[]`). NO
+  auto-split, NO manual per-room split. Walls stay full entities for
+  identity stability, `wallBeamSpecs` slots, beam-derivation, and
+  INV-W1–W10. Any room "boundary" that needs a wall fragment uses a
+  SUB-SPAN of the full wall between T-junctions via the expanded graph —
+  never a split.
+
 ## Phase BBS — Bar Bending Schedule + IS 2502 catalog (2026-05-28)
 
 New RebarGroup abstraction + per-element generators + IS 2502 cutting-
@@ -2879,9 +2953,15 @@ work Carpet/Built-up rows)** +
 **Phase D Face-Aware Draw Reference (inside_face default per RERA +
 buffer-then-commit chain draw + closure-in-face-space ordering +
 snap-overrides-mode pinned vertices + Drawing-to toolbar segmented
-control + canvas mode badge)**
-complete on `main` (latest 2026-05-28). See **Phase D** + **Phase BA**
-sections at the top of this file for the most recent landings.
+control + canvas mode badge)** +
+**Phase RoomConverge Face-selection room tool + sub-span fix (legacy
+manual wall-selection Room tool retired; room_detect relabeled "Room"
+on bare R as the single click-to-create path with folded smart-MEP;
+BE-FaceLookup-001 sub-span face-lookup fix; BE-DrawCorners-001 corner-
+join guard)**
+complete on `main` (latest 2026-05-30). See **Phase RoomConverge** +
+**Phase D** + **Phase BA** sections at the top of this file for the
+most recent landings.
 
 **Phase W — Wall Topology Integrity (2026-05-27) — COMPLETE.** Verify
 results at merge: `verify-wall-topology` 127/127 assertions across

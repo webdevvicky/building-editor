@@ -421,6 +421,53 @@ export const useStore = create((set, get) => ({
     return id
   },
 
+  // findNearbyCornerNode — strict reuse query (NO node creation, NO
+  // T-junction). Returns the id of the nearest current-floor CORNER node
+  // within radiusIn (Euclidean, strict <), else null. The caller supplies
+  // radiusIn; the global SNAP_IN constant is untouched.
+  findNearbyCornerNode(x, y, radiusIn) {
+    const state = get()
+    const cur = state.currentFloorId ?? DEFAULT_FLOOR_ID
+    const candidateNodes = getActiveFloorNodes(state, cur)
+    let bestId = null
+    let bestD2 = radiusIn * radiusIn
+    for (const n of Object.values(candidateNodes)) {
+      if ((n.kind ?? 'CORNER') !== 'CORNER') continue
+      const dx = n.x - x, dy = n.y - y
+      const d2 = dx * dx + dy * dy
+      if (d2 < bestD2) { bestD2 = d2; bestId = n.id }
+    }
+    return bestId
+  },
+
+  // getOrCreateNodeFaceJoin — node resolution for the face-mode commit
+  // path (inside_face / outside_face only; centerline draw never calls it).
+  //
+  // When the walls of one architectural corner are authored as SEPARATE
+  // chains, each chain's shared corner is converted in isolation as an
+  // open-polyline endpoint (perpendicular-projected by halfThickness — see
+  // src/draw/faceToCenterline.js + rooms.js::_offsetOpenPolyline). The two
+  // adjacent chains therefore land at DIFFERENT centerline positions for
+  // the SAME corner, diverging by up to halfThickness·√2 — which exceeds
+  // SNAP_IN (4") and would leave a near-duplicate node, marking the loop
+  // topologically open (faces.js closure is node-id based, zero tolerance).
+  //
+  // This helper first reuses any existing CORNER node within that KNOWN
+  // divergence bound — a geometry-derived join radius, NOT a widened global
+  // snap — so the corner collapses onto one node. It falls back to the
+  // normal getOrCreateNode (4" snap / T-junction / mid-span) otherwise.
+  getOrCreateNodeFaceJoin(x, y) {
+    // Max divergence between two open-polyline endpoint projections of the
+    // same face corner = halfThickness·√2. Round up + 1" epsilon so the
+    // bound is inclusive of rounding. Real residential corners are feet
+    // apart, so this can only merge the same architectural point.
+    const halfThickIn = DEFAULT_WALL_THICK_IN / 2
+    const joinRadiusIn = Math.ceil(halfThickIn * Math.SQRT2) + 1
+    const existing = get().findNearbyCornerNode(x, y, joinRadiusIn)
+    if (existing) return existing
+    return get().getOrCreateNode(x, y)
+  },
+
   // ── Walls ─────────────────────────────────────────────────────────────
 
   addWall(n1, n2) {
@@ -531,10 +578,17 @@ export const useStore = create((set, get) => ({
       }
 
       // 4 corners CCW from SW so winding matches getRoomPolygon convention.
-      const sw = get().getOrCreateNode(cornerSW.x, cornerSW.y)
-      const se = get().getOrCreateNode(cornerSE.x, cornerSE.y)
-      const ne = get().getOrCreateNode(cornerNE.x, cornerNE.y)
-      const nw = get().getOrCreateNode(cornerNW.x, cornerNW.y)
+      // Face-mode (inside_face / outside_face) uses the bounded conversion
+      // join so a corner shared with an independently-drawn wall collapses
+      // onto the existing node instead of a near-duplicate. Centerline mode
+      // keeps the exact-4"-snap path byte-identical.
+      const mkCorner = drawReference !== 'centerline'
+        ? (px, py) => get().getOrCreateNodeFaceJoin(px, py)
+        : (px, py) => get().getOrCreateNode(px, py)
+      const sw = mkCorner(cornerSW.x, cornerSW.y)
+      const se = mkCorner(cornerSE.x, cornerSE.y)
+      const ne = mkCorner(cornerNE.x, cornerNE.y)
+      const nw = mkCorner(cornerNW.x, cornerNW.y)
       if (!sw || !se || !ne || !nw) return { error: 'node-snap-failed' }
 
       // addWall is idempotent on dup geometry (returns early). After all
@@ -1296,6 +1350,11 @@ export const useStore = create((set, get) => ({
     return { survivorId, removedId, wasSplit, sharedNodeId }
   },
 
+  // Programmatic staging of pendingWallIds for saveRoom. The manual Room
+  // UI tool that drove this was RETIRED (Phase RoomConverge — room creation
+  // converged on the room_detect face tool). This stays as a pure staging
+  // primitive for verify fixtures + future bulk importers; saveRoom remains
+  // the single room-commit path. NOT wired to any UI.
   togglePendingWall(wallId) {
     set(s => {
       const already = s.pendingWallIds.includes(wallId)
@@ -1610,10 +1669,10 @@ export const useStore = create((set, get) => ({
     // for legacy/simple rooms (no T-junctions on touched walls).
     const dedupedPendingIds = Array.from(new Set(pendingWallIds))
     let nodeOrder = computeNodeOrderForWallIds(get(), dedupedPendingIds, candidateFloorId)
-    // For rooms drawn via the legacy room-tool flow (togglePendingWall),
-    // the wallIds may include duplicates and may not form a single closed
-    // chain in the expanded graph. Fall back to the old walkPolygon helper
-    // when the expanded walk returns empty — preserves legacy behavior.
+    // pendingWallIds is staged by createRoomFromFace (face walk order) or
+    // addRectangleRoom. If the expanded-graph face match returns empty (the
+    // wallIds don't resolve to a single closed face), fall back to the
+    // walkPolygon helper — preserves behavior for any non-face-derived set.
     if (!nodeOrder || nodeOrder.length === 0) {
       nodeOrder = walkPolygon(pendingWallIds, walls)
     }

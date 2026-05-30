@@ -112,16 +112,10 @@ export function useKeyboardShortcuts() {
       }
       if (key === 'r' || key === 'R') {
         e.preventDefault()
-        // Area 2B — Shift+R picks the rectangle-room tool.
-        useStore.getState().setTool?.(e.shiftKey ? 'rect_room' : 'room')
-        closeDropdowns()
-        return
-      }
-      // Phase R1 — Shift+A picks the room_detect tool. Bare A is reserved
-      // (intentional future-territory; not bound here).
-      if ((key === 'a' || key === 'A') && e.shiftKey) {
-        e.preventDefault()
-        useStore.getState().setTool?.('room_detect')
+        // Bare R = the single face-detect Room tool (room_detect). Shift+R =
+        // the rectangle-room fast-draw tool. The legacy manual wall-selection
+        // 'room' tool was retired; R returns to its natural "Room" home.
+        useStore.getState().setTool?.(e.shiftKey ? 'rect_room' : 'room_detect')
         closeDropdowns()
         return
       }
