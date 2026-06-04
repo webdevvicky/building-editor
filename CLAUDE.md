@@ -19,6 +19,12 @@ the room) was falsely reported "open" and the Save gate blocked creation.
 was wrong. Room creation now converges on the **face graph** as the single
 authoritative path.
 
+**Validated end-to-end in canvas 2026-05-30 by user:** (1) 10×10 closed-chain
+rectangle → room created at 100 sqft; (2) T-junction sub-span case → room
+created on the sub-region; (3) room selection auto-works. Real canvas behavior
+agrees with `verify-room-detection.mjs` Section H — the fix carries through to
+the live UI, not just verify.
+
 ### What landed
 
 - **`room_detect` is now the single Room tool.** Relabeled "Room", bound to
@@ -49,7 +55,7 @@ authoritative path.
   manual-Room-Tool open-corner screenshot — that symptom was the
   pre-Phase-W endpoint-counting closure gate (now removed). Keep
   BE-DrawCorners-001; it guards its own scenario.
-- **BE-FaceLookup-001 — FIXED** — `findFaceContainingEdge` (`faces.js`)
+- **BE-FaceLookup-001 — FIXED (canvas-validated 2026-05-30)** — `findFaceContainingEdge` (`faces.js`)
   built its `byEdgeSide` lookup key from the FULL wall endpoints `n1→n2`,
   but `byEdgeSide` is keyed per expanded **SEGMENT** (consecutive
   `nodeOrder` entries). On a junctioned full-length wall, `n1→n2` is never

@@ -5,6 +5,46 @@ recent first.
 
 ---
 
+## BE-FaceLookup-001 — Room Tool can't create sub-span rooms / false "open" on full-length walls (✅ RESOLVED 2026-05-30)
+
+- **Status**: RESOLVED · **Severity**: high (blocked defining rooms on real F1 plans)
+- **Symptom**: tracing F1 in Inside-face mode, the manual Room Tool reported a
+  visually-closed room as "open" (red corners) and the area read ~11% high
+  (111.13 vs 100 sqft). Rooms bounded by a **sub-span** of a full-length
+  (T-junctioned) wall could not be created.
+- **Root cause (two layers)**: (1) the pre-Phase-W manual Room Tool computed
+  closure from each wall's `n1`/`n2` endpoints only — a full-length boundary
+  wall's endpoints lie OUTSIDE the room, so they read as "open corners" and the
+  Save gate blocked creation. (2) latent: `findFaceContainingEdge`
+  (`topology/faces.js`) keyed its `byEdgeSide` lookup off the FULL wall
+  endpoints `n1→n2`, but the index is keyed per expanded SEGMENT, so
+  `room_detect` returned `null` for any sub-span boundary on a junctioned wall.
+- **Fix (Option A — converge on the face graph)**: retired the manual Room Tool
+  + its endpoint-counting gate (deleted, greenfield). `room_detect` is now the
+  single Room tool (bare **R**, label "Room"), instant-create, with smart-MEP
+  folded into its click handler. `findFaceContainingEdge` now resolves the
+  segment nearest the click via `getOrderedWallJunctions` and keys off that
+  segment's node pair. Walls stay full entities — Phase W honored, no split.
+- **Verify**: `verify-room-detection.mjs` Section H (sub-span detection, 104
+  assertions); all 34 verify scripts green; `vite build` clean.
+- **Validated end-to-end in canvas 2026-05-30 by user**: 10×10 closed-chain →
+  room at 100 sqft; T-junction sub-span → room on the sub-region; room
+  selection auto-works. Canvas behavior agrees with verify.
+
+## BE-DrawHelpOverlay-001 — Draw help bar overlaps wall-length input (✅ RESOLVED 2026-05-30)
+
+- **Status**: RESOLVED · **Severity**: cosmetic (input functional but covered)
+- **Root cause**: the "Length" input panel and the chain-drawing help bar were
+  both hard-coded to `bottom:80, left:50%, zIndex:20`; with `drawStartId` set
+  (centerline mid-chain draw) both rendered at the identical position and the
+  later-painted help bar covered the input.
+- **Fix**: moved the Length input panel to `bottom:128` (`Canvas.jsx`) so it
+  stacks above the help bar, which keeps its `bottom:80` anchor (it renders in
+  both draw states). Pure positioning constant — same class as
+  BE-DrawRegression-001 (layering without reflow).
+- **Verify**: `vite build` clean; ESLint unchanged from baseline. Visual check
+  by user.
+
 ## BE-DrawRegression-001 — Toolbar overlap (✅ RESOLVED 2026-05-29)
 
 - **Status**: RESOLVED · **Severity**: high (blocked in-canvas demo to MD)
