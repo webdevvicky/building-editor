@@ -17,6 +17,7 @@ import {
 } from '../iso/solids'
 import { buildFaceList } from '../iso/extrude'
 import { faceColors } from '../iso/colors'
+import { resolveBeamEndpoint } from '../topology/beams'
 import './iso.css'
 
 const FT = 12
@@ -33,22 +34,6 @@ function beamTopZForLevel(level, floorBaseZ, floorTopZ) {
   if (level === 'plinth') return floorBaseZ
   if (level === 'lintel') return floorBaseZ + 84   // 7 ft
   return floorTopZ                                 // roof
-}
-
-// Beam endpoint position. COLUMN endpoints follow attached-node coords when
-// the column is snapped to one; otherwise use the column's free position.
-function beamEndpointXY(ep, nodes, columns) {
-  if (!ep) return null
-  if (ep.type === 'COLUMN') {
-    const c = columns[ep.columnId]
-    if (!c) return null
-    if (c.attachedNodeId && nodes[c.attachedNodeId]) {
-      const n = nodes[c.attachedNodeId]
-      return { x: n.x, y: n.y }
-    }
-    return { x: c.x, y: c.y }
-  }
-  return { x: ep.x, y: ep.y }
 }
 
 // Column position. Attached columns mirror the node; standalone use col.x/y.
@@ -208,12 +193,15 @@ export default function IsoView() {
 
     // Beams
     if (layerVisibility.beams) {
-      const allBeams = useStore.getState().getAllBeams?.() ?? []
+      const st = useStore.getState()
+      const allBeams = st.getAllBeams?.() ?? []
       for (const beam of allBeams) {
         const fid = beam.floorId ?? walls[beam.sourceWallId]?.floorId ?? DEFAULT_FLOOR_ID
         if (!floorVisibility[fid]) continue
-        const fromXY = beamEndpointXY(beam.endpoints?.from, nodes, columns)
-        const toXY   = beamEndpointXY(beam.endpoints?.to,   nodes, columns)
+        // Canonical resolver — handles COLUMN / BEAM / WALL / POINT, returns
+        // {x,y}|null. Unresolvable (dangling / cyclic) endpoints skip the beam.
+        const fromXY = resolveBeamEndpoint(st, beam.endpoints?.from)
+        const toXY   = resolveBeamEndpoint(st, beam.endpoints?.to)
         if (!fromXY || !toXY) continue
         const dims = beamDimensions[beam.level] ?? { widthIn: 9, depthIn: 9 }
         const baseZ = baseZOf(fid)

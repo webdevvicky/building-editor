@@ -2,9 +2,87 @@
 
 ## Codebase Overview
 
-Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus **32 verify scripts** that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
+Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus **35 verify scripts** that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
+
+## Phase BeamConnect — Beam-to-beam / wall / point endpoints (2026-06-10)
+
+Beams are no longer column-only. An explicit beam endpoint is now a 4-type
+discriminated union, all geometry resolves through ONE canonical accessor, and
+the beam tool can connect to columns, other beams, walls, or free points.
+Shipped in two commits: **Phase 1 kernel (`9d7ea54`, no UI) + Phase 2 Canvas UI
+(`98e02c6`)**. **35 verify scripts now gate every commit** (+1
+`verify-beam-connections`, 37 assertions). Phase W honored — beams reference
+COLUMNS/BEAMS/WALLS, never nodes; no node entanglement, no wall splitting.
+
+### Endpoint union (`schema/entities/beam.js`)
+
+```
+{ type:'COLUMN', columnId }            — column position (or its attachedNodeId)
+{ type:'BEAM',   beamId, t }           — point at t∈[0,1] along that primary beam
+                                         (secondary frames into primary; recursive,
+                                         cycle-guarded)
+{ type:'WALL',   wallId, t }           — bearing point at t∈[0,1] along n1→n2
+{ type:'POINT',  x, y, detachedFrom? } — absolute world coords (free / cantilever /
+                                         detached-by-parent-delete; detachedFrom
+                                         preserves provenance)
+```
+
+### What landed — Phase 1 kernel (`9d7ea54`)
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | `topology/beams.js::resolveBeamEndpoint` | THE single canonical accessor. Recursive for BEAM (lerp by `t`) + cycle-guarded, WALL lerp on `n1→n2`, returns `{x,y}|null` — null for dangling / cyclic / unknown (no silent NaN). COLUMN/POINT byte-identical to pre-phase. |
+| 2 | `schema/integrity.js` | Dangling `beamId`/`wallId` broken-ref checks, beam-cycle detection, gated `FK_DESCRIPTORS` for `beamId→beams` / `wallId→walls`. |
+| 3 | `structuralSlice.js::addBeamWithEndpoints(from, to, opts)` | Creates an explicit beam from arbitrary endpoint descriptors. |
+| 4 | Detach-on-delete cascade | `deleteBeam` + `deleteColumn` (structuralSlice) and `deleteWall` (store.js) convert each referencing beam endpoint to a frozen `{type:'POINT', x, y, detachedFrom:{type, …id}}` at its last-resolved position + emit a `beam_endpoint_detached` validationEvent. Geometry survives; undo restores. |
+| 5 | `bbs/generators/beamRebar.js` | Per-endpoint anchorage (see BBS rule below). |
+| 6 | Validation | `beam_no_support` → v2; new `beam_circular_ref` (ERROR). |
+| 7 | `verify-beam-connections.mjs` (NEW) | 29 assertions at Phase 1. |
+
+### What landed — Phase 2 Canvas UI (`98e02c6`)
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | `src/snap/beamTarget.js` (NEW) | `resolveBeamTarget(state, worldXY, opts)` — resolves a click to a COLUMN/BEAM/WALL/POINT endpoint descriptor by priority + per-type radius, projecting onto beam/wall segments for the parametric `t`. Pure; `excludeBeamId` guards self-reference. + `describeBeamEndpoint(state, ep)` for panel labels. |
+| 2 | `src/snap/toolPolicy.js::BEAM_TOOL_TARGETS` | The policy home for the beam tool's snap radii + priority order. |
+| 3 | `Canvas.jsx` | Unified beam-endpoint pick in `handleSVGClick` (column clicks bubble; proximity resolves the target) → level picker → `addBeamWithEndpoints`. Render path resolves EVERY endpoint via `resolveBeamEndpoint` (BEAM/WALL/POINT now render; no direct coord access). Live hover: snap dot + target-segment highlight + `t` label + ghost line. Esc / tool-change / mouse-leave clear the in-progress pick. |
+| 4 | `BeamPanel.jsx` | "Connections" section: From/To shown as `Column C1` · `Beam B2 (mid-span 42%)` · `Wall W3` · `Free point` · `Detached (was Beam B2)` + reconnect hint. |
+| 5 | `IsoView.jsx` (fixed 2026-06-10) | 3D viewer's local `beamEndpointXY` (COLUMN/POINT-only → NaN for BEAM/WALL) replaced with `resolveBeamEndpoint`. Beam-to-beam / beam-to-wall now render in the iso view. |
+| 6 | `verify-beam-connections.mjs` | Section G (targeting priority + descriptions) → 37 assertions. |
+
+### Canvas snap priority (beam tool)
+
+`BEAM_TOOL_TARGETS` resolves a beam-endpoint click in this order:
+
+```
+COLUMN  >  BEAM  >  WALL  >  free POINT
+```
+
+Column wins over a coincident beam/wall; a beam mid-span wins over a wall
+behind it; a free point is the fallback when nothing is within its radius.
+Per-type radii live in `toolPolicy.js` — never inline a radius in Canvas.
+
+### Locked rules (Phase BeamConnect)
+
+- **`resolveBeamEndpoint` is the SINGLE canonical accessor — no direct
+  endpoint coordinate access ANYWHERE.** Every consumer (BBS, BOQ,
+  shuttering, **2D canvas render**, **3D iso render**, validation) resolves
+  through it. It returns `{x,y}|null`; the caller skips the beam on null.
+  The 2026-06-10 IsoView fix closed the last violator (a stale local
+  resolver that produced NaN geometry for BEAM/WALL endpoints).
+- **Beams reference COLUMNS / BEAMS / WALLS, never nodes.** Topology
+  face/adjacency graphs stay decoupled from beams (Phase W contract).
+- **Parent delete DETACHES, never silently drops geometry.** Frozen POINT
+  with `detachedFrom` provenance + `beam_endpoint_detached` event; undo
+  restores; `beam_no_support` then flags the free end. `beam_circular_ref`
+  (ERROR) guards BEAM cycles.
+- **BBS per-endpoint anchorage** (`beamRebar.js`): `BEAM` endpoint =
+  interior / pinned (`Ld/2`, no exterior 9d hook); `WALL` endpoint =
+  bearing (wall-exterior anchorage rule); `COLUMN`/`POINT` = existing
+  exterior-joint heuristic → byte-identical to pre-phase. Wall-derived
+  beams (COLUMN/POINT endpoints only) are unchanged.
 
 ## Phase RoomConverge — Face-selection room tool + sub-span fix (2026-05-30)
 
@@ -2964,10 +3042,26 @@ control + canvas mode badge)** +
 manual wall-selection Room tool retired; room_detect relabeled "Room"
 on bare R as the single click-to-create path with folded smart-MEP;
 BE-FaceLookup-001 sub-span face-lookup fix; BE-DrawCorners-001 corner-
-join guard)**
-complete on `main` (latest 2026-05-30). See **Phase RoomConverge** +
-**Phase D** + **Phase BA** sections at the top of this file for the
-most recent landings.
+join guard)** +
+**Phase BeamConnect Beam-to-beam / wall / point endpoints (4-type endpoint
+union COLUMN/BEAM/WALL/POINT; resolveBeamEndpoint as the single canonical
+accessor across 2D + 3D render, BBS, BOQ, validation; addBeamWithEndpoints
++ snap/beamTarget.js with column > beam > wall > point priority; detach-on-
+delete with detachedFrom provenance; beam_no_support v2 + beam_circular_ref
+ERROR; Phase 1 kernel `9d7ea54` + Phase 2 Canvas UI `98e02c6`; IsoView
+beam-render fix 2026-06-10)**
+complete on `main` (latest 2026-06-10). See **Phase BeamConnect** +
+**Phase RoomConverge** + **Phase D** + **Phase BA** sections at the top of
+this file for the most recent landings.
+
+**Phase BeamConnect — Beam Endpoint Union (2026-06-10) — COMPLETE.** Verify
+results at merge: `verify-beam-connections` 37/37 assertions across Sections
+A–G (endpoint resolution, recursive BEAM lerp + cycle guard, WALL bearing
+lerp, detach-on-delete provenance, integrity broken-refs, validation v2 +
+circular-ref, targeting priority). All 35 verify scripts green;
+`verify-boq` byte-identical (COLUMN/POINT path unchanged). The 3D iso viewer
+beam-render bug (stale local resolver → NaN geometry for BEAM/WALL endpoints)
+was fixed 2026-06-10 by routing IsoView through `resolveBeamEndpoint`.
 
 **Phase W — Wall Topology Integrity (2026-05-27) — COMPLETE.** Verify
 results at merge: `verify-wall-topology` 127/127 assertions across
@@ -3125,9 +3219,10 @@ node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-wall-topol
 node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-room-detection.mjs   # Phase R1 + Bug A Section F (virtual-wall faces) + Bug B Section G (delete-then-redraw)
 node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-building-area.mjs    # Phase BA — carpet + true built-up across 13 sections incl. F1-realistic L+T-junction + dumbbell + disconnected blocks
 node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-draw-reference.mjs   # Phase D — face-aware draw, 80 assertions incl. round-trip kernel, mixed snap/face chain, acute/zig-zag/closure-in-face-space
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-beam-connections.mjs # Phase BeamConnect — 37 assertions: endpoint union resolution, recursive BEAM lerp + cycle guard, WALL bearing, detach-on-delete, integrity broken-refs, validation v2 + circular-ref, targeting priority (Section G)
 ```
 
-Run all 32 in one go (POSIX shell):
+Run all 35 in one go (POSIX shell):
 ```
 for s in scripts/verify-*.mjs; do
   if node --experimental-loader ./scripts/resolver-hook.mjs "$s" > /tmp/v.log 2>&1; then
@@ -3138,11 +3233,13 @@ for s in scripts/verify-*.mjs; do
 done
 ```
 
-All 32 must pass green before any commit. Phase BA adds
+All 35 must pass green before any commit. Phase BA adds
 `verify-building-area.mjs` (51 assertions across 13 sections); Phase D
 adds `verify-draw-reference.mjs` (80 assertions across 14 sections
 including 3 edge cases: acute-angle open chain, zig-zag alternating
-reflex/convex, closure-in-face-space ordering proof). The byte-equality
+reflex/convex, closure-in-face-space ordering proof); Phase BeamConnect
+adds `verify-beam-connections.mjs` (37 assertions across Sections A–G). The
+byte-equality
 seatbelt for any change to the offset kernel is
 `verify-dimension-mode` (95/95) + `verify-building-area` (51/51) —
 both must stay green on every kernel refactor.
@@ -3192,11 +3289,14 @@ for role logic.
 counts }`. Issue shape `{ ruleId, severity, category, entityType, entityId,
 message }`. Severities: `info | warning | error`. Rules: `floating_column`
 (column with no nearby wall nodes), `slab_no_enclosure` (slab references
-invalid room), `beam_no_support` (explicit beam endpoint not a column),
+invalid room), `beam_no_support` **(v2 — supported = at least one endpoint
+resolves to a COLUMN / BEAM / WALL; a free/unresolvable POINT end is
+unsupported; no longer column-only)**, `beam_circular_ref` **(ERROR —
+structural rule 6; a BEAM endpoint chain that cycles back on itself)**,
 `staircase_disconnected` (fromFloorId === toFloorId when multi-floor),
 `footing_no_column` (foundation with empty columnIds AND wallIds; RAFT/PILE
 exempt). BOQPanel footer surfaces top 5 issues with severity color.
-No hard-blocking — warnings only.
+No hard-blocking — warnings only (except `beam_circular_ref` = ERROR).
 
 **Selector discipline.** Required for all Phase 1.7+ code:
 `getColumnsOnFloor`, `getWallsOnFloor`, `getSlabsOnFloor`, `getStampsOnFloor`,
