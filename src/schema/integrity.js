@@ -132,10 +132,45 @@ export function verifyIntegrity(state) {
         _push(issues, { kind: 'broken-ref', entityType: 'beam', entityId: b.id, field: `endpoints.${which}.columnId`, missing: ep.columnId,
                         message: `beam ${b.id} endpoints.${which}.columnId → column ${ep.columnId} not found` })
       }
+      if (ep.type === 'BEAM' && !beams[ep.beamId]) {
+        _push(issues, { kind: 'broken-ref', entityType: 'beam', entityId: b.id, field: `endpoints.${which}.beamId`, missing: ep.beamId,
+                        message: `beam ${b.id} endpoints.${which}.beamId → beam ${ep.beamId} not found` })
+      }
+      if (ep.type === 'WALL' && !walls[ep.wallId]) {
+        _push(issues, { kind: 'broken-ref', entityType: 'beam', entityId: b.id, field: `endpoints.${which}.wallId`, missing: ep.wallId,
+                        message: `beam ${b.id} endpoints.${which}.wallId → wall ${ep.wallId} not found` })
+      }
     }
     if (b.floorId && floorIds.size > 0 && !floorIds.has(b.floorId)) {
       _push(issues, { kind: 'broken-ref', entityType: 'beam', entityId: b.id, field: 'floorId', missing: b.floorId,
                       message: `beam ${b.id} floorId → ${b.floorId} not in projectSettings.floors` })
+    }
+  }
+
+  // ── 5b. Beam-to-beam endpoint cycles (A frames into B frames into A) ──────
+  for (const b of Object.values(beams)) {
+    const seen = new Set()
+    const stack = []
+    for (const which of ['from', 'to']) {
+      const ep = b.endpoints?.[which]
+      if (ep?.type === 'BEAM' && ep.beamId) stack.push(ep.beamId)
+    }
+    let cyclic = false
+    while (stack.length) {
+      const id = stack.pop()
+      if (id === b.id) { cyclic = true; break }
+      if (seen.has(id)) continue
+      seen.add(id)
+      const bb = beams[id]
+      if (!bb) continue
+      for (const which of ['from', 'to']) {
+        const ep = bb.endpoints?.[which]
+        if (ep?.type === 'BEAM' && ep.beamId) stack.push(ep.beamId)
+      }
+    }
+    if (cyclic) {
+      _push(issues, { kind: 'beam-cycle', entityType: 'beam', entityId: b.id, field: 'endpoints', missing: null,
+                      message: `beam ${b.id} has a circular beam-to-beam endpoint reference` })
     }
   }
 
@@ -444,6 +479,15 @@ export const FK_DESCRIPTORS = Object.freeze([
                   optional: true, gateField: 'endpoints.from.type', gateValue: 'COLUMN' }),
   Object.freeze({ collection: 'beams', field: 'endpoints.to.columnId',   target: 'columns',
                   optional: true, gateField: 'endpoints.to.type',   gateValue: 'COLUMN' }),
+  // Beams → beams (beam-to-beam) / walls (bearing) — gated by endpoint.type
+  Object.freeze({ collection: 'beams', field: 'endpoints.from.beamId', target: 'beams',
+                  optional: true, gateField: 'endpoints.from.type', gateValue: 'BEAM' }),
+  Object.freeze({ collection: 'beams', field: 'endpoints.to.beamId',   target: 'beams',
+                  optional: true, gateField: 'endpoints.to.type',   gateValue: 'BEAM' }),
+  Object.freeze({ collection: 'beams', field: 'endpoints.from.wallId', target: 'walls',
+                  optional: true, gateField: 'endpoints.from.type', gateValue: 'WALL' }),
+  Object.freeze({ collection: 'beams', field: 'endpoints.to.wallId',   target: 'walls',
+                  optional: true, gateField: 'endpoints.to.type',   gateValue: 'WALL' }),
   // Slabs → rooms
   Object.freeze({ collection: 'slabs', field: 'roomIds', target: 'rooms', isArray: true }),
   // Foundations → columns + walls

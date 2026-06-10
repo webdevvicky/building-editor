@@ -746,14 +746,23 @@ export const createStructuralSlice = (set, get, uid) => ({
     set(state => {
       const nextColumns = { ...state.columns }
       delete nextColumns[id]
-      // Delete all EXPLICIT beams that reference this column
+      // Detach (don't delete) beams that reference this column — preserve the
+      // beam geometry + record provenance (Correction 1). The endpoint freezes
+      // at its last-resolved position as a POINT carrying detachedFrom; the
+      // beam_no_support rule then flags it, and undo restores the connection.
       const nextBeams = {}
+      const events = []
       for (const [bid, beam] of Object.entries(state.beams)) {
-        const fromRef = beam.endpoints.from
-        const toRef   = beam.endpoints.to
-        const fromHit = fromRef.type === 'COLUMN' && fromRef.columnId === id
-        const toHit   = toRef.type   === 'COLUMN' && toRef.columnId   === id
-        if (!fromHit && !toHit) nextBeams[bid] = beam
+        let nb = beam
+        for (const which of ['from', 'to']) {
+          const ep = beam.endpoints[which]
+          if (ep.type === 'COLUMN' && ep.columnId === id) {
+            const pos = topoResolveBeamEndpoint(state, ep) ?? { x: 0, y: 0 }
+            nb = { ...nb, endpoints: { ...nb.endpoints, [which]: { type: 'POINT', x: pos.x, y: pos.y, detachedFrom: { type: 'COLUMN', columnId: id } } } }
+            events.push({ ruleId: 'beam_endpoint_detached', severity: 'warning', category: 'structural', entityType: 'beam', entityId: bid, message: `beam ${bid} ${which} endpoint detached — column ${id} deleted`, meta: { which, detachedFrom: { type: 'COLUMN', columnId: id } } })
+          }
+        }
+        nextBeams[bid] = nb
       }
       // Fix 1: foundation owns columnIds[]. Removing a column scrubs it from every foundation.
       const nextFoundations = {}
@@ -761,7 +770,10 @@ export const createStructuralSlice = (set, get, uid) => ({
         const cids = (f.columnIds || []).filter(cid => cid !== id)
         nextFoundations[fid] = cids.length === (f.columnIds || []).length ? f : { ...f, columnIds: cids }
       }
-      return { columns: nextColumns, beams: nextBeams, foundations: nextFoundations }
+      return {
+        columns: nextColumns, beams: nextBeams, foundations: nextFoundations,
+        ...(events.length ? { validationEvents: [...(state.validationEvents ?? []), ...events].slice(-100) } : {}),
+      }
     })
   },
 
@@ -960,13 +972,63 @@ export const createStructuralSlice = (set, get, uid) => ({
     return id
   },
 
+  // Generalized create — accepts arbitrary endpoint descriptors
+  // ({type:'COLUMN'|'BEAM'|'WALL'|'POINT', ...}). Caller pre-resolves the
+  // descriptor (e.g. Canvas projects a click onto a target to get parametric t).
+  // Mirrors addBeam's history-frame + id-generation pattern.
+  addBeamWithEndpoints: (fromRef, toRef, level, opts = {}) => {
+    const id = uid()
+    const state = get()
+    const refFloor = (ref) => {
+      if (!ref) return null
+      if (ref.type === 'COLUMN') return state.columns?.[ref.columnId]?.floorId ?? null
+      if (ref.type === 'BEAM')   return state.beams?.[ref.beamId]?.floorId ?? null
+      if (ref.type === 'WALL')   return state.walls?.[ref.wallId]?.floorId ?? null
+      return null
+    }
+    const floorId = opts.floorId ?? refFloor(fromRef) ?? refFloor(toRef)
+      ?? state.currentFloorId ?? DEFAULT_FLOOR_ID
+    state._save()
+    set(s => ({
+      beams: {
+        ...s.beams,
+        [id]: {
+          id,
+          ifcGlobalId: uidIfc(),
+          endpoints: { from: fromRef, to: toRef },
+          level,
+          source: 'EXPLICIT',
+          floorId,
+          meta: null,
+        },
+      },
+    }))
+    return id
+  },
+
+  // Delete a beam. Beams that frame INTO this beam (BEAM endpoint) are NOT
+  // deleted — their endpoint detaches to a frozen POINT carrying detachedFrom
+  // provenance (geometry survives; validation explains; undo restores).
   deleteBeam: (id) => {
     get()._save()
     set(state => {
       const next = { ...state.beams }
       delete next[id]
+      const events = []
+      for (const [bid, beam] of Object.entries(next)) {
+        let nb = beam
+        for (const which of ['from', 'to']) {
+          const ep = beam.endpoints?.[which]
+          if (ep?.type === 'BEAM' && ep.beamId === id) {
+            const pos = topoResolveBeamEndpoint(state, ep) ?? { x: 0, y: 0 }
+            nb = { ...nb, endpoints: { ...nb.endpoints, [which]: { type: 'POINT', x: pos.x, y: pos.y, detachedFrom: { type: 'BEAM', beamId: id } } } }
+            events.push({ ruleId: 'beam_endpoint_detached', severity: 'warning', category: 'structural', entityType: 'beam', entityId: bid, message: `beam ${bid} ${which} endpoint detached — beam ${id} deleted`, meta: { which, detachedFrom: { type: 'BEAM', beamId: id } } })
+          }
+        }
+        if (nb !== beam) next[bid] = nb
+      }
       const cleared = state.selectedBeamId === id ? { selectedBeamId: null } : {}
-      return { beams: next, ...cleared }
+      return { beams: next, ...cleared, ...(events.length ? { validationEvents: [...(state.validationEvents ?? []), ...events].slice(-100) } : {}) }
     })
   },
 

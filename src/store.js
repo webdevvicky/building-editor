@@ -38,6 +38,7 @@ import {
   recomputeRoomNodeOrder,
   computeNodeOrderForWallIds,
 } from './topology/nodeOrderRefresh.js'
+import { resolveBeamEndpoint } from './topology/beams.js'
 import {
   findExpandedEdge,
 } from './topology/adjacency.js'
@@ -790,10 +791,31 @@ export const useStore = create((set, get) => ({
       Object.values(s.rooms).forEach(r => {
         rooms[r.id] = { ...r, wallIds: (r.wallIds ?? []).filter(id => id !== wallId) }
       })
+      // Detach beams that bear on the deleted wall (WALL endpoint) — freeze to
+      // a POINT with detachedFrom provenance (geometry survives; undo restores).
+      let beams = s.beams
+      const beamDetachEvents = []
+      for (const [bid, beam] of Object.entries(s.beams ?? {})) {
+        let nb = beam
+        for (const which of ['from', 'to']) {
+          const ep = beam.endpoints?.[which]
+          if (ep?.type === 'WALL' && ep.wallId === wallId) {
+            const pos = resolveBeamEndpoint(s, ep) ?? { x: 0, y: 0 }
+            nb = { ...nb, endpoints: { ...nb.endpoints, [which]: { type: 'POINT', x: pos.x, y: pos.y, detachedFrom: { type: 'WALL', wallId } } } }
+            beamDetachEvents.push({ ruleId: 'beam_endpoint_detached', severity: 'warning', category: 'structural', entityType: 'beam', entityId: bid, message: `beam ${bid} ${which} endpoint detached — wall ${wallId} deleted`, meta: { which, detachedFrom: { type: 'WALL', wallId } } })
+          }
+        }
+        if (nb !== beam) {
+          if (beams === s.beams) beams = { ...s.beams }
+          beams[bid] = nb
+        }
+      }
       const clearOpening = s.selectedOpening?.wallId === wallId
       return {
         walls, nodes, rooms,
         selectedWallId: null,
+        ...(beams !== s.beams ? { beams } : {}),
+        ...(beamDetachEvents.length ? { validationEvents: [...(s.validationEvents ?? []), ...beamDetachEvents].slice(-100) } : {}),
         ...(clearOpening ? { selectedOpening: null } : {}),
       }
     })

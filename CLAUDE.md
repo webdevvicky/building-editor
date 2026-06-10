@@ -4407,10 +4407,26 @@ src/topology/
   `src/topology/` and `src/store.js`.** Use the topology selector that
   asks your question. If no selector exists for your question, ADD one
   to the appropriate module before using it.
-- **`endpointPos` lives in `topology/beams.js` as `resolveBeamEndpoint`.**
-  Five copies were collapsed in Step 5 — do not re-introduce inline
-  endpoint resolution in new code (BOQ aggregators, validation rules,
-  Canvas render, MEP engines).
+- **`resolveBeamEndpoint(state, ref, opts?)` in `topology/beams.js` is the
+  SINGLE CANONICAL ACCESSOR for beam-endpoint geometry (locked rule).** No
+  direct endpoint coordinate access ANYWHERE — every consumer (BBS, BOQ,
+  shuttering, canvas render, validation) resolves through it. It returns
+  `{x,y} | null` (never `{x: undefined}`); `null` means dangling / cyclic /
+  unknown-type and the caller skips the beam. Five inline copies were
+  collapsed here in Step 5 — do not re-introduce inline resolution.
+- **Beam endpoints are a 4-type discriminated union** (Phase BeamConnect):
+  `{type:'COLUMN', columnId}` · `{type:'BEAM', beamId, t}` (secondary frames
+  into a primary at `t∈[0,1]`) · `{type:'WALL', wallId, t}` (bearing on a wall)
+  · `{type:'POINT', x, y, detachedFrom?}` (free / cantilever, or detached by a
+  parent delete). `resolveBeamEndpoint` is recursive + cycle-guarded for BEAM.
+  Beams reference COLUMNS/BEAMS/WALLS, never nodes. Topology face/adjacency
+  graphs are decoupled from beams.
+- **Parent delete DETACHES, never silently drops geometry.** `deleteColumn` /
+  `deleteBeam` / `deleteWall` convert a referencing beam endpoint to a frozen
+  `{type:'POINT', x, y, detachedFrom:{type, …id}}` at its last-resolved
+  position + emit a `beam_endpoint_detached` validationEvent (undo restores;
+  `beam_no_support` then flags the free end). `detachedFrom` preserves
+  provenance for repair/audit. `beam_circular_ref` (ERROR) guards cycles.
 - **`nodeToColId` lives in `topology/columns.js` as
   `getNodeToColumnIndex`.** Single-source, memoized on `state.columns`.
 - **Wall adjacency is memoized once per `state.rooms`** —

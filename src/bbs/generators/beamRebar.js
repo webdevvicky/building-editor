@@ -62,6 +62,18 @@ function _isExteriorJoint(state, beam /*, end */) {
   return rooms.length === 1
 }
 
+// Per-endpoint anchorage class. Beam-to-beam = interior/pinned (a secondary
+// framing into a primary is a simple support); wall-bearing = exterior. COLUMN
+// and POINT (incl. cantilever / detached) fall back to the existing source-based
+// heuristic so existing column-only beams stay BYTE-IDENTICAL. (Dedicated
+// cantilever development length is deferred — POINT uses the conservative
+// existing path; no new catalog constants introduced.)
+function _endpointIsExterior(state, beam, ep) {
+  if (ep?.type === 'BEAM') return false
+  if (ep?.type === 'WALL') return true
+  return _isExteriorJoint(state, beam)
+}
+
 function _floorIdFor(state, beam) {
   if (beam.source === 'WALL_DERIVED') {
     return state.walls?.[beam.sourceWallId]?.floorId ?? beam.floorId ?? null
@@ -110,8 +122,8 @@ export function generateBeamRebarGroups(ctx, beam) {
   // hookEndCount:0 and stays byte-identical to the prior form in IS_STRICT.
   const topDia = spec.topBars.diaMm
   const botDia = spec.bottomBars.diaMm
-  const isExtFrom = _isExteriorJoint(state, beam, 'from')
-  const isExtTo   = _isExteriorJoint(state, beam, 'to')
+  const isExtFrom = _endpointIsExterior(state, beam, beam.endpoints?.from)
+  const isExtTo   = _endpointIsExterior(state, beam, beam.endpoints?.to)
 
   const anchorFromTopMm = allowanceMm({ kind: isExtFrom ? 'beamTopAnchorExterior' : 'beamTopAnchorInterior', diaMm: topDia, params })
   const anchorToTopMm   = allowanceMm({ kind: isExtTo   ? 'beamTopAnchorExterior' : 'beamTopAnchorInterior', diaMm: topDia, params })

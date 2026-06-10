@@ -71,7 +71,7 @@ check('filterRulesByScope mep: returns only mep rules',
       onlyMep.every(r => r.scope === 'mep') && onlyMep.length === 3)
 const onlyStructural = filterRulesByScope(RULES, ['structural'])
 check('filterRulesByScope structural: returns only structural rules',
-      onlyStructural.every(r => r.scope === 'structural') && onlyStructural.length === 5)
+      onlyStructural.every(r => r.scope === 'structural') && onlyStructural.length === 6)
 const allScopes = filterRulesByScope(RULES, [])
 check('filterRulesByScope empty: returns all rules',
       allScopes.length === RULES.length)

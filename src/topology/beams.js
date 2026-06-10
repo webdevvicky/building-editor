@@ -13,12 +13,23 @@ import { classifyWallBeamFlags } from './walls.js'
 const _derivedBeamsMemo = createMemo()
 const _allBeamsMemo     = createMemo()
 
-// Resolves a beam endpoint reference to world coords. Handles both kinds:
-//   { type: 'COLUMN', columnId } — position derived from columns[columnId]
-//     (and the column's attachedNodeId if present)
-//   { type: 'POINT',  x, y }     — absolute world coords
-// Returns null if the column reference is dangling.
-export function resolveBeamEndpoint(state, endpointRef) {
+// CANONICAL ACCESSOR (locked rule) — the single home for resolving a beam
+// endpoint reference to world coords. EVERY consumer of beam-endpoint geometry
+// (BBS, BOQ, shuttering, canvas render, validation) MUST call this; no direct
+// endpoint coordinate access anywhere in the codebase.
+//
+// Endpoint types:
+//   { type: 'COLUMN', columnId }            — column position (or its attachedNodeId)
+//   { type: 'BEAM',   beamId, t }           — point at parameter t∈[0,1] along that
+//                                             primary beam (recursive; cycle-guarded)
+//   { type: 'WALL',   wallId, t }           — point at parameter t∈[0,1] along n1→n2
+//   { type: 'POINT',  x, y, detachedFrom? } — absolute world coords (free / cantilever
+//                                             / detached-by-parent-delete)
+// Returns null for a dangling ref, a cycle, an out-of-graph ref, or an unknown
+// type — NEVER {x: undefined} (no silent NaN downstream).
+//
+// `opts.seen` is the internal cycle guard (Set of beamIds visited this resolve).
+export function resolveBeamEndpoint(state, endpointRef, opts = {}) {
   if (!endpointRef) return null
   if (endpointRef.type === 'COLUMN') {
     const col = state.columns[endpointRef.columnId]
@@ -29,7 +40,36 @@ export function resolveBeamEndpoint(state, endpointRef) {
     }
     return { x: col.x, y: col.y }
   }
-  return { x: endpointRef.x, y: endpointRef.y }
+  if (endpointRef.type === 'POINT') {
+    return { x: endpointRef.x, y: endpointRef.y }
+  }
+  if (endpointRef.type === 'BEAM') {
+    const seen = opts.seen ?? new Set()
+    if (seen.has(endpointRef.beamId)) return null   // cycle — refuse, no NaN
+    const beam = state.beams?.[endpointRef.beamId]
+    if (!beam) return null
+    seen.add(endpointRef.beamId)
+    const a = resolveBeamEndpoint(state, beam.endpoints?.from, { seen })
+    const b = resolveBeamEndpoint(state, beam.endpoints?.to,   { seen })
+    if (!a || !b) return null
+    const t = _clamp01(endpointRef.t)
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+  }
+  if (endpointRef.type === 'WALL') {
+    const wall = state.walls?.[endpointRef.wallId]
+    if (!wall) return null
+    const n1 = state.nodes?.[wall.n1], n2 = state.nodes?.[wall.n2]
+    if (!n1 || !n2) return null
+    const t = _clamp01(endpointRef.t)
+    return { x: n1.x + (n2.x - n1.x) * t, y: n1.y + (n2.y - n1.y) * t }
+  }
+  return null   // unknown type — refuse rather than emit {x: undefined}
+}
+
+function _clamp01(t) {
+  const n = Number(t)
+  if (!Number.isFinite(n)) return 0
+  return n < 0 ? 0 : n > 1 ? 1 : n
 }
 
 // Returns beam length in feet, or 0 if either endpoint is dangling.
