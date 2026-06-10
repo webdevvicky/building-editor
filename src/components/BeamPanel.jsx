@@ -15,6 +15,7 @@ import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import { describeBeamEndpoint } from '../snap/beamTarget.js'
 
 const fieldRow = { marginTop: 'var(--space-2)' }
 const label    = { color: 'var(--color-text-muted)', marginBottom: 2, fontSize: 'var(--text-xs)' }
@@ -120,6 +121,19 @@ export default function BeamPanel() {
           <div style={{ fontSize: 'var(--text-base)' }}>{dims.widthIn}″ × {dims.depthIn}″</div>
         </div>
       )}
+
+      <div style={fieldRow}>
+        <div style={label}>Connections</div>
+        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}>
+          <div><span style={{ color: 'var(--color-text-muted)' }}>From: </span>{describeBeamEndpoint(beam.endpoints?.from)}</div>
+          <div><span style={{ color: 'var(--color-text-muted)' }}>To: </span>{describeBeamEndpoint(beam.endpoints?.to)}</div>
+        </div>
+        {(beam.endpoints?.from?.detachedFrom || beam.endpoints?.to?.detachedFrom) && (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)', marginTop: 2 }}>
+            Detached endpoint — re-draw with the beam tool to reconnect.
+          </div>
+        )}
+      </div>
 
       <Field label="Steel spec (BBS)">
         <select

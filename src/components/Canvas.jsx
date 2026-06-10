@@ -6,6 +6,8 @@ import {
   closestPointOnSegment,
 } from '../geometry'
 import { resolveSnap, getTargetDescriptor, findNearestCandidate, getSnapRef } from '../snap'
+import { resolveBeamTarget } from '../snap/beamTarget.js'
+import { resolveBeamEndpoint } from '../topology/beams.js'
 import { convertFacePointsToCenterline, isFaceChainClosed } from '../draw/faceToCenterline.js'
 import { isFaceCoveredByRoom } from '../topology/faces.js'
 import { canMergeWalls } from '../topology/canMerge.js'
@@ -265,6 +267,7 @@ export default function Canvas() {
   const deleteColumn = useStore(s => s.deleteColumn)
   const selectColumn = useStore(s => s.selectColumn)
   const addBeam          = useStore(s => s.addBeam)
+  const addBeamWithEndpoints = useStore(s => s.addBeamWithEndpoints)
   const selectBeam       = useStore(s => s.selectBeam)
   const selectedBeamId   = useStore(s => s.selectedBeamId)
   const layerVisibility  = useStore(s => s.layerVisibility)
@@ -319,8 +322,9 @@ export default function Canvas() {
   const [joinHover, setJoinHover] = useState(null)   // { wallA, wallB|null, eligible, reason }
   const [lockedLength, setLockedLength] = useState('')
   const [draggingStamp, setDraggingStamp] = useState(null) // { stampId, offX, offY } in world inches
-  const [beamFromColId, setBeamFromColId] = useState(null)      // first column selected for beam
-  const [beamLevelPicker, setBeamLevelPicker] = useState(null)  // { fromColId, toColId, screenX, screenY }
+  const [beamFirstRef, setBeamFirstRef] = useState(null)        // first endpoint descriptor for the beam being drawn
+  const [beamLevelPicker, setBeamLevelPicker] = useState(null)  // { fromRef, toRef, screenX, screenY }
+  const [beamHoverTarget, setBeamHoverTarget] = useState(null)  // resolveBeamTarget(...) live preview during beam tool
   // Area 2A — wall chain drawing. drawChainOriginId tracks the FIRST node
   // of the active chain. End triggers: double-click on SVG, Enter key
   // (fired via window event from useKeyboardShortcuts), Esc (existing
@@ -413,7 +417,7 @@ export default function Canvas() {
       if (e.code === 'Space' && !e.target.closest('input')) { e.preventDefault(); setSpaceDown(true) }
       if (e.key === 'Shift') setShiftDown(true)
       if (matchesBypass(e)) setBypassDown(true)
-      if (e.key === 'Escape') { cancelAction(); setBeamFromColId(null); setBeamLevelPicker(null); return }
+      if (e.key === 'Escape') { cancelAction(); setBeamFirstRef(null); setBeamHoverTarget(null); setBeamLevelPicker(null); return }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return }
       if (e.key === 'Delete') {
@@ -507,6 +511,11 @@ export default function Canvas() {
     }
   }, [activeTool])
 
+  // Beam tool: clear the in-progress first pick + hover target on tool change.
+  useEffect(() => {
+    if (activeTool !== 'beam') { setBeamFirstRef(null); setBeamHoverTarget(null) }
+  }, [activeTool])
+
   const startNode    = drawStartId ? nodes[drawStartId] : null
   // lockedLength may be '' (free draw) or a number-as-string ('10.5') or a
   // number — FeetInchesInput commits numbers, the legacy clear button
@@ -591,6 +600,14 @@ export default function Canvas() {
       }
     }
 
+    // Beam tool — live endpoint-target preview (column/beam/wall/point).
+    if (activeTool === 'beam') {
+      const raw = screenToWorldRaw(e.clientX, e.clientY, getRect(), panRef.current, zoomRef.current)
+      setBeamHoverTarget(resolveBeamTarget(useStore.getState(), raw, { floorId: currentFloorId }))
+    } else if (beamHoverTarget) {
+      setBeamHoverTarget(null)
+    }
+
     // Phase W follow-up — join_walls hover preview. Find the hovered wall,
     // then either look up its single collinear-eligible sibling (no
     // first pick yet) or evaluate canMergeWalls against the staged
@@ -640,29 +657,19 @@ export default function Canvas() {
   }
 
   function handleMouseLeave() {
-    setCursor(null); setHoveredWallId(null); setDraggingStamp(null); setHoveredFace(null); setJoinHover(null)
+    setCursor(null); setHoveredWallId(null); setDraggingStamp(null); setHoveredFace(null); setJoinHover(null); setBeamHoverTarget(null)
   }
 
   function handleColumnClick(e, colId) {
-    const shouldCapture = activeTool === 'column' || activeTool === 'select' || activeTool === 'beam'
+    // Beam tool no longer intercepts column clicks — the unified beam-endpoint
+    // picker in handleSVGClick resolves column / beam / wall / point by
+    // proximity (column has highest snap priority), so we let the click bubble.
+    const shouldCapture = activeTool === 'column' || activeTool === 'select'
     if (!shouldCapture) return
     e.stopPropagation()
-    if (activeTool === 'beam') {
-      if (!beamFromColId) {
-        setBeamFromColId(colId)
-        return
-      }
-      if (colId === beamFromColId) { setBeamFromColId(null); return }
-      // Second column selected — show level picker near click
-      setBeamLevelPicker({ fromColId: beamFromColId, toColId: colId, screenX: e.clientX, screenY: e.clientY })
-      setBeamFromColId(null)
-      return
-    }
-    if (activeTool === 'column' || activeTool === 'select') {
-      selectColumn(colId)
-      selectWall(null)
-      selectStamp(null)
-    }
+    selectColumn(colId)
+    selectWall(null)
+    selectStamp(null)
   }
 
   function handleSVGClick(e) {
@@ -713,8 +720,23 @@ export default function Canvas() {
       return
     }
     if (activeTool === 'beam') {
-      // Clicking empty canvas in beam mode — cancel
-      setBeamFromColId(null)
+      // Unified endpoint pick: resolve the click to a column / beam / wall /
+      // free-point descriptor (priority column > beam > wall > point).
+      const { x, y } = screenToWorldRaw(e.clientX, e.clientY, getRect(), pan, zoom)
+      const st = useStore.getState()
+      const target = resolveBeamTarget(st, { x, y }, { floorId: currentFloorId })
+      if (!beamFirstRef) {
+        setBeamFirstRef(target.ref)
+        return
+      }
+      // Reject a degenerate (zero-length) beam — both ends at ~the same point.
+      const aPos = resolveBeamEndpoint(st, beamFirstRef)
+      if (aPos && Math.hypot(aPos.x - target.point.x, aPos.y - target.point.y) < 1) {
+        setBeamFirstRef(null)
+        return
+      }
+      setBeamLevelPicker({ fromRef: beamFirstRef, toRef: target.ref, screenX: e.clientX, screenY: e.clientY })
+      setBeamFirstRef(null)
       return
     }
 
@@ -1188,7 +1210,7 @@ export default function Canvas() {
         {BEAM_LEVEL_REGISTRY.map(lvl => (
           <button key={lvl.id}
             onClick={() => {
-              addBeam(beamLevelPicker.fromColId, beamLevelPicker.toColId, lvl.id)
+              addBeamWithEndpoints(beamLevelPicker.fromRef, beamLevelPicker.toRef, lvl.id)
               setBeamLevelPicker(null)
             }}
             style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer',
@@ -1197,7 +1219,7 @@ export default function Canvas() {
             {lvl.label}
           </button>
         ))}
-        <button onClick={() => { setBeamLevelPicker(null); setBeamFromColId(null) }}
+        <button onClick={() => { setBeamLevelPicker(null); setBeamFirstRef(null) }}
           style={{ padding: '2px 6px', fontSize: 10, cursor: 'pointer', background: '#f5f5f5',
             border: '1px solid #ddd', borderRadius: 4, color: '#888' }}>
           Cancel
@@ -1810,12 +1832,11 @@ export default function Canvas() {
         {layerVisibility.beams && (<>
         {/* Beams */}
         {getAllBeams().map(beam => {
-          const fromPos = beam.endpoints.from.type === 'COLUMN'
-            ? getColPos(columns[beam.endpoints.from.columnId], nodes)
-            : beam.endpoints.from
-          const toPos = beam.endpoints.to.type === 'COLUMN'
-            ? getColPos(columns[beam.endpoints.to.columnId], nodes)
-            : beam.endpoints.to
+          // Canonical resolver for every endpoint type (COLUMN/BEAM/WALL/POINT) —
+          // no direct endpoint coordinate access in the render path.
+          const beamRS = useStore.getState()
+          const fromPos = resolveBeamEndpoint(beamRS, beam.endpoints.from)
+          const toPos   = resolveBeamEndpoint(beamRS, beam.endpoints.to)
           if (!fromPos || !toPos) return null
           const color = BEAM_LEVEL_REGISTRY.find(l => l.id === beam.level)?.color ?? '#888'
           const isDerived = beam.source === 'WALL_DERIVED'
@@ -2168,14 +2189,46 @@ export default function Canvas() {
         })()}
         </>)}
 
-        {/* Beam tool: ghost line from selected first column to cursor */}
-        {activeTool === 'beam' && beamFromColId && cursor && (() => {
-          const fromCol = columns[beamFromColId]
-          if (!fromCol) return null
-          const pos = getColPos(fromCol, nodes)
+        {/* Beam tool — live snap-target highlight + dot + t label (color by kind). */}
+        {activeTool === 'beam' && beamHoverTarget && (() => {
+          const t = beamHoverTarget
+          const COLORS = { COLUMN: '#2471a3', BEAM: '#9b59b6', WALL: '#e67e22', POINT: '#7f8c8d' }
+          const col = COLORS[t.kind] ?? '#7f8c8d'
+          const cx = sx(t.point.x), cy = sy(t.point.y)
+          const live = useStore.getState()
+          let seg = null
+          if (t.kind === 'BEAM') {
+            const b = live.beams[t.entityId]
+            const a = b && resolveBeamEndpoint(live, b.endpoints.from)
+            const z = b && resolveBeamEndpoint(live, b.endpoints.to)
+            if (a && z) seg = { a, z }
+          } else if (t.kind === 'WALL') {
+            const w = live.walls[t.entityId]
+            const n1 = w && nodes[w.n1], n2 = w && nodes[w.n2]
+            if (n1 && n2) seg = { a: n1, z: n2 }
+          }
+          return (
+            <g style={{ pointerEvents: 'none' }}>
+              {seg && (
+                <line x1={sx(seg.a.x)} y1={sy(seg.a.y)} x2={sx(seg.z.x)} y2={sy(seg.z.y)}
+                  stroke={col} strokeWidth={5} opacity={0.35} strokeLinecap="round" />
+              )}
+              <circle cx={cx} cy={cy} r={6} fill={col} stroke="#fff" strokeWidth={2} />
+              {(t.kind === 'BEAM' || t.kind === 'WALL') && Number.isFinite(t.t) && (
+                <text x={cx + 9} y={cy - 8} fontSize={11} fontWeight={700} fill={col}>t={t.t.toFixed(2)}</text>
+              )}
+            </g>
+          )
+        })()}
+
+        {/* Beam tool: ghost line from the first picked endpoint to cursor/snap. */}
+        {activeTool === 'beam' && beamFirstRef && cursor && (() => {
+          const pos = resolveBeamEndpoint(useStore.getState(), beamFirstRef)
+          if (!pos) return null
+          const tip = beamHoverTarget?.point ?? cursor
           return (
             <line
-              x1={sx(pos.x)} y1={sy(pos.y)} x2={sx(cursor.x)} y2={sy(cursor.y)}
+              x1={sx(pos.x)} y1={sy(pos.y)} x2={sx(tip.x)} y2={sy(tip.y)}
               stroke="#9b59b6" strokeWidth={2} strokeDasharray="6 3" opacity={0.7}
               style={{ pointerEvents: 'none' }}
             />

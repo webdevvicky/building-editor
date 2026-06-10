@@ -22,6 +22,7 @@ import { verifyIntegrity, FK_DESCRIPTORS } from '../src/schema/integrity.js'
 import { beamNoSupport } from '../src/validation/rules/beamNoSupport.js'
 import { beamCircularRef } from '../src/validation/rules/beamCircularRef.js'
 import { computeRebarGroups } from '../src/bbs/index.js'
+import { resolveBeamTarget, describeBeamEndpoint } from '../src/snap/beamTarget.js'
 
 const s = useStore.getState
 let pass = 0, fail = 0
@@ -205,6 +206,31 @@ header('Section F — BBS interior anchorage + FK descriptors + integrity')
   ok('F.5 wallId FK descriptors present (gated WALL)',
      FK_DESCRIPTORS.some(d => d.field === 'endpoints.from.wallId' && d.gateValue === 'WALL') &&
      FK_DESCRIPTORS.some(d => d.field === 'endpoints.to.wallId' && d.gateValue === 'WALL'))
+}
+
+// ── Section G — Beam-tool targeting (resolveBeamTarget) + descriptions ──
+header('Section G — resolveBeamTarget priority + describeBeamEndpoint')
+{
+  reset()
+  const gA = s().addColumn(0, 0), gB = s().addColumn(120, 0)
+  const gP = s().addBeam(gA, gB, 'roof')
+  ok('G.1 click near a column → COLUMN target',
+     (() => { const t = resolveBeamTarget(s(), { x: 8, y: 0 }); return t.kind === 'COLUMN' && t.ref.columnId === gA })())
+  ok('G.2 click on beam mid-span → BEAM target t≈0.5',
+     (() => { const t = resolveBeamTarget(s(), { x: 60, y: 2 }); return t.kind === 'BEAM' && t.ref.beamId === gP && near(t.t, 0.5, 0.05) })())
+  const w1 = s().getOrCreateNode(0, 400), w2 = s().getOrCreateNode(120, 400)
+  s().addWall(w1, w2)
+  const wId = Object.values(s().walls)[0].id
+  ok('G.3 click near a wall (away from col/beam) → WALL target',
+     (() => { const t = resolveBeamTarget(s(), { x: 60, y: 402 }); return t.kind === 'WALL' && t.ref.wallId === wId })())
+  ok('G.4 click in empty space → free POINT',
+     (() => { const t = resolveBeamTarget(s(), { x: 600, y: 600 }); return t.kind === 'POINT' && near(t.ref.x, 600) && near(t.ref.y, 600) })())
+  ok('G.5 priority column > beam (near both → COLUMN)',
+     resolveBeamTarget(s(), { x: 2, y: 1 }).kind === 'COLUMN')
+
+  ok('G.6 describe COLUMN', describeBeamEndpoint({ type: 'COLUMN', columnId: 'abcd1234' }).startsWith('Column'))
+  ok('G.7 describe BEAM mid-span %', describeBeamEndpoint({ type: 'BEAM', beamId: 'b1234', t: 0.42 }).includes('mid-span 42%'))
+  ok('G.8 describe detached endpoint', describeBeamEndpoint({ type: 'POINT', x: 0, y: 0, detachedFrom: { type: 'BEAM', beamId: 'b1234' } }).startsWith('Detached'))
 }
 
 // ── Summary ────────────────────────────────────────────────────────────

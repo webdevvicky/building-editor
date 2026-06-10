@@ -106,6 +106,19 @@ export const TOOL_SNAP_POLICY = Object.freeze({
 
 _validatePolicy(TOOL_SNAP_POLICY)
 
+// Beam-tool endpoint targeting (Phase BeamConnect). The beam tool resolves a
+// click to a beam endpoint by PRIORITY + per-type radius: column > beam > wall
+// > free point. This is NOT a TOOL_SNAP_POLICY entry — those ids feed the
+// generic resolver against SNAP_TARGETS; beam targeting is consumed by
+// src/snap/beamTarget.js::resolveBeamTarget. Walls get a slightly larger
+// radius (they are long; the projected bearing point can sit far from the
+// click along the span).
+export const BEAM_TOOL_TARGETS = Object.freeze([
+  Object.freeze({ kind: 'COLUMN', toleranceIn: 16 }),
+  Object.freeze({ kind: 'BEAM',   toleranceIn: 16 }),
+  Object.freeze({ kind: 'WALL',   toleranceIn: 24 }),
+])
+
 // Returns the raw policy array (or null if the tool has no snap policy).
 export function getToolPolicy(toolId) {
   return TOOL_SNAP_POLICY[toolId] ?? null
