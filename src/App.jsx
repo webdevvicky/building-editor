@@ -28,6 +28,7 @@ import MepDefaultsModal from './components/MepDefaultsModal'
 import ProjectsPanel from './components/ProjectsPanel'
 import RevisionsPanel from './components/RevisionsPanel'
 import IsoView from './components/IsoView'
+import HelpGuide from './components/HelpGuide'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -65,6 +66,7 @@ export default function App() {
         <ProjectsPanel />
         <RevisionsPanel />
         <IsoView />
+        <HelpGuide />
         <LayersPanel />
         <BOQPanel />
         <Canvas />

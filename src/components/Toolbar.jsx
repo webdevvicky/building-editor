@@ -14,10 +14,12 @@
 // open flyout closes automatically.
 
 import { useRef, Fragment } from 'react'
+import { HelpCircle } from 'lucide-react'
 import { useStore } from '../store'
 import { getCurrentProjectId, saveCurrent } from '../projects/manager'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
+import { Button } from './ui/Button'
 import {
   Dropdown,
   DropdownGroup,
@@ -390,6 +392,20 @@ export default function Toolbar() {
           }
         </Dropdown>
       ))}
+
+      {/* Standalone Help affordance. Not a clustered tool — it's a top-level
+          "?" button that opens the Getting Started guide (HelpGuide self-gates
+          on activeTool === 'help', mounted in App.jsx). */}
+      <Button
+        variant={activeTool === 'help' ? 'primary' : 'ghost'}
+        size="sm"
+        title="Getting started guide"
+        aria-label="Help"
+        onClick={() => setTool('help')}
+      >
+        <HelpCircle size={14} strokeWidth={2} />
+        Help
+      </Button>
 
       <input
         ref={fileInputRef}

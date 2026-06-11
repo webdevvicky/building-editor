@@ -11,12 +11,213 @@ function closeDropdowns() {
   window.dispatchEvent(new CustomEvent('toolbar:close-dropdowns'))
 }
 
+// ── Single source of truth for keyboard shortcuts ─────────────────────────
+//
+// This array is BOTH the dispatch table (the hook below iterates it on every
+// keydown and runs the first match) AND the display source consumed by the
+// in-app Getting Started guide (HelpGuide.jsx imports KEYBOARD_SHORTCUTS and
+// renders `combo` + `label`). Because the handler dispatches from the same
+// array the guide renders, the two can never drift — add a shortcut here and
+// it appears in Help automatically.
+//
+// Entry shape:
+//   group          display bucket (HelpGuide groups by this)
+//   combo          human-readable key combo (display only)
+//   label          what the shortcut does (display only)
+//   allowInForm    when true, fires even while typing in an input/textarea/
+//                  select/contenteditable. Modifier shortcuts opt in; bare-key
+//                  shortcuts do not (mirrors the old `if (inForm) return` gate).
+//   closeDropdowns when false, the matched shortcut does NOT dispatch
+//                  toolbar:close-dropdowns (Ctrl/Cmd+B and Enter preserve the
+//                  original behaviour of returning without closing flyouts).
+//   when(e, env)   predicate; env = { mod } where mod = ctrlKey || metaKey.
+//   run(e, env)    the action to perform.
+//
+// ORDER IS LOAD-BEARING: the hook runs the FIRST matching entry, so modifier
+// shortcuts are listed before the bare-key ones they would otherwise shadow
+// (e.g. Ctrl/Cmd+S must precede bare S). Do not reorder casually.
+export const KEYBOARD_SHORTCUTS = Object.freeze([
+  // ── Modifier shortcuts — fire everywhere, including form inputs ──────────
+  {
+    group: 'History & project',
+    combo: 'Ctrl/Cmd + Shift + Z',
+    label: 'Redo',
+    allowInForm: true,
+    when: (e, { mod }) => mod && e.shiftKey && (e.key === 'z' || e.key === 'Z'),
+    run: () => useStore.getState().redo?.(),
+  },
+  {
+    group: 'History & project',
+    combo: 'Ctrl/Cmd + Y',
+    label: 'Redo',
+    allowInForm: true,
+    when: (e, { mod }) => mod && !e.shiftKey && (e.key === 'y' || e.key === 'Y'),
+    run: () => useStore.getState().redo?.(),
+  },
+  {
+    group: 'History & project',
+    combo: 'Ctrl/Cmd + Z',
+    label: 'Undo',
+    allowInForm: true,
+    when: (e, { mod }) => mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z'),
+    run: () => useStore.getState().undo?.(),
+  },
+  {
+    group: 'History & project',
+    combo: 'Ctrl/Cmd + S',
+    label: 'Save project',
+    allowInForm: true,
+    when: (e, { mod }) => mod && !e.shiftKey && (e.key === 's' || e.key === 'S'),
+    run: () => handleSave(),
+  },
+  {
+    group: 'View',
+    combo: 'Ctrl/Cmd + B',
+    label: 'Collapse / expand the BOQ sidebar',
+    allowInForm: true,
+    closeDropdowns: false,
+    when: (e, { mod }) => mod && !e.shiftKey && (e.key === 'b' || e.key === 'B'),
+    run: () => window.dispatchEvent(new CustomEvent('boq:toggle')),
+  },
+  {
+    group: 'View',
+    combo: 'Ctrl/Cmd + 3',
+    label: 'Open the 3D view',
+    allowInForm: true,
+    when: (e, { mod }) => mod && !e.shiftKey && e.key === '3',
+    run: () => useStore.getState().setTool?.('iso'),
+  },
+
+  // ── Bare-key shortcuts — suppressed while typing in a form field ─────────
+  {
+    group: 'Editing',
+    combo: 'Esc',
+    label: 'Switch to Select · close the open panel · cancel the current draw',
+    when: (e) => e.key === 'Escape',
+    run: () => handleEscape(),
+  },
+  {
+    group: 'Editing',
+    combo: 'Enter',
+    label: 'Finish the current wall chain (Draw tool)',
+    closeDropdowns: false,
+    when: (e) => e.key === 'Enter' && useStore.getState().activeTool === 'draw',
+    run: () => window.dispatchEvent(new CustomEvent('canvas:end-chain')),
+  },
+  {
+    group: 'Editing',
+    combo: 'Delete / Backspace',
+    label: 'Delete the current selection (asks to confirm, offers Undo)',
+    when: (e) => e.key === 'Delete' || e.key === 'Backspace',
+    run: () => handleDelete(),
+  },
+  {
+    group: 'Tools',
+    combo: 'D',
+    label: 'Draw walls',
+    when: (e) => e.key === 'd' || e.key === 'D',
+    run: () => useStore.getState().setTool?.('draw'),
+  },
+  {
+    group: 'Tools',
+    combo: 'S',
+    label: 'Select',
+    when: (e) => e.key === 's' || e.key === 'S',
+    run: () => useStore.getState().setTool?.('select'),
+  },
+  {
+    // Bare R = the face-detect Room tool (room_detect). Shift+R below = the
+    // rectangle-room fast-draw tool. Split into two entries so each combo
+    // shows separately in Help; behaviour is identical to the old single
+    // shift-branching handler.
+    group: 'Tools',
+    combo: 'R',
+    label: 'Room — click a wall inside a closed loop to create the room',
+    when: (e) => (e.key === 'r' || e.key === 'R') && !e.shiftKey,
+    run: () => useStore.getState().setTool?.('room_detect'),
+  },
+  {
+    group: 'Tools',
+    combo: 'Shift + R',
+    label: 'Rectangle room — click two opposite corners',
+    when: (e) => (e.key === 'r' || e.key === 'R') && e.shiftKey,
+    run: () => useStore.getState().setTool?.('rect_room'),
+  },
+  {
+    group: 'Tools',
+    combo: 'Shift + B',
+    label: 'Open the BBS Schedule',
+    when: (e, { mod }) => (e.key === 'b' || e.key === 'B') && e.shiftKey && !mod,
+    run: () => useStore.getState().setTool?.('bbs_schedule'),
+  },
+  {
+    group: 'Tools',
+    combo: 'J',
+    label: 'Join walls',
+    when: (e) => e.key === 'j' || e.key === 'J',
+    run: () => useStore.getState().setTool?.('join_walls'),
+  },
+  {
+    group: 'MEP',
+    combo: 'P',
+    label: 'Plumbing',
+    when: (e) => e.key === 'p' || e.key === 'P',
+    run: () => useStore.getState().setTool?.('plumbing'),
+  },
+  {
+    group: 'MEP',
+    combo: 'E',
+    label: 'Electrical',
+    when: (e) => e.key === 'e' || e.key === 'E',
+    run: () => useStore.getState().setTool?.('electrical'),
+  },
+  {
+    group: 'MEP',
+    combo: 'H',
+    label: 'HVAC',
+    when: (e) => e.key === 'h' || e.key === 'H',
+    run: () => useStore.getState().setTool?.('hvac'),
+  },
+  {
+    group: 'MEP',
+    combo: 'F',
+    label: 'Fire',
+    when: (e) => e.key === 'f' || e.key === 'F',
+    run: () => useStore.getState().setTool?.('fire'),
+  },
+  {
+    group: 'MEP',
+    combo: 'L',
+    label: 'ELV (low-voltage)',
+    when: (e) => e.key === 'l' || e.key === 'L',
+    run: () => useStore.getState().setTool?.('elv'),
+  },
+  {
+    // Phase A Task 5 — F9 toggles snap globally. Canvas listens for the
+    // `snap:toggle` window event and performs the actual store flip (kept
+    // there because Canvas owns its own bypass-key state too). We dispatch,
+    // then read the new value the next tick for the toast.
+    group: 'View',
+    combo: 'F9',
+    label: 'Toggle snapping on / off',
+    when: (e) => e.key === 'F9',
+    run: () => {
+      window.dispatchEvent(new CustomEvent('snap:toggle'))
+      setTimeout(() => {
+        const onNow = !!useStore.getState().projectSettings?.snap?.enabled
+        toast.info(`Snap ${onNow ? 'on' : 'off'}`)
+      }, 0)
+    },
+  },
+])
+
 /**
- * Mount-once global keyboard shortcuts. Listens on `window` for keydown.
+ * Mount-once global keyboard shortcuts. Listens on `window` for keydown and
+ * dispatches from the KEYBOARD_SHORTCUTS registry above (first match wins).
  *
  * Form-aware: typing inside <input>/<textarea>/<select>/contenteditable
- * suppresses bare-key shortcuts (Esc / Delete / D / S / R) but NOT
- * modifier shortcuts (Ctrl/Cmd + Z/Y/S) — those work everywhere by design.
+ * suppresses bare-key shortcuts but NOT modifier shortcuts (those declare
+ * `allowInForm: true`) — they work everywhere by design.
  */
 export function useKeyboardShortcuts() {
   useEffect(() => {
@@ -29,154 +230,14 @@ export function useKeyboardShortcuts() {
         tag === 'SELECT' ||
         t?.isContentEditable === true
 
-      const mod = e.ctrlKey || e.metaKey
-      const key = e.key
+      const env = { mod: e.ctrlKey || e.metaKey }
 
-      // ── Modifier shortcuts (always-active) ────────────────────────────
-      // Ctrl+Shift+Z / Cmd+Shift+Z → redo  (check before plain Ctrl+Z)
-      if (mod && e.shiftKey && (key === 'z' || key === 'Z')) {
+      for (const sc of KEYBOARD_SHORTCUTS) {
+        if (inForm && !sc.allowInForm) continue
+        if (!sc.when(e, env)) continue
         e.preventDefault()
-        useStore.getState().redo?.()
-        closeDropdowns()
-        return
-      }
-      // Ctrl+Y / Cmd+Y → redo
-      if (mod && !e.shiftKey && (key === 'y' || key === 'Y')) {
-        e.preventDefault()
-        useStore.getState().redo?.()
-        closeDropdowns()
-        return
-      }
-      // Ctrl+Z / Cmd+Z → undo
-      if (mod && !e.shiftKey && (key === 'z' || key === 'Z')) {
-        e.preventDefault()
-        useStore.getState().undo?.()
-        closeDropdowns()
-        return
-      }
-      // Ctrl+S / Cmd+S → save
-      if (mod && !e.shiftKey && (key === 's' || key === 'S')) {
-        e.preventDefault()
-        handleSave()
-        closeDropdowns()
-        return
-      }
-      // Ctrl+B / Cmd+B → toggle BOQ sidebar (BOQPanel listens on window)
-      if (mod && !e.shiftKey && (key === 'b' || key === 'B')) {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('boq:toggle'))
-        return
-      }
-      // Ctrl+3 / Cmd+3 → open 2.5D iso view
-      if (mod && !e.shiftKey && key === '3') {
-        e.preventDefault()
-        useStore.getState().setTool?.('iso')
-        closeDropdowns()
-        return
-      }
-
-      // ── Form-input-aware shortcuts below ──────────────────────────────
-      if (inForm) return
-
-      if (key === 'Escape') {
-        e.preventDefault()
-        handleEscape()
-        closeDropdowns()
-        return
-      }
-      // Area 2A — Enter ends wall chain in draw tool. Canvas listens for
-      // this window event (see canvas:end-chain in Canvas.jsx) so the
-      // keyboard hook stays decoupled from concrete component state.
-      if (key === 'Enter' && useStore.getState().activeTool === 'draw') {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('canvas:end-chain'))
-        return
-      }
-      if (key === 'Delete' || key === 'Backspace') {
-        e.preventDefault()
-        handleDelete()
-        closeDropdowns()
-        return
-      }
-      if (key === 'd' || key === 'D') {
-        e.preventDefault()
-        useStore.getState().setTool?.('draw')
-        closeDropdowns()
-        return
-      }
-      if (key === 's' || key === 'S') {
-        e.preventDefault()
-        useStore.getState().setTool?.('select')
-        closeDropdowns()
-        return
-      }
-      if (key === 'r' || key === 'R') {
-        e.preventDefault()
-        // Bare R = the single face-detect Room tool (room_detect). Shift+R =
-        // the rectangle-room fast-draw tool. The legacy manual wall-selection
-        // 'room' tool was retired; R returns to its natural "Room" home.
-        useStore.getState().setTool?.(e.shiftKey ? 'rect_room' : 'room_detect')
-        closeDropdowns()
-        return
-      }
-      // BBS-5 — Shift+B opens the BBS Schedule panel. Bare B is unbound
-      // (Ctrl+B toggles BOQ — handled in the modifier section above).
-      if ((key === 'b' || key === 'B') && e.shiftKey && !mod) {
-        e.preventDefault()
-        useStore.getState().setTool?.('bbs_schedule')
-        closeDropdowns()
-        return
-      }
-      // Phase W follow-up — bare J picks the Manual Join tool.
-      if (key === 'j' || key === 'J') {
-        e.preventDefault()
-        useStore.getState().setTool?.('join_walls')
-        closeDropdowns()
-        return
-      }
-      if (key === 'p' || key === 'P') {
-        e.preventDefault()
-        useStore.getState().setTool?.('plumbing')
-        closeDropdowns()
-        return
-      }
-      if (key === 'e' || key === 'E') {
-        e.preventDefault()
-        useStore.getState().setTool?.('electrical')
-        closeDropdowns()
-        return
-      }
-      if (key === 'h' || key === 'H') {
-        e.preventDefault()
-        useStore.getState().setTool?.('hvac')
-        closeDropdowns()
-        return
-      }
-      if (key === 'f' || key === 'F') {
-        e.preventDefault()
-        useStore.getState().setTool?.('fire')
-        closeDropdowns()
-        return
-      }
-      if (key === 'l' || key === 'L') {
-        e.preventDefault()
-        useStore.getState().setTool?.('elv')
-        closeDropdowns()
-        return
-      }
-      // Phase A Task 5 — F9 toggles snap globally. Canvas component
-      // listens for the `snap:toggle` window event and performs the
-      // actual store flip (kept there because Canvas owns its own
-      // bypass-key state too). We just dispatch and then schedule a
-      // toast read the next tick so it reflects the new value.
-      if (key === 'F9') {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('snap:toggle'))
-        setTimeout(() => {
-          const onNow = !!useStore.getState().projectSettings?.snap?.enabled
-          toast.info(`Snap ${onNow ? 'on' : 'off'}`)
-        }, 0)
-        closeDropdowns()
+        sc.run(e, env)
+        if (sc.closeDropdowns !== false) closeDropdowns()
         return
       }
     }
@@ -191,7 +252,7 @@ export function useKeyboardShortcuts() {
 function handleEscape() {
   // setTool('select') already clears every selectedXId + selectedWallIds.
   // Calling it unconditionally also closes any modal panel opened by
-  // activeTool (foundations/floors/bbs/settings/projects/slabs/...).
+  // activeTool (foundations/floors/bbs/settings/projects/slabs/help/...).
   useStore.getState().setTool?.('select')
 }
 
