@@ -2033,6 +2033,8 @@ export const useStore = create((set, get) => ({
         ...rest,
         baseFloorId,
         topFloorId: rest.topFloorId ?? baseFloorId,
+        // Phase ColumnStack — per-floor override map (null = uniform).
+        segments: rest.segments ?? null,
       }
     }
 

@@ -14,6 +14,7 @@
 //   }
 
 import { floatingColumn } from './rules/floatingColumn.js'
+import { columnUnsupported } from './rules/columnUnsupported.js'
 import { slabNoEnclosure } from './rules/slabNoEnclosure.js'
 import { beamNoSupport } from './rules/beamNoSupport.js'
 import { beamCircularRef } from './rules/beamCircularRef.js'
@@ -28,6 +29,7 @@ import {
 
 export const RULES = [
   floatingColumn,
+  columnUnsupported,
   slabNoEnclosure,
   beamNoSupport,
   beamCircularRef,

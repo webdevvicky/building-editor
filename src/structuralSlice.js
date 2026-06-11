@@ -51,7 +51,10 @@ import {
 } from './topology/beams.js'
 import {
   getColumnHeightFt as topoGetColumnHeightFt,
+  getColumnSpanFloorIds as topoGetColumnSpanFloorIds,
+  getColumnLiftHeightFt as topoGetColumnLiftHeightFt,
 } from './topology/columns.js'
+import { resolveColumnTypeForColumn } from './specs/resolution.js'
 import {
   getFoundationForColumn as topoGetFoundationForColumn,
   getFoundationForWall as topoGetFoundationForWall,
@@ -734,6 +737,7 @@ export const createStructuralSlice = (set, get, uid) => ({
           baseFloorId: floorId, topFloorId: floorId,
           classification: null,
           reinforcementSpecId: null,
+          segments: null,
           meta: null,
         },
       },
@@ -782,6 +786,92 @@ export const createStructuralSlice = (set, get, uid) => ({
     set(state => ({
       columns: { ...state.columns, [id]: { ...state.columns[id], baseFloorId, topFloorId } },
     }))
+  },
+
+  // Phase ColumnStack — extend an existing column stack to include floorId.
+  // Raises topFloorId (and lowers baseFloorId if floorId is below the base)
+  // in floor-sequence order. NEVER creates a new entity — a column is one
+  // continuous vertical member. Returns the (unchanged) column id.
+  extendColumnToFloor: (id, floorId) => {
+    const sorted = [...(get().projectSettings?.floors ?? [])].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    const col = get().columns[id]
+    if (!col || sorted.length === 0) return id
+    const idxOf = fid => sorted.findIndex(f => f.id === fid)
+    const baseIdx = idxOf(col.baseFloorId ?? sorted[0].id)
+    const topIdx  = idxOf(col.topFloorId  ?? col.baseFloorId ?? sorted[0].id)
+    const tgtIdx  = idxOf(floorId)
+    if (tgtIdx === -1) return id
+    const nextBaseIdx = Math.min(baseIdx, tgtIdx)
+    const nextTopIdx  = Math.max(topIdx,  tgtIdx)
+    get()._save()
+    set(state => ({
+      columns: { ...state.columns, [id]: {
+        ...state.columns[id],
+        baseFloorId: sorted[nextBaseIdx].id,
+        topFloorId:  sorted[nextTopIdx].id,
+      } },
+    }))
+    return id
+  },
+
+  // Phase ColumnStack — lower the column's top to floorId (delete the lifts
+  // above). If floorId is below the base, the whole column is deleted (no
+  // lifts remain). Prunes orphaned segment overrides outside the new span.
+  truncateColumnToFloor: (id, floorId) => {
+    const sorted = [...(get().projectSettings?.floors ?? [])].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    const col = get().columns[id]
+    if (!col || sorted.length === 0) return
+    const idxOf = fid => sorted.findIndex(f => f.id === fid)
+    const baseIdx = idxOf(col.baseFloorId ?? sorted[0].id)
+    const tgtIdx  = idxOf(floorId)
+    if (tgtIdx === -1) return
+    if (tgtIdx < baseIdx) { get().deleteColumn(id); return }
+    const keep = new Set(sorted.slice(Math.min(baseIdx, tgtIdx), Math.max(baseIdx, tgtIdx) + 1).map(f => f.id))
+    get()._save()
+    set(state => {
+      const prevSeg = state.columns[id].segments
+      let nextSeg = prevSeg
+      if (prevSeg) {
+        nextSeg = {}
+        for (const [fid, v] of Object.entries(prevSeg)) if (keep.has(fid)) nextSeg[fid] = v
+        if (Object.keys(nextSeg).length === 0) nextSeg = null
+      }
+      return {
+        columns: { ...state.columns, [id]: {
+          ...state.columns[id], topFloorId: floorId, segments: nextSeg,
+        } },
+      }
+    })
+  },
+
+  // Phase ColumnStack — write a per-floor segment override (section and/or
+  // reinforcement) on a column. Immutable nested update (Zustand v5 shallow
+  // merge → explicit spread). Empty partials are ignored.
+  setColumnSegment: (id, floorId, partial) => {
+    if (!floorId || !partial || Object.keys(partial).length === 0) return
+    get()._save()
+    set(state => {
+      const col = state.columns[id]
+      if (!col) return {}
+      const segments = { ...(col.segments ?? {}) }
+      segments[floorId] = { ...(segments[floorId] ?? {}), ...partial }
+      return { columns: { ...state.columns, [id]: { ...col, segments } } }
+    })
+  },
+
+  // Phase ColumnStack — clear a column's segment override for one floor.
+  // Drops the segments map entirely when no overrides remain.
+  clearColumnSegment: (id, floorId) => {
+    get()._save()
+    set(state => {
+      const col = state.columns[id]
+      if (!col || !col.segments || !(floorId in col.segments)) return {}
+      const segments = { ...col.segments }
+      delete segments[floorId]
+      return { columns: { ...state.columns, [id]: {
+        ...col, segments: Object.keys(segments).length === 0 ? null : segments,
+      } } }
+    })
   },
 
   setColumnReinforcementSpec: (id, reinforcementSpecId) => {
@@ -1461,19 +1551,34 @@ export const createStructuralSlice = (set, get, uid) => ({
   getColumnHeightFt: (column) => topoGetColumnHeightFt(get(), column),
 
   // Returns { [columnTypeId]: { count, columnHeightFt, sectionFt2, volFt3, label } }
-  // Per-column height (Fix 2) — multi-span columns contribute their full span height.
+  // Phase ColumnStack — per-floor accounting:
+  //   • count   = column ENTITY count, attributed to each column's DEFAULT
+  //               section (foundations/labels rely on one entity = one footing).
+  //   • volFt3  = Σ over the column's span of (resolved-per-floor section area ×
+  //               that floor's lift height) — so per-floor section overrides and
+  //               multi-floor spans are accounted correctly (no double-count).
+  // A single-floor column reduces to one lift at its default section → output is
+  // byte-identical to the pre-phase whole-column form.
   getColumnQuantities: () => {
-    const { columns, projectSettings } = get()
+    const state = get()
+    const { columns, projectSettings } = state
     const { columnTypes } = projectSettings
     const result = {}
+    const ensure = (ct, repHeightFt) => {
+      if (!result[ct.id]) {
+        result[ct.id] = { count: 0, columnHeightFt: repHeightFt, sectionFt2: getColumnAreaFt2(ct), volFt3: 0, label: ct.label }
+      }
+      return result[ct.id]
+    }
     for (const col of Object.values(columns)) {
-      const ct = columnTypes.find(t => t.id === col.columnTypeId)
-      if (!ct) continue
-      const sectionFt2  = getColumnAreaFt2(ct)
-      const colHeightFt = get().getColumnHeightFt(col)
-      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt: colHeightFt, sectionFt2, volFt3: 0, label: ct.label }
-      result[ct.id].count  += 1
-      result[ct.id].volFt3 += sectionFt2 * colHeightFt
+      const fullHeightFt = topoGetColumnHeightFt(state, col)
+      const defaultCt = columnTypes.find(t => t.id === col.columnTypeId)
+      if (defaultCt) ensure(defaultCt, fullHeightFt).count += 1
+      for (const fid of topoGetColumnSpanFloorIds(state, col)) {
+        const ct = resolveColumnTypeForColumn(state, col, columnTypes, fid)
+        if (!ct) continue
+        ensure(ct, fullHeightFt).volFt3 += getColumnAreaFt2(ct) * topoGetColumnLiftHeightFt(state, col, fid)
+      }
     }
     for (const k of Object.keys(result)) result[k].volFt3 = r2(result[k].volFt3)
     return result
@@ -1776,9 +1881,12 @@ export const createStructuralSlice = (set, get, uid) => ({
     let colFt3 = 0
     for (const col of Object.values(columns)) {
       if (exColumns.has(col.id)) continue
-      const ct = columnTypes.find(t => t.id === col.columnTypeId)
-      if (!ct) continue
-      colFt3 += getColumnAreaFt2(ct) * state.getColumnHeightFt(col)
+      // Phase ColumnStack — per-floor: resolved section × that floor's lift.
+      for (const fid of topoGetColumnSpanFloorIds(state, col)) {
+        const ct = resolveColumnTypeForColumn(state, col, columnTypes, fid)
+        if (!ct) continue
+        colFt3 += getColumnAreaFt2(ct) * topoGetColumnLiftHeightFt(state, col, fid)
+      }
     }
 
     // ── Beams: per-instance (explicit + wall-derived), drop excluded ───────

@@ -25,6 +25,12 @@ export const columnSchema = Object.freeze({
     // (footing-top→grade-beam = SUB, above = SUPER) when split enabled;
     // 'SUB'/'SUPER' forces the whole column into one abstract category.
     position:            Object.freeze({ type: 'string|null', required: true,  default: null, oneOf: Object.freeze([null, 'SUB', 'SUPER']) }),
+    // Phase ColumnStack — sparse per-floor section/reinforcement overrides.
+    // null = uniform column (default section/reinforcement on every floor in
+    // [baseFloorId, topFloorId]). Key = floorId within the span; value =
+    // { columnTypeId?, reinforcementSpecId?, meta? }. Resolution falls back
+    // segment → instance → type → project-default → estimate.
+    segments:            Object.freeze({ type: 'object|null', required: true,  default: null }),
     meta:                Object.freeze({ type: 'object|null', required: true,  default: null }),
   }),
   invariants: Object.freeze([]),

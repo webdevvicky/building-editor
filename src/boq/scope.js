@@ -26,6 +26,8 @@ import {
 } from '../constants/structural'
 import { getColumnAreaFt2 } from '../lib/columnShapes'
 import { isColumnOnFloor, sortedFloorList } from '../topology/floor.js'
+import { getColumnLiftHeightFt as topoGetColumnLiftHeightFt } from '../topology/columns.js'
+import { resolveColumnTypeForColumn } from '../specs/resolution.js'
 import { getWallAdjacencyCount as topoGetWallAdjacencyCount, classifyWallBeamFlags as topoClassifyWallBeamFlags } from '../topology/walls.js'
 import { resolveBeamEndpoint as topoResolveBeamEndpoint, getDerivedWallBeams as topoGetDerivedWallBeams, getAllBeams as topoGetAllBeams } from '../topology/beams.js'
 import { buildPlumbingSystemGraph } from '../mep/plumbing/network.js'
@@ -225,17 +227,24 @@ export function scopeStateToFloor(state, floorId) {
   }
 
   // ── Column / beam / foundation / slab / staircase ─────────────────────
+  // Phase ColumnStack — floor-scoped: a spanning column contributes ONLY this
+  // floor's lift (resolved-per-floor section × lift height), never its whole
+  // height (which previously double-counted across the floors it spans).
+  // count stays per-entity at the default section. Single-floor columns reduce
+  // to the pre-phase whole-column form (lift == full height).
   const getColumnQuantities = () => {
     const { columnTypes } = state.projectSettings
     const result = {}
+    const ensure = (ct, repHeightFt) => {
+      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt: repHeightFt, sectionFt2: getColumnAreaFt2(ct), volFt3: 0, label: ct.label }
+      return result[ct.id]
+    }
     for (const col of Object.values(columns)) {
-      const ct = columnTypes.find(t => t.id === col.columnTypeId)
-      if (!ct) continue
-      const sectionFt2  = getColumnAreaFt2(ct)
-      const colHeightFt = getColumnHeightFt(col)
-      if (!result[ct.id]) result[ct.id] = { count: 0, columnHeightFt: colHeightFt, sectionFt2, volFt3: 0, label: ct.label }
-      result[ct.id].count  += 1
-      result[ct.id].volFt3 += sectionFt2 * colHeightFt
+      const fullHeightFt = getColumnHeightFt(col)
+      const defaultCt = columnTypes.find(t => t.id === col.columnTypeId)
+      if (defaultCt) ensure(defaultCt, fullHeightFt).count += 1
+      const ct = resolveColumnTypeForColumn(state, col, columnTypes, floorId)
+      if (ct) ensure(ct, fullHeightFt).volFt3 += getColumnAreaFt2(ct) * topoGetColumnLiftHeightFt(state, col, floorId)
     }
     for (const k of Object.keys(result)) result[k].volFt3 = r2(result[k].volFt3)
     return result
@@ -468,13 +477,13 @@ export function scopeStateToFloor(state, floorId) {
 
     const { columnTypes, beamDimensions, slabSettings } = state.projectSettings
 
-    // Columns
+    // Columns — Phase ColumnStack: this floor's lift only (resolved section).
     let colFt3 = 0
     for (const col of Object.values(columns)) {
       if (exColumns.has(col.id)) continue
-      const ct = columnTypes.find(t => t.id === col.columnTypeId)
+      const ct = resolveColumnTypeForColumn(state, col, columnTypes, floorId)
       if (!ct) continue
-      colFt3 += getColumnAreaFt2(ct) * getColumnHeightFt(col)
+      colFt3 += getColumnAreaFt2(ct) * topoGetColumnLiftHeightFt(state, col, floorId)
     }
 
     // Beams (scoped explicit + scoped wall-derived)

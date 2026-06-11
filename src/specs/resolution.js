@@ -9,11 +9,14 @@
 //     spec:      ReinforcementSpec | null,   // null → fallback to kg/m³ estimate
 //     specId:    string | null,
 //     specLabel: string,                     // 'Estimate (kg/m³)' when spec === null
-//     source:    'INSTANCE' | 'TYPE' | 'CLASS' | 'PROJECT_DEFAULT' | 'ESTIMATE',
+//     source:    'SEGMENT' | 'INSTANCE' | 'TYPE' | 'CLASS' | 'PROJECT_DEFAULT' | 'ESTIMATE',
 //   }
 //
 // Fallback chains:
-//   COLUMN:  instance → type (columnType.reinforcementSpecId)
+//   COLUMN:  segment (column.segments[floorId].reinforcementSpecId, when a
+//                     floorId is supplied — Phase ColumnStack)
+//                    → instance (column.reinforcementSpecId)
+//                    → type (columnType.reinforcementSpecId)
 //                    → project default (bbsDefaults.COLUMN)
 //                    → ESTIMATE
 //   BEAM:    instance → class (bbsDefaults.BEAM[beamClass])
@@ -49,20 +52,28 @@ function makeResolved(spec, source) {
 }
 
 // ── Column resolver ──────────────────────────────────────────────────────────
-// instance → type → project default → ESTIMATE
-export function resolveColumnReinforcementSpec(state, columnId) {
+// [segment →] instance → type → project default → ESTIMATE
+//
+// Optional `floorId` (Phase ColumnStack): when supplied, a per-floor segment
+// override (column.segments[floorId].reinforcementSpecId) is consulted FIRST.
+// Omitting floorId preserves the pre-phase chain byte-for-byte.
+export function resolveColumnReinforcementSpec(state, columnId, floorId = null) {
   const column = state.columns?.[columnId]
   if (!column) return makeEstimate()
   const columnTypes = state.projectSettings?.columnTypes ?? []
-  const ct = columnTypes.find(t => t.id === column.columnTypeId)
-  return resolveColumnReinforcementSpecForColumn(state, column, ct)
+  const ct = resolveColumnTypeForColumn(state, column, columnTypes, floorId)
+  return resolveColumnReinforcementSpecForColumn(state, column, ct, floorId)
 }
 
 // Variant that accepts column + columnType directly (avoids redundant lookups
 // in tight aggregator loops). Same fallback chain, same output shape.
-export function resolveColumnReinforcementSpecForColumn(state, column, columnType) {
+export function resolveColumnReinforcementSpecForColumn(state, column, columnType, floorId = null) {
   if (!column) return makeEstimate()
   const defaults = defaultsOf(state)
+
+  const segOverride = floorId ? column.segments?.[floorId] : null
+  const segmentSpec = lookupSpec(state, segOverride?.reinforcementSpecId)
+  if (segmentSpec) return makeResolved(segmentSpec, 'SEGMENT')
 
   const instanceSpec = lookupSpec(state, column.reinforcementSpecId)
   if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
@@ -74,6 +85,23 @@ export function resolveColumnReinforcementSpecForColumn(state, column, columnTyp
   if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
 
   return makeEstimate()
+}
+
+// ── Column SECTION resolver (Phase ColumnStack) ──────────────────────────────
+// Returns the columnType object that applies to a column on a given floor:
+// column.segments[floorId].columnTypeId overrides column.columnTypeId. With no
+// floorId or no segment override, returns the column's default section.
+// Helper that takes the columnTypes array (tight-loop variant).
+export function resolveColumnTypeForColumn(state, column, columnTypes, floorId = null) {
+  const segOverride = floorId ? column.segments?.[floorId] : null
+  const ctId = segOverride?.columnTypeId ?? column.columnTypeId
+  return (columnTypes ?? []).find(t => t.id === ctId) ?? null
+}
+
+// Convenience: resolve the section for a column on a floor from live state.
+export function resolveColumnSectionForFloor(state, column, floorId) {
+  const columnTypes = state.projectSettings?.columnTypes ?? []
+  return resolveColumnTypeForColumn(state, column, columnTypes, floorId)
 }
 
 // ── Beam resolver ────────────────────────────────────────────────────────────

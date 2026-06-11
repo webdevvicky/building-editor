@@ -67,28 +67,82 @@ export function getColumnFloorSpans(state) {
   })
 }
 
-// Column height — depends on projectSettings.floors[] span and the slab
-// thickness above. Pure on its inputs. Used by structural BOQ and (eventually)
-// MEP service-stack height calculations.
-export function getColumnHeightFt(state, column) {
-  const { projectSettings } = state
-  const { floors = [], slabSettings } = projectSettings
-  if (floors.length === 0) {
-    const h = projectSettings.heights
-    return h.plinthHeightFt + h.floorHeightFt + (slabSettings.mainThicknessIn / GRID_IN)
-  }
-  const sorted = [...floors].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+// Ordered list of floorIds a column spans (lo→hi in sequence order).
+// Empty when floors are unconfigured or base/top resolve outside the list.
+export function getColumnSpanFloorIds(state, column) {
+  const sorted = sortedFloorList(state)
+  if (sorted.length === 0) return []
   const baseId = column.baseFloorId ?? sorted[0].id
   const topId  = column.topFloorId  ?? baseId
   const baseIdx = sorted.findIndex(f => f.id === baseId)
   const topIdx  = sorted.findIndex(f => f.id === topId)
-  if (baseIdx === -1 || topIdx === -1) {
+  if (baseIdx === -1 || topIdx === -1) return []
+  const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
+  return sorted.slice(lo, hi + 1).map(f => f.id)
+}
+
+// Per-floor "lift" height (ft) for one floor in a column's span. Decomposition
+// (Phase ColumnStack, load-bearing — guarantees Σ lifts == getColumnHeightFt
+// AND single-floor byte-identity):
+//   plinth  → added on the BASE lift only
+//   floorHeight → added on EVERY lift
+//   slab    → added on the TOP lift only
+// Returns 0 if floorId is not within the column's span.
+export function getColumnLiftHeightFt(state, column, floorId) {
+  const { projectSettings } = state
+  const { slabSettings } = projectSettings
+  const sorted = sortedFloorList(state)
+  if (sorted.length === 0) return 0
+  const baseId = column.baseFloorId ?? sorted[0].id
+  const topId  = column.topFloorId  ?? baseId
+  const baseIdx = sorted.findIndex(f => f.id === baseId)
+  const topIdx  = sorted.findIndex(f => f.id === topId)
+  const i       = sorted.findIndex(f => f.id === floorId)
+  if (baseIdx === -1 || topIdx === -1 || i === -1) return 0
+  const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
+  if (i < lo || i > hi) return 0
+  let h = sorted[i].floorHeightFt || 0
+  if (i === lo) h += sorted[lo].plinthHeightFt || 0
+  if (i === hi) h += slabSettings.mainThicknessIn / GRID_IN
+  return h
+}
+
+// Column height — sum of per-floor lifts across the span. Pure on its inputs.
+// Used by structural BOQ and (eventually) MEP service-stack height calcs.
+// Refactored to derive from getColumnLiftHeightFt so the per-floor and
+// whole-column heights share ONE decomposition source.
+export function getColumnHeightFt(state, column) {
+  const { projectSettings } = state
+  const { floors = [] } = projectSettings
+  const slabSettings = projectSettings.slabSettings
+  const fallback = () => {
     const h = projectSettings.heights
     return h.plinthHeightFt + h.floorHeightFt + (slabSettings.mainThicknessIn / GRID_IN)
   }
-  const lo = Math.min(baseIdx, topIdx), hi = Math.max(baseIdx, topIdx)
-  let h = sorted[lo].plinthHeightFt || 0
-  for (let i = lo; i <= hi; i++) h += sorted[i].floorHeightFt || 0
-  h += slabSettings.mainThicknessIn / GRID_IN
-  return h
+  if (floors.length === 0) return fallback()
+  const spanIds = getColumnSpanFloorIds(state, column)
+  if (spanIds.length === 0) return fallback()
+  let total = 0
+  for (const fid of spanIds) total += getColumnLiftHeightFt(state, column, fid)
+  return total
+}
+
+// Returns the column whose span top is the floor DIRECTLY BELOW currentFloorId
+// and whose resolved position is within tolIn of (x, y) — i.e. the stack a new
+// upper-floor lift would extend onto. Null when there's no floor below or no
+// column within tolerance. Pure; consumed by Phase 2 Canvas placement.
+export function findColumnStackBelow(state, x, y, currentFloorId, tolIn) {
+  const sorted = sortedFloorList(state)
+  const curIdx = sorted.findIndex(f => f.id === currentFloorId)
+  if (curIdx <= 0) return null
+  let best = null
+  for (const col of Object.values(state.columns)) {
+    const topIdx = sorted.findIndex(f => f.id === (col.topFloorId ?? col.baseFloorId))
+    if (topIdx !== curIdx - 1) continue   // top must be exactly the floor below
+    const pos = getColumnPosition(state, col.id)
+    if (!pos) continue
+    const d = Math.hypot(pos.x - x, pos.y - y)
+    if (d <= tolIn && (!best || d < best.d)) best = { d, col }
+  }
+  return best ? best.col : null
 }

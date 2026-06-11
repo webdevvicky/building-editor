@@ -147,6 +147,27 @@ const brokenFloorResult = verifyIntegrity(brokenFloorState)
 check('Broken column.baseFloorId (F999) detected',
       brokenFloorResult.issues.some(i => i.entityType === 'column' && i.field === 'baseFloorId' && i.missing === 'F999'))
 
+// ── 6b. Phase ColumnStack — broken column.segments refs ────────────────
+// A segment keyed by a ghost floor + referencing a ghost section/spec.
+const brokenSegState = {
+  ...s(),
+  columns: {
+    ...s().columns,
+    'col-bad-seg': {
+      id: 'col-bad-seg', ifcGlobalId: 'colbadseg1234567890ab',
+      x: 0, y: 0, columnTypeId: 'C1', attachedNodeId: null,
+      baseFloorId: 'F1', topFloorId: 'F1', classification: null,
+      reinforcementSpecId: null, position: null, meta: null,
+      segments: { F999: { columnTypeId: 'CX', reinforcementSpecId: 'SPEC_GHOST' } },
+    },
+  },
+}
+const brokenSegResult = verifyIntegrity(brokenSegState)
+check('Broken column.segments floor key (F999) detected',
+      brokenSegResult.issues.some(i => i.entityType === 'column' && i.field === 'segments.F999' && i.missing === 'F999'))
+check('Broken column.segments columnTypeId (CX) detected',
+      brokenSegResult.issues.some(i => i.entityType === 'column' && i.field === 'segments.F999.columnTypeId' && i.missing === 'CX'))
+
 // ── 7. Deterministic ordering ──────────────────────────────────────────
 // Build same broken state twice, assert byte-equal issue lists.
 const r1 = verifyIntegrity(brokenState)

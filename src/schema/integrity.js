@@ -117,6 +117,26 @@ export function verifyIntegrity(state) {
       _push(issues, { kind: 'broken-ref', entityType: 'column', entityId: c.id, field: 'topFloorId', missing: c.topFloorId,
                       message: `column ${c.id} topFloorId → ${c.topFloorId} not in projectSettings.floors` })
     }
+    // Phase ColumnStack — per-floor segment override map. Keys must be floors
+    // that exist; referenced section/reinforcement ids must resolve.
+    if (c.segments && typeof c.segments === 'object') {
+      const ctIds = new Set((state.projectSettings?.columnTypes ?? []).map(t => t.id))
+      const specIds = new Set(Object.keys(state.projectSettings?.reinforcementSpecs ?? {}))
+      for (const [fid, seg] of Object.entries(c.segments)) {
+        if (floorIds.size > 0 && !floorIds.has(fid)) {
+          _push(issues, { kind: 'broken-ref', entityType: 'column', entityId: c.id, field: `segments.${fid}`, missing: fid,
+                          message: `column ${c.id} segments key ${fid} → not in projectSettings.floors` })
+        }
+        if (seg?.columnTypeId && ctIds.size > 0 && !ctIds.has(seg.columnTypeId)) {
+          _push(issues, { kind: 'broken-ref', entityType: 'column', entityId: c.id, field: `segments.${fid}.columnTypeId`, missing: seg.columnTypeId,
+                          message: `column ${c.id} segments.${fid}.columnTypeId → ${seg.columnTypeId} not in projectSettings.columnTypes` })
+        }
+        if (seg?.reinforcementSpecId && specIds.size > 0 && !specIds.has(seg.reinforcementSpecId)) {
+          _push(issues, { kind: 'broken-ref', entityType: 'column', entityId: c.id, field: `segments.${fid}.reinforcementSpecId`, missing: seg.reinforcementSpecId,
+                          message: `column ${c.id} segments.${fid}.reinforcementSpecId → ${seg.reinforcementSpecId} not in reinforcementSpecs` })
+        }
+      }
+    }
   }
 
   // ── 5. Beam endpoints reference columns (POINT endpoints exempt) ─────────

@@ -61,7 +61,8 @@ export {
 export {
   getNodeToColumnIndex, getColumnAtNode, getColumnPosition,
   getColumnAreaFt2, getColumnPerimeterFt, getColumnHeightFt,
-  getColumnFloorSpans,
+  getColumnFloorSpans, getColumnSpanFloorIds, getColumnLiftHeightFt,
+  findColumnStackBelow,
 } from './columns.js'
 
 // Beams

@@ -53,6 +53,9 @@ check('slab_no_enclosure dismissable=false (error severity)',
       ruleById['slab_no_enclosure']?.dismissable === false)
 check('floating_column dismissable=true (warning)',
       ruleById['floating_column']?.dismissable === true)
+check('column_unsupported scope=structural', ruleById['column_unsupported']?.scope === 'structural')
+check('column_unsupported severity=warning', ruleById['column_unsupported']?.severity === 'warning')
+check('column_unsupported dismissable=true', ruleById['column_unsupported']?.dismissable === true)
 
 // ── 3. sortRulesForRun: deterministic ─────────────────────────────────
 const sorted1 = sortRulesForRun(RULES)
@@ -71,7 +74,7 @@ check('filterRulesByScope mep: returns only mep rules',
       onlyMep.every(r => r.scope === 'mep') && onlyMep.length === 3)
 const onlyStructural = filterRulesByScope(RULES, ['structural'])
 check('filterRulesByScope structural: returns only structural rules',
-      onlyStructural.every(r => r.scope === 'structural') && onlyStructural.length === 6)
+      onlyStructural.every(r => r.scope === 'structural') && onlyStructural.length === 7)
 const allScopes = filterRulesByScope(RULES, [])
 check('filterRulesByScope empty: returns all rules',
       allScopes.length === RULES.length)

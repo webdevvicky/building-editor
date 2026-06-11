@@ -44,6 +44,9 @@ function buildFixture() {
   s().addRectangleRoom(0, 0, 10 * FT, 10 * FT, { name: 'Living', type: 'LIVING' })
   // Column + foundation (exercises foundation→columns).
   const colId = s().addColumn(5 * FT, 5 * FT, 'C1')
+  // Phase ColumnStack — a per-floor segment override (valid floor F1 + type C1)
+  // so the template clone path carries column.segments through verbatim.
+  s().setColumnSegment(colId, 'F1', { columnTypeId: 'C1' })
   // Slab attached to the room (exercises slab→rooms).
   // Some projects use autoInit; explicit addSlab works either way.
   // Add a beam between two columns: need a second column.
@@ -120,6 +123,11 @@ header('3. rewriteSnapshot — FK rewrite via FK_DESCRIPTORS (Correction 8)')
     ok(`cloned.${coll} drops old ids`, overlap.length === 0,
        overlap.length ? `${overlap.length} overlap` : 'clean')
   }
+
+  // Phase ColumnStack — column.segments survives the clone verbatim (floor
+  // keys are NOT remapped; section/spec ids are project-level, not remapped).
+  const clonedCol = Object.values(cloned.columns ?? {}).find(c => c.segments)
+  ok('cloned column retains segments override', !!clonedCol?.segments?.F1 && clonedCol.segments.F1.columnTypeId === 'C1')
 
   // ifcGlobalId regenerated on every entity.
   const oldIfcs = new Set(

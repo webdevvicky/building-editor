@@ -15,7 +15,8 @@
 // emission is byte-identical to the pre-split generator (verify-bbs C/G), with
 // an additive meta.bbsCategory = 'COLUMN' stamp.
 
-import { resolveColumnReinforcementSpecForColumn } from '../../specs/resolution.js'
+import { resolveColumnReinforcementSpecForColumn, resolveColumnTypeForColumn } from '../../specs/resolution.js'
+import { getColumnSpanFloorIds as topoGetColumnSpanFloorIds, getColumnLiftHeightFt as topoGetColumnLiftHeightFt } from '../../topology/columns.js'
 import {
   computeStraightBarCuttingLengthMm,
   computeStirrupCuttingLengthMm,
@@ -68,22 +69,48 @@ export function generateColumnRebarGroups(ctx, column) {
   const { state, params } = ctx
   if (!column || !state || !params) return []
 
+  // Phase ColumnStack — emit one "lift" per floor in the column's span. Each
+  // lift resolves its own section + reinforcement (per-floor segment overrides)
+  // and carries its own lap; the sub/super grade split happens at the BASE lift
+  // only. A single-floor column has exactly one (base) lift → emission is
+  // byte-identical to the pre-phase whole-column generator (verify-bbs C/G).
   const columnTypes = state.projectSettings?.columnTypes ?? []
-  const ct = columnTypes.find(t => t.id === column.columnTypeId)
+  const spanFloorIds = topoGetColumnSpanFloorIds(state, column)
+
+  if (spanFloorIds.length === 0) {
+    // Floors unconfigured / span unresolved — single base lift over the whole
+    // fallback height (mirrors getColumnHeightFt's fallback).
+    const floorId = column.baseFloorId ?? column.floorId ?? null
+    const liftHeightFt = state.getColumnHeightFt?.(column) ?? 0
+    return _emitLift(ctx, column, columnTypes, floorId, true, liftHeightFt)
+  }
+
+  const groups = []
+  const baseFid = spanFloorIds[0]
+  for (const fid of spanFloorIds) {
+    const liftHeightFt = topoGetColumnLiftHeightFt(state, column, fid)
+    groups.push(..._emitLift(ctx, column, columnTypes, fid, fid === baseFid, liftHeightFt))
+  }
+  return groups
+}
+
+// Emit one lift's RebarGroups. `isBase` gates the sub/super grade split (only
+// the base lift straddles the grade beam); upper lifts are super-columns.
+function _emitLift(ctx, column, columnTypes, floorId, isBase, liftHeightFt) {
+  const { state, params } = ctx
+  const ct = resolveColumnTypeForColumn(state, column, columnTypes, floorId)
   if (!ct) return []
 
-  const resolved = resolveColumnReinforcementSpecForColumn(state, column, ct)
+  const resolved = resolveColumnReinforcementSpecForColumn(state, column, ct, floorId)
   if (!resolved.spec) return []   // ESTIMATE — kg/m³ pool handles it
 
   const spec       = resolved.spec
   const specId     = resolved.specId
   const specSource = resolved.source
 
-  const heightFt = state.getColumnHeightFt?.(column) ?? 0
-  if (heightFt <= 0) return []
-  const heightMm = ftToMm(heightFt)
+  const heightMm = ftToMm(liftHeightFt)
+  if (heightMm <= 0) return []
 
-  const floorId = column.baseFloorId ?? column.floorId ?? null
   const columnLabel = columnLabelFor(ct, column)
   const idSlice = String(column.id ?? '').slice(0, 4)
   const steelGrade  = params.defaultSteelGrade
@@ -92,54 +119,49 @@ export function generateColumnRebarGroups(ctx, column) {
   const lapMm   = lapLengthMm({ diaMm: longDia, lapKey: params.defaultLapKey, params })
   const stirrupSpacingMm = inToMm(spec.stirrupSpacingIn)
   const sg = _stirrupGeom(ct, spec, params)
+  const common = { column, floorId, spec, specId, specSource, steelGrade, params, longDia, sg, stirrupSpacingMm, ct }
 
-  // ── Decide split ────────────────────────────────────────────────────────────
   const forcedPos = (column.position === 'SUB' || column.position === 'SUPER') ? column.position : null
   const splitEnabled = params.subSuperColumnSplitEnabled === true
-  // Grade-beam level above footing top = fraction × base-floor plinth height.
-  const floors = state.projectSettings?.floors ?? []
-  const baseFloor = floors.find(f => f.id === floorId)
-  const plinthFt = baseFloor?.plinthHeightFt ?? state.projectSettings?.heights?.plinthHeightFt ?? 0
-  const subLenMm = (params.gradeBeamLevelPlinthFraction ?? 1.0) * ftToMm(plinthFt)
-  const canAutoSplit = splitEnabled && !forcedPos && subLenMm > 0 && subLenMm < heightMm
 
-  // ── Forced position: whole column → one abstract category ───────────────────
+  // ── Forced position: whole column → one abstract category (every lift) ──────
   if (forcedPos) {
     const cat = bbsCategoryForColumnPosition(forcedPos)
     return _buildSegment({
-      mk: `${getBarMarkPrefix(cat)}-${idSlice}`, column, floorId, spec, specId, specSource, steelGrade, params,
-      lengthMm: heightMm, lapMm, longDia, sg, stirrupSpacingMm,
-      bbsCategory: cat, segmentType: `FORCED_${forcedPos}`,
-      confinement: forcedPos === 'SUPER', ct,
+      ...common, mk: `${getBarMarkPrefix(cat)}-${idSlice}`, lengthMm: heightMm, lapMm,
+      bbsCategory: cat, segmentType: `FORCED_${forcedPos}`, confinement: forcedPos === 'SUPER',
     })
   }
 
-  // ── Auto sub/super split ────────────────────────────────────────────────────
-  if (canAutoSplit) {
-    const subLapMm = (params.subColumnLapFactor ?? 1.0) * lapMm
-    const superLenMm = heightMm - subLenMm
-    const groups = []
-    groups.push(..._buildSegment({
-      mk: `${getBarMarkPrefix(BBS_CATEGORY.SUB_COLUMN)}-${idSlice}`, column, floorId, spec, specId, specSource, steelGrade, params,
-      lengthMm: subLenMm, lapMm: subLapMm, longDia, sg, stirrupSpacingMm,
-      bbsCategory: BBS_CATEGORY.SUB_COLUMN, segmentType: 'AUTO_SUB',
-      confinement: false, ct,
-    }))
-    groups.push(..._buildSegment({
-      mk: columnLabel, column, floorId, spec, specId, specSource, steelGrade, params,
-      lengthMm: superLenMm, lapMm, longDia, sg, stirrupSpacingMm,
-      bbsCategory: BBS_CATEGORY.SUPER_COLUMN, segmentType: 'AUTO_SUPER',
-      confinement: true, ct,
-    }))
-    return groups
+  // ── Base lift: optional sub/super auto-split at the grade beam ───────────────
+  if (isBase) {
+    const floors = state.projectSettings?.floors ?? []
+    const baseFloor = floors.find(f => f.id === floorId)
+    const plinthFt = baseFloor?.plinthHeightFt ?? state.projectSettings?.heights?.plinthHeightFt ?? 0
+    const subLenMm = (params.gradeBeamLevelPlinthFraction ?? 1.0) * ftToMm(plinthFt)
+    const canAutoSplit = splitEnabled && subLenMm > 0 && subLenMm < heightMm
+    if (canAutoSplit) {
+      const subLapMm = (params.subColumnLapFactor ?? 1.0) * lapMm
+      const superLenMm = heightMm - subLenMm
+      return [
+        ..._buildSegment({ ...common, mk: `${getBarMarkPrefix(BBS_CATEGORY.SUB_COLUMN)}-${idSlice}`,
+          lengthMm: subLenMm, lapMm: subLapMm, bbsCategory: BBS_CATEGORY.SUB_COLUMN, segmentType: 'AUTO_SUB', confinement: false }),
+        ..._buildSegment({ ...common, mk: columnLabel,
+          lengthMm: superLenMm, lapMm, bbsCategory: BBS_CATEGORY.SUPER_COLUMN, segmentType: 'AUTO_SUPER', confinement: true }),
+      ]
+    }
+    // Standard base lift (no split) — byte-identical to the pre-phase emission.
+    return _buildSegment({
+      ...common, mk: columnLabel, lengthMm: heightMm, lapMm,
+      bbsCategory: BBS_CATEGORY.COLUMN, segmentType: null, confinement: true,
+    })
   }
 
-  // ── Standard (no split) — backward-compatible emission (mk = ctLabel) ───────
+  // ── Upper lift: physically a super-column, no grade split ────────────────────
   return _buildSegment({
-    mk: columnLabel, column, floorId, spec, specId, specSource, steelGrade, params,
-    lengthMm: heightMm, lapMm, longDia, sg, stirrupSpacingMm,
-    bbsCategory: BBS_CATEGORY.COLUMN, segmentType: null,
-    confinement: true, ct,
+    ...common, mk: columnLabel, lengthMm: heightMm, lapMm,
+    bbsCategory: splitEnabled ? BBS_CATEGORY.SUPER_COLUMN : BBS_CATEGORY.COLUMN,
+    segmentType: splitEnabled ? 'AUTO_SUPER' : null, confinement: true,
   })
 }
 
