@@ -55,14 +55,11 @@ export const TOOL_SNAP_POLICY = Object.freeze({
   // and the user expects to re-use the prior junction.
   rect_room:   Object.freeze(['NODE', 'WALL_ENDPOINT', 'WALL_JUNCTION', 'GRID']),
 
-  // Column placement: today's code attracts to nearby nodes within a
-  // 24in radius. T-junctions also attract within 24in — columns
-  // landing near a T-junction probably want to attach.
-  column:      Object.freeze([
-    Object.freeze({ id: 'NODE',          toleranceIn: 24 }),
-    Object.freeze({ id: 'WALL_JUNCTION', toleranceIn: 24 }),
-    'GRID',
-  ]),
+  // Column placement: columns are structural grid-anchored entities — they
+  // snap ONLY to the pitch grid, never to wall topology nodes / T-junctions.
+  // (Attracting to wall centerline nodes within 24in pulled columns off-grid
+  // and made clean rectangular column grids impossible near walls.)
+  column:      Object.freeze(['GRID']),
 
   // Stamp placement (sump / OHT / septic / stairs / lift): grid only.
   sump:           Object.freeze(['GRID']),
@@ -114,7 +111,11 @@ _validatePolicy(TOOL_SNAP_POLICY)
 // radius (they are long; the projected bearing point can sit far from the
 // click along the span).
 export const BEAM_TOOL_TARGETS = Object.freeze([
-  Object.freeze({ kind: 'COLUMN', toleranceIn: 16 }),
+  // COLUMN raised 16→24 to match the column grid-snap granularity: a click
+  // near a column always binds as a COLUMN ref (resolves to the column
+  // center) instead of falling through to WALL-centerline projection or a
+  // free POINT. COLUMN is checked first, so it still wins over WALL at ties.
+  Object.freeze({ kind: 'COLUMN', toleranceIn: 24 }),
   Object.freeze({ kind: 'BEAM',   toleranceIn: 16 }),
   Object.freeze({ kind: 'WALL',   toleranceIn: 24 }),
 ])

@@ -702,19 +702,11 @@ export default function Canvas() {
     }
 
     if (activeTool === 'column') {
-      // Column placement: resolver's column policy attracts to NODE within
-      // 24in (the legacy nearNode radius preserved as a per-tool override),
-      // else falls through to GRID. When the winner is NODE, we attach the
-      // column to that node's id so future moves stay coupled.
+      // Columns are grid-anchored and never attach to wall topology nodes
+      // (policy is GRID-only). Always place at the snapped grid point as a
+      // standalone column (attachedNodeId = null).
       const result = runSnap(e)
       const ctId   = projectSettings.columnTypes[0]?.id ?? 'C1'
-      if (result.targetKind === 'NODE' && result.sourceId) {
-        const node = useStore.getState().nodes?.[result.sourceId]
-        if (node) {
-          addColumn(node.x, node.y, ctId, node.id)
-          return
-        }
-      }
       const { x, y } = result.worldXY
       addColumn(x, y, ctId, null)
       return
@@ -1862,6 +1854,12 @@ export default function Canvas() {
                   stroke="transparent" strokeWidth={14}
                   style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
                   onMouseDown={(e) => { e.stopPropagation(); selectBeam(beam.id) }}
+                  // Opening-click bug class: mousedown stopPropagation does NOT
+                  // stop the synthesized click event chain — without this, the
+                  // SVG root onClick (handleSVGClick) fires after mouseup and its
+                  // select-tool branch calls selectWall(null), which clears
+                  // selectedBeamId → the BeamPanel opens then instantly closes.
+                  onClick={(e) => e.stopPropagation()}
                 />
               )}
               {isSelected && (

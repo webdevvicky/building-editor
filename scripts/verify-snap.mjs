@@ -207,10 +207,13 @@ section('Section A — defaults reproduce today (byte-equality fuzz)')
   // legacy. The GRID fallback was added post-implementation to preserve
   // current behavior.
   //
-  // Phase W: WALL_JUNCTION added to draw / rect_room / column policies.
+  // Phase W: WALL_JUNCTION added to draw / rect_room policies.
   // On clean canvas (no TJUNCTION nodes), WALL_JUNCTION returns null
   // and the fall-through to GRID is unchanged — byte-identical to
   // legacy preserved.
+  //
+  // The `column` policy is GRID-only (columns are grid-anchored and never
+  // snap to wall nodes/junctions), so it resolves to GRID directly.
   const gridFallthroughTools = [
     'draw', 'rect_room', 'column',
     'sump', 'overhead_tank', 'septic_tank', 'stairs', 'lift',
