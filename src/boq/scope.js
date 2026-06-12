@@ -226,6 +226,49 @@ export function scopeStateToFloor(state, floorId) {
     return result
   }
 
+  // Brickwork work-quantity bucketed by (materialKey, thicknessIn). Mirrors
+  // getMasonryWithBeamDeduction's per-wall beam-deduction math exactly, but
+  // accumulates into a (matKey → thicknessIn) two-level map instead of by
+  // matKey only. FLOOR scope: each wall counted once (no partition factor).
+  const getMasonryByThickness = () => {
+    const { beamDimensions } = state.projectSettings
+    const result = {}
+    for (const wall of Object.values(walls)) {
+      if (wall.isVirtual || wall.isPlot) continue
+      const matKey = wall.materialKey ?? 'IS_MODULAR_BRICK'
+      if (!MATERIAL_LIBRARY[matKey]) continue
+      const n1 = state.nodes[wall.n1], n2 = state.nodes[wall.n2]
+      if (!n1 || !n2) continue
+      const faceAreaFt2 = getWallArea(wall.id)
+      const thicknessIn = wall.thickness ?? 9
+      const wallThickFt = thicknessIn / 12
+      const wallLenFt   = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
+      // Same beam deduction as getMasonryWithBeamDeduction.
+      const flags = classifyWallBeamFlags(wall.id)
+      let deductFt3 = 0
+      for (const lvl of BEAM_LEVEL_REGISTRY) {
+        if (!flags[lvl.flagName]) continue
+        const dims = beamDimensions[lvl.id]
+        if (!dims) continue
+        deductFt3 += wallLenFt * Math.min(wallThickFt, dims.widthIn / 12) * (dims.depthIn / 12)
+      }
+      const grossVolFt3 = faceAreaFt2 * wallThickFt
+      const volFt3 = Math.max(0, grossVolFt3 - deductFt3)
+      if (!result[matKey]) result[matKey] = { byThickness: {} }
+      const bucket = result[matKey].byThickness
+      if (!bucket[thicknessIn]) bucket[thicknessIn] = { volFt3: 0, faceAreaFt2: 0 }
+      bucket[thicknessIn].volFt3      += volFt3
+      bucket[thicknessIn].faceAreaFt2 += faceAreaFt2
+    }
+    for (const m of Object.values(result)) {
+      for (const t of Object.keys(m.byThickness)) {
+        m.byThickness[t].volFt3      = r2(m.byThickness[t].volFt3)
+        m.byThickness[t].faceAreaFt2 = r2(m.byThickness[t].faceAreaFt2)
+      }
+    }
+    return result
+  }
+
   // ── Column / beam / foundation / slab / staircase ─────────────────────
   // Phase ColumnStack — floor-scoped: a spanning column contributes ONLY this
   // floor's lift (resolved-per-floor section × lift height), never its whole
@@ -638,7 +681,7 @@ export function scopeStateToFloor(state, floorId) {
     // Wall-set selectors
     getTotalWallArea, getAllWallsLength, getWallAdjacencyCount, classifyWallBeamFlags,
     // Masonry
-    getMaterialQuantities, getMasonryWithBeamDeduction,
+    getMaterialQuantities, getMasonryWithBeamDeduction, getMasonryByThickness,
     // Structural
     getColumnQuantities, getFoundationQuantities, getFootingQuantities,
     getDerivedWallBeams, getAllBeams, getBeamQuantities,
@@ -818,6 +861,37 @@ function _buildRoomLikeScope(liveState, { rooms, marker }) {
   // already accounts for the dominant deduction users care about).
   const getMasonryWithBeamDeduction = () => getMaterialQuantities()
 
+  // Brickwork work-quantity bucketed by (materialKey, thicknessIn). ROOM
+  // scope: same HALF_PARTITION attribution as getMaterialQuantities (a
+  // partition wall touching ≥2 rooms contributes ×0.5 to the owning room).
+  // No beam deduction in room scope (mirrors getMasonryWithBeamDeduction).
+  const getMasonryByThickness = () => {
+    const result = {}
+    for (const w of Object.values(walls)) {
+      if (w.isVirtual || w.isPlot) continue
+      const matKey = w.materialKey ?? 'IS_MODULAR_BRICK'
+      if (!MATERIAL_LIBRARY[matKey]) continue
+      const adj = liveAdjCount[w.id] ?? 1
+      const shareFactor = adj >= 2 ? 0.5 : 1.0
+      const thicknessIn = w.thickness ?? 9
+      const thicknessFt = thicknessIn / 12
+      const faceAreaFt2 = getWallArea(w.id) * shareFactor
+      const volFt3 = faceAreaFt2 * thicknessFt
+      if (!result[matKey]) result[matKey] = { byThickness: {} }
+      const bucket = result[matKey].byThickness
+      if (!bucket[thicknessIn]) bucket[thicknessIn] = { volFt3: 0, faceAreaFt2: 0 }
+      bucket[thicknessIn].volFt3      += volFt3
+      bucket[thicknessIn].faceAreaFt2 += faceAreaFt2
+    }
+    for (const m of Object.values(result)) {
+      for (const t of Object.keys(m.byThickness)) {
+        m.byThickness[t].volFt3      = r2(m.byThickness[t].volFt3)
+        m.byThickness[t].faceAreaFt2 = r2(m.byThickness[t].faceAreaFt2)
+      }
+    }
+    return result
+  }
+
   // Project-level shapes return empty results so structural emitters no-op.
   const ZERO_Q = Object.freeze({})
   const EMPTY_BEAM_Q = Object.fromEntries(BEAM_LEVEL_REGISTRY.map(lvl => [lvl.id, null]))
@@ -857,7 +931,7 @@ function _buildRoomLikeScope(liveState, { rooms, marker }) {
     getValidRoomIds, sumRoomAreas, getTotalFloorArea,
     getTotalFlooringArea, getTotalCeilingPlasterArea, getTotalWaterproofingArea,
     getTotalRoofingArea, getTotalPaintCeilingArea, getTotalPaintWallsArea,
-    getMaterialQuantities, getMasonryWithBeamDeduction,
+    getMaterialQuantities, getMasonryWithBeamDeduction, getMasonryByThickness,
     getColumnQuantities, getFoundationQuantities, getFootingQuantities,
     getDerivedWallBeams, getAllBeams, getBeamQuantities,
     getSlabQuantities, getStaircaseQuantities,

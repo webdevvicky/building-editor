@@ -739,9 +739,11 @@ export const createStructuralSlice = (set, get, uid) => ({
           reinforcementSpecId: null,
           segments: null,
           meta: null,
+          labelNo: null,
         },
       },
     }))
+    get().assignElementLabels?.()
     return id
   },
 
@@ -1056,9 +1058,11 @@ export const createStructuralSlice = (set, get, uid) => ({
           source: 'EXPLICIT',
           floorId,
           meta: null,
+          labelNo: null,
         },
       },
     }))
+    get().assignElementLabels?.()
     return id
   },
 
@@ -1090,9 +1094,11 @@ export const createStructuralSlice = (set, get, uid) => ({
           source: 'EXPLICIT',
           floorId,
           meta: null,
+          labelNo: null,
         },
       },
     }))
+    get().assignElementLabels?.()
     return id
   },
 
@@ -1246,9 +1252,11 @@ export const createStructuralSlice = (set, get, uid) => ({
           roleSource,
           reinforcementSpecId: null,
           meta: null,
+          labelNo: null,
         },
       },
     }))
+    get().assignElementLabels?.()
     return id
   },
 
@@ -1313,7 +1321,7 @@ export const createStructuralSlice = (set, get, uid) => ({
         thicknessIn: mainThicknessIn, sinkDepthIn: 0, grade: 'M20',
         floorId, classification: mainRole, role: mainRole,
         roleSource: 'AUTO',
-        reinforcementSpecId: null, meta: null,
+        reinforcementSpecId: null, meta: null, labelNo: null,
       }
     }
 
@@ -1326,11 +1334,12 @@ export const createStructuralSlice = (set, get, uid) => ({
         thicknessIn: mainThicknessIn, sinkDepthIn: sunkenDepthIn, grade: 'M20',
         floorId, classification: 'SUNKEN', role: 'SUNKEN',
         roleSource: 'AUTO',
-        reinforcementSpecId: null, meta: null,
+        reinforcementSpecId: null, meta: null, labelNo: null,
       }
     }
 
     set({ slabs: newSlabs })
+    get().assignElementLabels?.()
   },
 
   setSlabRole: (slabId, role) => {
@@ -2081,5 +2090,54 @@ export const createStructuralSlice = (set, get, uid) => ({
       }
       return result
     })
+  },
+
+  // Masonry brickwork split by wall thickness, for the work-quantity BOQ lines
+  // (9″ → Cft, 4.5″ → Sft, other → Cft). Live-store (all-floors) sibling of the
+  // scope.js getMasonryByThickness (floor + room scope). Mirrors the floor-scope
+  // policy: every non-virtual / non-plot wall counted once (NO partition share
+  // factor), with the same per-wall beam deduction as getMasonryWithBeamDeduction.
+  // Shape: { [matKey]: { byThickness: { [thicknessIn]: { volFt3, faceAreaFt2 } } } }
+  getMasonryByThickness: () => {
+    const { walls, nodes, projectSettings } = get()
+    const { beamDimensions } = projectSettings
+    const acc = {}   // matKey → thicknessIn → { volFt3, faceAreaFt2 }
+    for (const wall of Object.values(walls)) {
+      if (wall.isVirtual || wall.isPlot) continue
+      const matKey = wall.materialKey ?? 'IS_MODULAR_BRICK'
+      const n1 = nodes[wall.n1], n2 = nodes[wall.n2]
+      if (!n1 || !n2) continue
+      const faceAreaFt2 = get().getWallArea(wall.id)
+      const thicknessIn = wall.thickness ?? 9
+      const thicknessFt = thicknessIn / 12
+      const grossVol = faceAreaFt2 * thicknessFt
+
+      // Per-wall beam deduction (same formula as getMasonryWithBeamDeduction).
+      const flags = get().classifyWallBeamFlags(wall.id)
+      const wallLenFt = Math.hypot(n2.x - n1.x, n2.y - n1.y) / 12
+      const wallThickFt = thicknessFt
+      let deductFt3 = 0
+      for (const lvl of BEAM_LEVEL_REGISTRY) {
+        if (!flags[lvl.flagName]) continue
+        const dims = beamDimensions[lvl.id]
+        if (!dims) continue
+        deductFt3 += wallLenFt * Math.min(wallThickFt, dims.widthIn / 12) * (dims.depthIn / 12)
+      }
+      const netVol = Math.max(0, grossVol - deductFt3)
+
+      if (!acc[matKey]) acc[matKey] = {}
+      if (!acc[matKey][thicknessIn]) acc[matKey][thicknessIn] = { volFt3: 0, faceAreaFt2: 0 }
+      acc[matKey][thicknessIn].volFt3 += netVol
+      acc[matKey][thicknessIn].faceAreaFt2 += faceAreaFt2
+    }
+    const result = {}
+    for (const [matKey, byThk] of Object.entries(acc)) {
+      const byThickness = {}
+      for (const [thk, q] of Object.entries(byThk)) {
+        byThickness[thk] = { volFt3: r2(q.volFt3), faceAreaFt2: r2(q.faceAreaFt2) }
+      }
+      result[matKey] = { byThickness }
+    }
+    return result
   },
 })

@@ -107,6 +107,13 @@ export const BOQ_LINE_IDS = Object.freeze({
   PARAPET_RCC:                       'parapet_rcc',
   STAIR_RCC:                         'stair_rcc',
 
+  // Work-quantity lines (Steps 1-3 — area/length/count alongside RCC vols)
+  SLAB_MAIN_AREA:                    'slab_main_area',
+  SLAB_SUNKEN_AREA:                  'slab_sunken_area',
+  PARAPET_LEN:                       'parapet_len',
+  STAIR_GRANITE:                     'stair_granite',
+  STAIR_STEP_COUNT:                  'stair_step_count',
+
   // Concrete mix
   CONC_M7_5_CEMENT:                  'conc_M7_5_cement',
   CONC_M7_5_SAND:                    'conc_M7_5_sand',
@@ -173,6 +180,10 @@ export const BOQ_LINE_IDS = Object.freeze({
 // at the emission site.
 
 export const BOQ_LINE_ID = Object.freeze({
+  // Masonry brickwork by thickness (work quantity — Steps 1-3)
+  // thkTag is '9in', '4_5in', or `other_${thkIn}in`.
+  masonryWork:     (matKey, thkTag) => `masonry_work_${matKey}_${thkTag}`,
+
   // Masonry (per material)
   matUnit:         (matKey) => `mat_${matKey}_unit`,
   matCement:       (matKey) => `mat_${matKey}_cement`,
@@ -199,6 +210,7 @@ export const BOQ_LINE_ID = Object.freeze({
 
   // Beams (per beam class)
   beam:            (lvlId)  => `beam_${lvlId}`,
+  beamLen:         (lvlId)  => `beam_len_${lvlId}`,
 
   // Steel grouped-by-spec (per category × spec)
   steelSpec:       (rateKey, specId) => `${rateKey}_spec_${specId}`,

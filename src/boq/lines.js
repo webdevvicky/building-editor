@@ -104,6 +104,34 @@ export function getBoqLines(state, rates, opts = {}) {
   push({ id: BOQ_LINE_IDS.FINISHES_ROOFING,                category: BOQ_CATEGORIES.FINISHES, label: 'Roofing',                             qty: state.getTotalRoofingArea(),        unit: UNITS.FT2, rateKey: 'roofing',               formulaId: 'roofing' })
 
   // ── 2. Masonry (per material with beam deduction) ─────────────────────
+  // 2a. Brickwork work-quantity, bucketed by wall thickness (WORK_QTY).
+  // Emitted BEFORE the material breakdown so work qty precedes materials.
+  const matWorkQ = state.getMasonryByThickness?.() ?? {}
+  for (const [matKey, mwq] of Object.entries(matWorkQ)) {
+    const mat = MATERIAL_LIBRARY[matKey]
+    if (!mat) continue
+    for (const [thkStr, wqty] of Object.entries(mwq.byThickness)) {
+      const thkIn = Number(thkStr)
+      if (thkIn === 9) {
+        push({ id: BOQ_LINE_ID.masonryWork(matKey, '9in'), category: BOQ_CATEGORIES.MASONRY,
+               label: `${mat.name} – 9″ Brickwork`, qty: r2(wqty.volFt3), unit: UNITS.CFT,
+               rateKey: BOQ_LINE_ID.masonryWork(matKey, '9in'), formulaId: BOQ_LINE_ID.masonryWork(matKey, '9in'),
+               meta: { materialKey: matKey, thicknessIn: 9, role: 'WORK_QTY' } })
+      } else if (thkIn === 4.5) {
+        push({ id: BOQ_LINE_ID.masonryWork(matKey, '4_5in'), category: BOQ_CATEGORIES.MASONRY,
+               label: `${mat.name} – 4.5″ Brickwork (half-brick)`, qty: r2(wqty.faceAreaFt2), unit: UNITS.SFT,
+               rateKey: BOQ_LINE_ID.masonryWork(matKey, '4_5in'), formulaId: BOQ_LINE_ID.masonryWork(matKey, '4_5in'),
+               meta: { materialKey: matKey, thicknessIn: 4.5, role: 'WORK_QTY' } })
+      } else {
+        push({ id: BOQ_LINE_ID.masonryWork(matKey, `other_${thkIn}in`), category: BOQ_CATEGORIES.MASONRY,
+               label: `${mat.name} – ${thkIn}″ Brickwork`, qty: r2(wqty.volFt3), unit: UNITS.CFT,
+               rateKey: BOQ_LINE_ID.masonryWork(matKey, `other_${thkIn}in`), formulaId: BOQ_LINE_ID.masonryWork(matKey, `other_${thkIn}in`),
+               meta: { materialKey: matKey, thicknessIn: thkIn, role: 'WORK_QTY' } })
+      }
+    }
+  }
+
+  // 2b. Material breakdown per material (bricks/blocks + cement/sand/adhesive).
   const matQ = state.getMasonryWithBeamDeduction()
   for (const [matKey, qty] of Object.entries(matQ)) {
     const mat = MATERIAL_LIBRARY[matKey]
@@ -118,13 +146,13 @@ export function getBoqLines(state, rates, opts = {}) {
       rateKey:   BOQ_LINE_ID.matUnit(matKey),
       isPer1000: isBrick,
       formulaId: BOQ_LINE_ID.matUnit(matKey),
-      meta:      { materialKey: matKey },
+      meta:      { materialKey: matKey, role: 'MATERIAL' },
     })
     if (mat.bondingType === BONDING.CEMENT_SAND) {
-      push({ id: BOQ_LINE_ID.matCement(matKey), category: BOQ_CATEGORIES.MASONRY, label: `${mat.name} – Cement`, qty: qty.cementBags, unit: UNITS.BAG, rateKey: BOQ_LINE_ID.matCement(matKey), formulaId: BOQ_LINE_ID.matCement(matKey), meta: { materialKey: matKey } })
-      push({ id: BOQ_LINE_ID.matSand(matKey),   category: BOQ_CATEGORIES.MASONRY, label: `${mat.name} – Sand`,   qty: qty.sandFt3,    unit: UNITS.FT3, rateKey: BOQ_LINE_ID.matSand(matKey),   formulaId: BOQ_LINE_ID.matSand(matKey),   meta: { materialKey: matKey } })
+      push({ id: BOQ_LINE_ID.matCement(matKey), category: BOQ_CATEGORIES.MASONRY, label: `${mat.name} – Cement`, qty: qty.cementBags, unit: UNITS.BAG, rateKey: BOQ_LINE_ID.matCement(matKey), formulaId: BOQ_LINE_ID.matCement(matKey), meta: { materialKey: matKey, role: 'MATERIAL' } })
+      push({ id: BOQ_LINE_ID.matSand(matKey),   category: BOQ_CATEGORIES.MASONRY, label: `${mat.name} – Sand`,   qty: qty.sandFt3,    unit: UNITS.FT3, rateKey: BOQ_LINE_ID.matSand(matKey),   formulaId: BOQ_LINE_ID.matSand(matKey),   meta: { materialKey: matKey, role: 'MATERIAL' } })
     } else {
-      push({ id: BOQ_LINE_ID.matAdhesive(matKey), category: BOQ_CATEGORIES.MASONRY, label: `${mat.name} – Adhesive`, qty: qty.adhesiveBags, unit: UNITS.BAG, rateKey: BOQ_LINE_ID.matAdhesive(matKey), formulaId: BOQ_LINE_ID.matAdhesive(matKey), meta: { materialKey: matKey } })
+      push({ id: BOQ_LINE_ID.matAdhesive(matKey), category: BOQ_CATEGORIES.MASONRY, label: `${mat.name} – Adhesive`, qty: qty.adhesiveBags, unit: UNITS.BAG, rateKey: BOQ_LINE_ID.matAdhesive(matKey), formulaId: BOQ_LINE_ID.matAdhesive(matKey), meta: { materialKey: matKey, role: 'MATERIAL' } })
     }
   }
 
@@ -196,16 +224,25 @@ export function getBoqLines(state, rates, opts = {}) {
   for (const lvl of BEAM_LEVEL_REGISTRY) {
     const q = beamQ[lvl.id]
     if (!q) continue
+    push({ id: BOQ_LINE_ID.beamLen(lvl.id), category: BOQ_CATEGORIES.RCC, label: `${lvl.label} beams — length`, qty: r2(q.totalLenFt), unit: UNITS.RFT, rateKey: BOQ_LINE_ID.beamLen(lvl.id), formulaId: BOQ_LINE_ID.beamLen(lvl.id), meta: { level: lvl.id, role: 'WORK_QTY' } })
     push({ id: BOQ_LINE_ID.beam(lvl.id), category: BOQ_CATEGORIES.RCC, label: `${lvl.label} beams`, qty: r2(q.volFt3), unit: UNITS.FT3, rateKey: BOQ_LINE_ID.beam(lvl.id), formulaId: BOQ_LINE_ID.beam(lvl.id), meta: { level: lvl.id } })
   }
 
-  if (slabQ.mainVolFt3   > 0) push({ id: BOQ_LINE_IDS.SLAB_MAIN,    category: BOQ_CATEGORIES.RCC, label: 'Main slab (M20)', qty: r2(slabQ.mainVolFt3),   unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.SLAB_MAIN,    formulaId: BOQ_LINE_IDS.SLAB_MAIN })
-  if (slabQ.sunkenVolFt3 > 0) push({ id: BOQ_LINE_IDS.SLAB_SUNKEN,  category: BOQ_CATEGORIES.RCC, label: 'Sunken slab',     qty: r2(slabQ.sunkenVolFt3), unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.SLAB_SUNKEN,  formulaId: BOQ_LINE_IDS.SLAB_SUNKEN })
-  if (sunQ?.count        > 0) push({ id: BOQ_LINE_IDS.SUNSHADE_RCC, category: BOQ_CATEGORIES.RCC, label: `Sunshades ×${sunQ.count}`, qty: r2(sunQ.totalVolFt3), unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.SUNSHADE_RCC, formulaId: BOQ_LINE_IDS.SUNSHADE_RCC })
-  if (parQ?.totalLenFt   > 0) push({ id: BOQ_LINE_IDS.PARAPET_RCC,  category: BOQ_CATEGORIES.RCC, label: 'Parapet',         qty: r2(parQ.totalVolFt3),   unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.PARAPET_RCC,  formulaId: BOQ_LINE_IDS.PARAPET_RCC })
+  if (slabQ.mainAreaFt2   > 0) push({ id: BOQ_LINE_IDS.SLAB_MAIN_AREA,   category: BOQ_CATEGORIES.RCC, label: 'Main slab — area',   qty: r2(slabQ.mainAreaFt2),   unit: UNITS.SFT, rateKey: BOQ_LINE_IDS.SLAB_MAIN_AREA,   formulaId: BOQ_LINE_IDS.SLAB_MAIN_AREA,   meta: { role: 'WORK_QTY' } })
+  if (slabQ.mainVolFt3    > 0) push({ id: BOQ_LINE_IDS.SLAB_MAIN,    category: BOQ_CATEGORIES.RCC, label: 'Main slab (M20)', qty: r2(slabQ.mainVolFt3),   unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.SLAB_MAIN,    formulaId: BOQ_LINE_IDS.SLAB_MAIN })
+  if (slabQ.sunkenAreaFt2 > 0) push({ id: BOQ_LINE_IDS.SLAB_SUNKEN_AREA, category: BOQ_CATEGORIES.RCC, label: 'Sunken slab — area', qty: r2(slabQ.sunkenAreaFt2), unit: UNITS.SFT, rateKey: BOQ_LINE_IDS.SLAB_SUNKEN_AREA, formulaId: BOQ_LINE_IDS.SLAB_SUNKEN_AREA, meta: { role: 'WORK_QTY' } })
+  if (slabQ.sunkenVolFt3  > 0) push({ id: BOQ_LINE_IDS.SLAB_SUNKEN,  category: BOQ_CATEGORIES.RCC, label: 'Sunken slab',     qty: r2(slabQ.sunkenVolFt3), unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.SLAB_SUNKEN,  formulaId: BOQ_LINE_IDS.SLAB_SUNKEN })
+  if (sunQ?.count         > 0) push({ id: BOQ_LINE_IDS.SUNSHADE_RCC, category: BOQ_CATEGORIES.RCC, label: `Sunshades ×${sunQ.count}`, qty: r2(sunQ.totalVolFt3), unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.SUNSHADE_RCC, formulaId: BOQ_LINE_IDS.SUNSHADE_RCC })
+  if ((parQ?.totalLenFt ?? 0) > 0) push({ id: BOQ_LINE_IDS.PARAPET_LEN, category: BOQ_CATEGORIES.RCC, label: 'Parapet — length', qty: r2(parQ.totalLenFt), unit: UNITS.RFT, rateKey: BOQ_LINE_IDS.PARAPET_LEN, formulaId: BOQ_LINE_IDS.PARAPET_LEN, meta: { role: 'WORK_QTY' } })
+  if (parQ?.totalLenFt    > 0) push({ id: BOQ_LINE_IDS.PARAPET_RCC,  category: BOQ_CATEGORIES.RCC, label: 'Parapet',         qty: r2(parQ.totalVolFt3),   unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.PARAPET_RCC,  formulaId: BOQ_LINE_IDS.PARAPET_RCC })
 
   const totalStairRcc = stairQ.reduce((s, sc) => s + sc.totalRccFt3, 0)
   if (totalStairRcc > 0) push({ id: BOQ_LINE_IDS.STAIR_RCC, category: BOQ_CATEGORIES.STAIRCASE, label: 'Staircase RCC', qty: r2(totalStairRcc), unit: UNITS.FT3, rateKey: BOQ_LINE_IDS.STAIR_RCC, formulaId: BOQ_LINE_IDS.STAIR_RCC })
+
+  const totalGranite = stairQ.reduce((t, sc) => t + (sc.graniteFt2 ?? 0), 0)
+  const totalSteps   = stairQ.reduce((t, sc) => t + (sc.stepCount ?? 0), 0)
+  if (totalGranite > 0) push({ id: BOQ_LINE_IDS.STAIR_GRANITE, category: BOQ_CATEGORIES.STAIRCASE, label: 'Staircase — Granite treads', qty: r2(totalGranite), unit: UNITS.SFT, rateKey: BOQ_LINE_IDS.STAIR_GRANITE, formulaId: BOQ_LINE_IDS.STAIR_GRANITE, meta: { role: 'WORK_QTY' } })
+  if (totalSteps   > 0) push({ id: BOQ_LINE_IDS.STAIR_STEP_COUNT, category: BOQ_CATEGORIES.STAIRCASE, label: 'Staircase — Steps', qty: totalSteps, unit: UNITS.NOS, rateKey: BOQ_LINE_IDS.STAIR_STEP_COUNT, formulaId: BOQ_LINE_IDS.STAIR_STEP_COUNT, meta: { role: 'WORK_QTY' } })
 
   // ── 5. Structural Steel ───────────────────────────────────────────────
   const bbs = computeBBSQuantities(state)
