@@ -67,7 +67,9 @@ function buildSheetForBucket(bucket, displayMode, contingencyMode) {
     const row = []
     row.push(l.id)
     if (multi) row.push(l.systemColumn ?? '')
-    row.push(l.label)
+    // Indent material sub-lines under their parent work-quantity line.
+    const isMaterial = l.meta?.role === 'MATERIAL'
+    row.push(isMaterial ? `    → ${l.label}` : l.label)
     if (detailed) {
       row.push(r2(l.qty))
       row.push(fmtPct(l.contingencyPct))
@@ -234,6 +236,166 @@ function buildRawSheet(decoratedLines, displayMode) {
   return ws
 }
 
+// 8b — Room Breakdown sheet (model.roomBreakdown). One section per floor,
+// header row + one row per room, then a project totals row.
+function buildRoomBreakdownSheet(rb) {
+  const HEAD = [
+    'Floor', 'Room', 'Type', 'Floor Area (Sft)', 'Carpet Area (Sft)',
+    'Ceiling Ht (ft)', 'Walls', 'Brickwork (Cft)', 'Plaster Int (Sft)',
+    'Plaster Ext (Sft)', 'Flooring (Sft)', 'Paint (Sft)', 'WP (Sft)',
+    'Tiles (Sft)', 'Doors', 'Windows',
+  ]
+  const aoa = []
+  for (const floor of (rb.byFloor ?? [])) {
+    aoa.push(HEAD)
+    for (const room of (floor.rooms ?? [])) {
+      aoa.push([
+        floor.floorLabel ?? floor.floorId,
+        room.name,
+        room.typeLabel ?? room.type,
+        room.floorAreaFt2,
+        room.carpetAreaFt2 ?? '',
+        room.ceilingHeightFt ?? '',
+        room.wallCount ?? '',
+        room.brickworkCft,
+        room.plasterIntSft,
+        room.plasterExtSft,
+        room.flooringSft,
+        room.paintSft,
+        room.waterproofingSft,
+        room.tilesSft,
+        room.doors,
+        room.windows,
+      ])
+    }
+    aoa.push([])
+  }
+
+  // Project totals row.
+  const t = rb.totals ?? {}
+  aoa.push([
+    'TOTAL', '', '',
+    t.floorAreaFt2 ?? '', '', '', '',
+    t.brickworkCft ?? '', t.plasterIntSft ?? '', t.plasterExtSft ?? '',
+    t.flooringSft ?? '', t.paintSft ?? '', t.waterproofingSft ?? '',
+    t.tilesSft ?? '', t.doors ?? '', t.windows ?? '',
+  ])
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 15 },
+    { wch: 13 }, { wch: 7 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+    { wch: 13 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 7 }, { wch: 9 },
+  ]
+  return ws
+}
+
+// 8c — Per-Wall Detail sheet (roomBreakdown.byFloor[].rooms[].perWall).
+// One block per room, header + one row per wall, with each opening as an
+// indented sub-row.
+function buildPerWallSheet(rb) {
+  const HEAD = [
+    'Room', 'Wall', 'Face', 'Length (ft)', 'Height (ft)', 'Thick (in)',
+    'Gross (Sft)', 'Opening Deduct (Sft)', 'Net Plaster (Sft)',
+    'Brickwork (Cft)', 'IFC GUID',
+  ]
+  const aoa = []
+  for (const floor of (rb.byFloor ?? [])) {
+    for (const room of (floor.rooms ?? [])) {
+      const walls = room.perWall ?? []
+      if (walls.length === 0) continue
+      aoa.push([room.name])
+      aoa.push(HEAD)
+      for (const w of walls) {
+        aoa.push([
+          room.name,
+          w.label,
+          w.faceType,
+          w.effectiveLengthFt,
+          w.heightFt,
+          w.thicknessIn,
+          w.grossAreaSft,
+          w.openingDeductSft,
+          w.netPlasterSft,
+          w.brickworkCft,
+          w.ifcGlobalId ?? '',
+        ])
+        for (const op of (w.openings ?? [])) {
+          aoa.push([
+            '',
+            `    → ${op.subtype || op.type}`,
+            `${op.widthFt}×${op.heightFt}`,
+            '', '', '',
+            op.areaSft,
+            '', '', '', '',
+          ])
+        }
+      }
+      aoa.push([])
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!cols'] = [
+    { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 11 }, { wch: 11 },
+    { wch: 10 }, { wch: 11 }, { wch: 18 }, { wch: 16 }, { wch: 15 }, { wch: 26 },
+  ]
+  return ws
+}
+
+// 8d — Element IDs sheet (model.elementLabels). Stacked labelled sub-tables,
+// one per entity type, sorted by labelNo.
+function buildElementIdsSheet(elementLabels) {
+  const byLabelNo = (a, b) => {
+    const an = a.labelNo, bn = b.labelNo
+    if (typeof an === 'number' && typeof bn === 'number') return an - bn
+    return String(a.label).localeCompare(String(b.label))
+  }
+
+  const SUB_TABLES = [
+    {
+      key: 'walls', title: 'WALLS',
+      head: ['Label', 'Description', 'IFC GUID', 'Floor', 'Thickness (in)', 'Length (ft)'],
+      row: (e) => [e.label, e.description, e.ifcGlobalId ?? '', e.floorId, e.thicknessIn ?? '', e.lengthFt ?? ''],
+    },
+    {
+      key: 'rooms', title: 'ROOMS',
+      head: ['Label', 'Description', 'IFC GUID', 'Floor', 'Area (Sft)'],
+      row: (e) => [e.label, e.description, e.ifcGlobalId ?? '', e.floorId, e.areaFt2 ?? ''],
+    },
+    {
+      key: 'columns', title: 'COLUMNS',
+      head: ['Label', 'Description', 'IFC GUID', 'Floor', 'Type'],
+      row: (e) => [e.label, e.description, e.ifcGlobalId ?? '', e.floorId, e.typeId ?? ''],
+    },
+    {
+      key: 'beams', title: 'BEAMS',
+      head: ['Label', 'Description', 'IFC GUID', 'Floor', 'Level'],
+      row: (e) => [e.label, e.description, e.ifcGlobalId ?? '', e.floorId, e.level ?? ''],
+    },
+    {
+      key: 'slabs', title: 'SLABS',
+      head: ['Label', 'Description', 'IFC GUID', 'Floor'],
+      row: (e) => [e.label, e.description, e.ifcGlobalId ?? '', e.floorId],
+    },
+  ]
+
+  const aoa = []
+  for (const tbl of SUB_TABLES) {
+    const items = Object.values(elementLabels?.[tbl.key] ?? {})
+    if (items.length === 0) continue
+    items.sort(byLabelNo)
+    aoa.push([tbl.title])
+    aoa.push(tbl.head)
+    for (const e of items) aoa.push(tbl.row(e))
+    aoa.push([])
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!cols'] = [{ wch: 14 }, { wch: 44 }, { wch: 26 }, { wch: 8 }, { wch: 16 }, { wch: 12 }]
+  return ws
+}
+
 export function exportBoqExcel(state, rates, opts = {}) {
   const projectName = opts.projectName || state?.projectSettings?.projectMeta?.projectTitle || 'Untitled'
   const displayMode = normalizeUnitMode(
@@ -262,6 +424,15 @@ export function exportBoqExcel(state, rates, opts = {}) {
     const ws   = buildSheetForBucket(bucket, displayMode, contingencyMode)
     const name = bucket.name.slice(0, 31)
     XLSX.utils.book_append_sheet(wb, ws, name)
+  }
+
+  // Element-tracking sheets (Steps 7–8) — after per-category sheets.
+  if (model.roomBreakdown) {
+    XLSX.utils.book_append_sheet(wb, buildRoomBreakdownSheet(model.roomBreakdown), 'Room Breakdown')
+    XLSX.utils.book_append_sheet(wb, buildPerWallSheet(model.roomBreakdown), 'Per-Wall Detail')
+  }
+  if (model.elementLabels) {
+    XLSX.utils.book_append_sheet(wb, buildElementIdsSheet(model.elementLabels), 'Element IDs')
   }
 
   // Raw data dump last — flat decorated lines (every field).

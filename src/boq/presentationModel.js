@@ -35,6 +35,8 @@ import { SHEET_BUCKETS, bucketLines, bucketIsMulti, bucketSystemLabel } from '..
 import { resolveContingencyPctForLine, resolveContingencyDefaults } from './_contingencyResolver.js'
 import { computeScopeOfWork } from './_scopeOfWork.js'
 import { computeProjectCosts, DEFAULT_PROJECT_COSTS } from './projectCosts.js'
+import { getElementLabels } from './elementLabels.js'
+import { computeRoomBreakdown } from './roomBreakdown.js'
 import { safeR2 as r2 } from '../lib/numbers.js'
 
 export const PRESENTATION_VERSION = '2026-05-26-V1'
@@ -169,6 +171,10 @@ export function computeBoqPresentationModel(lines, rates, state, opts = {}) {
     projectCosts,
     materialSubtotal,
     grandTotal:         projectCosts.grandTotal,
+    // Additive element-tracking fields (Steps 7–8). Guard against an
+    // undefined state the same way the rest of this function does.
+    elementLabels:      state ? getElementLabels(state) : null,
+    roomBreakdown:      state ? computeRoomBreakdown(state, rates ?? {}) : null,
     presentationVersion: PRESENTATION_VERSION,
     generatedAt:        Date.now(),
   }
