@@ -152,6 +152,13 @@ export const KEYBOARD_SHORTCUTS = Object.freeze([
   },
   {
     group: 'Tools',
+    combo: 'Shift + K',
+    label: 'Open the Room-by-room BOQ breakdown',
+    when: (e, { mod }) => (e.key === 'k' || e.key === 'K') && e.shiftKey && !mod,
+    run: () => useStore.getState().setTool?.('room_breakdown'),
+  },
+  {
+    group: 'Tools',
     combo: 'J',
     label: 'Join walls',
     when: (e) => e.key === 'j' || e.key === 'J',

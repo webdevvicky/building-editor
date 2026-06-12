@@ -29,6 +29,7 @@ import ProjectsPanel from './components/ProjectsPanel'
 import RevisionsPanel from './components/RevisionsPanel'
 import IsoView from './components/IsoView'
 import HelpGuide from './components/HelpGuide'
+import RoomBreakdownPanel from './components/RoomBreakdownPanel'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -67,6 +68,7 @@ export default function App() {
         <RevisionsPanel />
         <IsoView />
         <HelpGuide />
+        <RoomBreakdownPanel />
         <LayersPanel />
         <BOQPanel />
         <Canvas />
