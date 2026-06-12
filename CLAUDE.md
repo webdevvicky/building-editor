@@ -6,6 +6,57 @@ Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian sta
 
 For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
 
+## Phase BOQ-WorkQty — Work quantities + element labels + room/export detail (2026-06-12)
+
+Three landings on `main` (`62bd3f7` work-quantity lines + `14c710f` element
+labels + room breakdown + `6369887` export sheets). Closes three gaps: (1)
+several computed work quantities were never emitted as BOQ lines; (2) no
+human-readable per-element spatial-tracking IDs existed; (3) the export had no
+room-wise / per-wall / element-ID breakdown. **No new verify script** — all
+changes are additive over existing data-layer contracts; the 35 existing scripts
+stay green and `verify-boq` / `verify-room-breakdown` cover the new paths.
+
+### What landed
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | Work-quantity BOQ lines (`boq/lines.js`) | Masonry brickwork by thickness (9″→Cft, 4.5″→Sft half-brick, other→Cft), beam length (Rft/level), main+sunken slab area (Sft), parapet length (Rft), staircase granite (Sft) + step count (Nos). All via `push()`; `meta.role:'WORK_QTY'`; masonry material sub-lines now `meta.role:'MATERIAL'`. New ids in `constants/boqCategories.js` (`masonryWork`/`beamLen` builders + `SLAB_MAIN_AREA`/`SLAB_SUNKEN_AREA`/`PARAPET_LEN`/`STAIR_GRANITE`/`STAIR_STEP_COUNT`). |
+| 2 | `getMasonryByThickness()` | New masonry selector — LIVE store (`structuralSlice.js`, all-floors) + BOTH scope.js builders. Shape `{ [matKey]: { byThickness: { [thicknessIn]: { volFt3, faceAreaFt2 } } } }`. Floor/live scope count each wall once with beam deduction; ROOM scope applies the HALF_PARTITION ×0.5 factor (mirrors room-scope `getMaterialQuantities`, no beam deduction). Both skip virtual/plot. |
+| 3 | Element labels (`boq/elementLabels.js`, NEW) | `assignLabelsToState(state)` pure planner + `getElementLabels(state)` selector. Labels: W/R/C/B/S, per-floor sequential, `W-001` single-floor → `W-F1-001` multi-floor. |
+| 4 | `labelNo` schema slot | Added to wall/room/column/beam/slab schemas (`number\|null`, default null). |
+| 5 | `assignElementLabels()` store action | Wired into every creation action (`addWall`, `splitWall`, `saveRoom`, `addColumn`, `addBeam`, `addBeamWithEndpoints`, `addSlab`, `autoInitSlabs`) + `loadProject` backfill. |
+| 6 | Room breakdown per-wall detail (`boq/roomBreakdown.js`) | Each room row gains `carpetAreaFt2` (clear_internal), `wallCount`, `ceilingHeightFt`, `perWall[]` (label, faceType, length/height/thickness, gross/opening-deduct/net plaster, brickworkCft, openings). Derived from existing `computePlasterQuantities()._meta.perRoom` — no new geometry. `RoomBreakdownPanel` rows expandable; carpet + ceiling-height columns added. |
+| 7 | Export (`export/excel.js` + `boq/presentationModel.js`) | Model gains additive `elementLabels` + `roomBreakdown`. Excel: MATERIAL lines indented under their WORK_QTY parent via `meta.role`; three new sheets — Room Breakdown, Per-Wall Detail, Element IDs. Reuses existing SheetJS API; totals unchanged. |
+
+### Locked rules (Phase BOQ-WorkQty)
+
+- **`labelNo` is the immutable element identity — assign-once, never
+  reassigned.** Stored as an integer (per-type, per-floor sequence) like
+  `ifcGlobalId`; assigned at creation + backfilled on load. The rendered
+  string (single vs multi-floor prefix) is DERIVED at read time by
+  `getElementLabels`, so adding a floor never renumbers an existing element
+  (a single→multi transition only ADDS a floor qualifier — `W-001`→`W-F1-001`).
+  `assignLabelsToState` is idempotent and skips any entity that already has a
+  `labelNo`. Floor for a column's label = `baseFloorId`.
+- **`meta.role ∈ WORK_QTY | MATERIAL`** on the lines it applies to. WORK_QTY =
+  primary work-quantity line; MATERIAL = a material sub-line that the exporter
+  indents under its preceding WORK_QTY parent. Lines without `role` render as
+  normal primary rows. The NOS step-count WORK_QTY line is auto-excluded from
+  contingency by the existing NOS rule.
+- **`getMasonryByThickness` mirrors each builder's existing masonry
+  attribution.** Live + floor scope: every non-virtual/non-plot wall once,
+  with the same per-wall beam deduction as `getMasonryWithBeamDeduction`. Room
+  scope: HALF_PARTITION ×0.5 for partition walls (adj≥2), no beam deduction —
+  identical policy to room-scope `getMaterialQuantities`. The live-store sibling
+  is required so the all-floors BOQ view (unscoped path) shows the lines;
+  `lines.js` guards with `?.() ?? {}`.
+- **Per-wall room detail derives from `plaster._meta.perRoom.wallContributions`
+  — no new geometry walk.** `faceAreaFt2` there is already net (opening-deducted)
+  and IS the per-wall net plaster area. `roomBreakdown.js` stays React/DOM-free.
+- **Exporters still consume the presentation model only.** `elementLabels` +
+  `roomBreakdown` are additive model fields; `excel.js` does no new quantity
+  math — sheet rendering reads the model.
+
 ## Phase BeamConnect — Beam-to-beam / wall / point endpoints (2026-06-10)
 
 Beams are no longer column-only. An explicit beam endpoint is now a 4-type
