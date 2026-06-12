@@ -28,6 +28,8 @@ import { scopeStateToRoom } from './scope'
 import { getBoqLines } from './lines'
 import { computePlasterQuantities } from '../quantities/plaster.js'
 import { computeScopeOfWork } from './_scopeOfWork.js'
+import { getElementLabels } from './elementLabels.js'
+import { getRoomGeometry } from '../topology/rooms.js'
 import { ROOM_TYPE_LABELS } from '../roomPresets.js'
 import { safeR2 as r2 } from '../lib/numbers.js'
 
@@ -72,11 +74,16 @@ function lineIndex(lines) {
 export function computeRoomBreakdown(state, rates = {}) {
   const validIds = state.getValidRoomIds?.() ?? []
 
+  // Element labels (W-001, etc.) — computed once, shared across rooms (DRY).
+  const elementLabels = getElementLabels(state)
+
   // ── Project-level plaster split (correct EXTERNAL/PARTITION classification).
   const plaster = computePlasterQuantities(state)
   const internalByRoom = {}            // roomId  → inner-face wall plaster (Sft)
+  const wallContribsByRoom = {}        // roomId  → wallContributions[]
   for (const pr of (plaster?._meta?.perRoom ?? [])) {
     internalByRoom[pr.roomId] = pr.wallSumFt2 ?? 0
+    wallContribsByRoom[pr.roomId] = pr.wallContributions ?? []
   }
   const externalByWall = {}            // wallId  → outer-face plaster (Sft)
   for (const ew of (plaster?._meta?.perExternalWall ?? [])) {
@@ -106,6 +113,45 @@ export function computeRoomBreakdown(state, rates = {}) {
 
     const openings = computeScopeOfWork(rs).openingCounts
 
+    // Carpet (clear-internal) area — pure geometry; fall back to stored area.
+    const carpetAreaFt2 = r2(
+      getRoomGeometry(state, roomId, 'clear_internal')?.area ??
+      state.getRoomArea(roomId)
+    )
+
+    // Per-wall detail rows for this room (from the plaster wall contributions).
+    const perWall = (wallContribsByRoom[roomId] ?? [])
+      .map((wc) => {
+        const w = state.walls?.[wc.wallId]
+        if (!w) return null
+        const heightFt    = r2((w.height ?? 120) / 12)
+        const thicknessIn = w.thickness ?? 9
+        return {
+          label:             elementLabels.walls[wc.wallId]?.label ?? wc.wallId,
+          wallId:            wc.wallId,
+          ifcGlobalId:       w.ifcGlobalId ?? null,
+          faceType:          wc.wallType,                    // 'EXTERNAL' | 'PARTITION'
+          effectiveLengthFt: r2(wc.effectiveLengthFt),
+          heightFt,
+          thicknessIn,
+          grossAreaSft:      r2(wc.effectiveLengthFt * heightFt),
+          openingDeductSft:  r2(wc.openingDeductionFt2),
+          netPlasterSft:     r2(wc.faceAreaFt2),             // faceAreaFt2 is already net
+          netPaintSft:       r2(wc.faceAreaFt2),             // paint zone == plaster zone
+          brickworkCft:      r2(wc.faceAreaFt2 * (thicknessIn / 12)),
+          openings: (w.openings ?? []).map((o) => ({
+            type:     o.type,
+            subtype:  o.subtype ?? null,
+            widthFt:  r2((o.width  ?? 0) / 12),
+            heightFt: r2((o.height ?? 0) / 12),
+            areaSft:  r2(((o.width ?? 0) * (o.height ?? 0)) / 144),
+          })),
+        }
+      })
+      .filter(Boolean)
+
+    const ceilingHeightFt = r2(perWall.reduce((m, pw) => Math.max(m, pw.heightFt), 0))
+
     rows.push({
       roomId,
       name:             room.name || 'Untitled',
@@ -113,7 +159,11 @@ export function computeRoomBreakdown(state, rates = {}) {
       typeLabel:        ROOM_TYPE_LABELS[room.type] ?? room.type ?? 'Other',
       floorId:          room.floorId ?? DEFAULT_FLOOR_ID,
       floorAreaFt2:     r2(state.getRoomArea(roomId)),
+      carpetAreaFt2,
       wallAreaFt2:      r2(state.getRoomWallArea(roomId)),
+      wallCount:        perWall.length,
+      ceilingHeightFt,
+      perWall,
       brickworkCft:     r2(brickworkCft),
       plasterIntSft:    r2(internalByRoom[roomId] ?? 0),
       plasterExtSft:    r2(plasterExtSft),

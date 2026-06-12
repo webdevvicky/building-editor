@@ -3,6 +3,8 @@
 // stays untouched. Purely presentational: all numbers come from the pure
 // computeRoomBreakdown() helper.
 
+import { useState } from 'react'
+import { ChevronRight, ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
 import { useUnits } from '../hooks/useUnits'
 import { Modal } from './ui/Modal.jsx'
@@ -16,7 +18,9 @@ const COLUMNS = [
   { key: 'name',             label: 'Room',          kind: 'text',   sticky: true,  align: 'left'  },
   { key: 'typeLabel',        label: 'Type',          kind: 'text',   sticky: true,  align: 'left'  },
   { key: 'floorAreaFt2',     label: 'Floor area',    kind: 'area'                                  },
+  { key: 'carpetAreaFt2',    label: 'Carpet area',   kind: 'area'                                  },
   { key: 'wallAreaFt2',      label: 'Wall area',     kind: 'area'                                  },
+  { key: 'ceilingHeightFt',  label: 'Ceiling ht',    kind: 'length'                                },
   { key: 'brickworkCft',     label: 'Brickwork',     kind: 'volume'                                },
   { key: 'plasterIntSft',    label: 'Plaster (int)', kind: 'area'                                  },
   { key: 'plasterExtSft',    label: 'Plaster (ext)', kind: 'area'                                  },
@@ -42,7 +46,17 @@ export default function RoomBreakdownPanel() {
   const projectSettings = useStore(s => s.projectSettings)
   void rooms; void walls; void nodes; void projectSettings
 
-  const { fmtArea, fmtVolume } = useUnits()
+  const { fmtArea, fmtVolume, fmtLength } = useUnits()
+
+  // Which room rows are expanded (local UI state only — never store state).
+  const [expanded, setExpanded] = useState(() => new Set())
+  const toggleRow = (roomId) =>
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(roomId)) next.delete(roomId)
+      else next.add(roomId)
+      return next
+    })
 
   const open = activeTool === 'room_breakdown'
   if (!open) return null
@@ -56,6 +70,7 @@ export default function RoomBreakdownPanel() {
     switch (col.kind) {
       case 'area':   return fmtArea(value)
       case 'volume': return fmtVolume(value)
+      case 'length': return fmtLength(value)
       case 'count':  return String(value)
       default:       return value
     }
@@ -107,6 +122,11 @@ export default function RoomBreakdownPanel() {
                     group={group}
                     showFloorHeader={isMultiFloor}
                     fmtCell={fmtCell}
+                    fmtArea={fmtArea}
+                    fmtLength={fmtLength}
+                    fmtVolume={fmtVolume}
+                    expanded={expanded}
+                    toggleRow={toggleRow}
                   />
                 ))}
               </tbody>
@@ -181,7 +201,9 @@ export default function RoomBreakdownPanel() {
   )
 }
 
-function FloorGroup({ group, showFloorHeader, fmtCell }) {
+function FloorGroup({
+  group, showFloorHeader, fmtCell, fmtArea, fmtLength, fmtVolume, expanded, toggleRow,
+}) {
   return (
     <>
       {showFloorHeader && (
@@ -190,9 +212,42 @@ function FloorGroup({ group, showFloorHeader, fmtCell }) {
           <td colSpan={COLUMNS.length - 2} />
         </tr>
       )}
-      {group.rooms.map(row => (
-        <tr key={row.roomId} className="rbd-room-row">
-          {COLUMNS.map(col => (
+      {group.rooms.map(row => {
+        const isOpen   = expanded.has(row.roomId)
+        const perWall  = row.perWall ?? []
+        const expandable = perWall.length > 0
+        return (
+          <RoomRows
+            key={row.roomId}
+            row={row}
+            isOpen={isOpen}
+            expandable={expandable}
+            perWall={perWall}
+            fmtCell={fmtCell}
+            fmtArea={fmtArea}
+            fmtLength={fmtLength}
+            fmtVolume={fmtVolume}
+            toggleRow={toggleRow}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function RoomRows({
+  row, isOpen, expandable, perWall, fmtCell, fmtArea, fmtLength, fmtVolume, toggleRow,
+}) {
+  return (
+    <>
+      <tr
+        className={`rbd-room-row${expandable ? ' rbd-room-row--expandable' : ''}`}
+        onClick={expandable ? () => toggleRow(row.roomId) : undefined}
+        aria-expanded={expandable ? isOpen : undefined}
+      >
+        {COLUMNS.map((col, i) => {
+          const isFirst = i === 0
+          return (
             <td
               key={col.key}
               className={[
@@ -200,9 +255,88 @@ function FloorGroup({ group, showFloorHeader, fmtCell }) {
                 col.align === 'left' ? 'rbd-left' : 'rbd-num',
               ].join(' ').trim()}
             >
-              {fmtCell(col, row[col.key])}
+              {isFirst ? (
+                <span className="rbd-room-name">
+                  <span className="rbd-disclosure" aria-hidden="true">
+                    {expandable
+                      ? (isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)
+                      : null}
+                  </span>
+                  {fmtCell(col, row[col.key])}
+                </span>
+              ) : (
+                fmtCell(col, row[col.key])
+              )}
             </td>
-          ))}
+          )
+        })}
+      </tr>
+
+      {expandable && isOpen && (
+        <tr className="rbd-detail-row">
+          <td className="rbd-sticky rbd-left" />
+          <td colSpan={COLUMNS.length - 1} className="rbd-detail-cell">
+            <table className="rbd-detail-table">
+              <thead>
+                <tr>
+                  <th className="rbd-left">Wall</th>
+                  <th className="rbd-left">Face</th>
+                  <th className="rbd-num">Length</th>
+                  <th className="rbd-num">Height</th>
+                  <th className="rbd-num">Thick</th>
+                  <th className="rbd-num">Gross</th>
+                  <th className="rbd-num">Openings</th>
+                  <th className="rbd-num">Net plaster</th>
+                  <th className="rbd-num">Brickwork</th>
+                </tr>
+              </thead>
+              <tbody>
+                {perWall.map(pw => (
+                  <WallDetailRows
+                    key={pw.wallId}
+                    pw={pw}
+                    fmtArea={fmtArea}
+                    fmtLength={fmtLength}
+                    fmtVolume={fmtVolume}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function WallDetailRows({ pw, fmtArea, fmtLength, fmtVolume }) {
+  const openings = pw.openings ?? []
+  return (
+    <>
+      <tr className="rbd-wall-row">
+        <td className="rbd-left rbd-wall-label">{pw.label}</td>
+        <td className="rbd-left">
+          <span className={`rbd-face rbd-face--${pw.faceType === 'EXTERNAL' ? 'ext' : 'part'}`}>
+            {pw.faceType === 'EXTERNAL' ? 'External' : 'Partition'}
+          </span>
+        </td>
+        <td className="rbd-num">{fmtLength(pw.effectiveLengthFt)}</td>
+        <td className="rbd-num">{fmtLength(pw.heightFt)}</td>
+        <td className="rbd-num">{pw.thicknessIn}″</td>
+        <td className="rbd-num">{fmtArea(pw.grossAreaSft)}</td>
+        <td className="rbd-num">{openings.length}</td>
+        <td className="rbd-num">{fmtArea(pw.netPlasterSft)}</td>
+        <td className="rbd-num">{fmtVolume(pw.brickworkCft)}</td>
+      </tr>
+      {openings.map((o, idx) => (
+        <tr key={`${pw.wallId}-op-${idx}`} className="rbd-opening-row">
+          <td className="rbd-left rbd-opening-cell" colSpan={2}>
+            ↳ {o.subtype || o.type || 'opening'}
+          </td>
+          <td className="rbd-num" colSpan={2}>
+            {fmtLength(o.widthFt)} × {fmtLength(o.heightFt)}
+          </td>
+          <td className="rbd-num" colSpan={5}>{fmtArea(o.areaSft)}</td>
         </tr>
       ))}
     </>

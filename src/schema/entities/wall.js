@@ -11,6 +11,11 @@ export const wallSchema = Object.freeze({
   fields: Object.freeze({
     id:          Object.freeze({ type: 'uuid',    required: true,  generator: 'uid' }),
     ifcGlobalId: Object.freeze({ type: 'ifcGuid', required: true,  generator: 'uidIfc' }),
+    // Human-readable spatial-tracking label sequence (assign-once, never
+    // reassigned — see src/boq/elementLabels.js). Per-type, per-floor integer;
+    // the rendered string (W-001 / W-F1-001) is derived at read time so the
+    // number is stable even when the project later becomes multi-floor.
+    labelNo:     Object.freeze({ type: 'number|null', required: true, default: null }),
     n1:          Object.freeze({ type: 'ref',     required: true,  refTarget: 'node' }),
     n2:          Object.freeze({ type: 'ref',     required: true,  refTarget: 'node' }),
     height:      Object.freeze({ type: 'number',  required: true,  default: 120, min: 12, max: 240, unit: 'inches' }),

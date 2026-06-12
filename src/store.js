@@ -58,6 +58,7 @@ import {
   VENTILATOR_MAX_HEIGHT_IN, VENTILATOR_MAX_WIDTH_IN,
 } from './constants/joinery.js'
 import { uid, uidIfc, newEntityIds } from './lib/ids.js'
+import { assignLabelsToState } from './boq/elementLabels.js'
 
 // Default opening subtype — pure heuristic by size + type. Used at creation
 // time (addOpening) and as loadProject fallback when subtype is absent.
@@ -509,9 +510,10 @@ export const useStore = create((set, get) => ({
     const isVirtual = get().drawVirtual
     const floorId = cur
     set(s => ({
-      walls: { ...s.walls, [id]: { id, ifcGlobalId, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null, junctions: [], splitOrigin: 'NONE' } },
+      walls: { ...s.walls, [id]: { id, ifcGlobalId, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null, junctions: [], splitOrigin: 'NONE', labelNo: null } },
       drawStartId: null,
     }))
+    get().assignElementLabels()
   },
 
   // Area 2B — atomic rectangle-room creation. ONE history frame for nodes
@@ -1010,6 +1012,7 @@ export const useStore = create((set, get) => ({
         meta: wall.meta ?? null,
         junctions: w1JunctionIds,
         splitOrigin: 'USER_SPLIT',
+        labelNo: null,
       }
       newWalls[w2Id] = {
         id: w2Id, ifcGlobalId: w2Ifc, n1: newNodeId, n2: wall.n2,
@@ -1025,6 +1028,7 @@ export const useStore = create((set, get) => ({
         meta: wall.meta ?? null,
         junctions: w2JunctionIds,
         splitOrigin: 'USER_SPLIT',
+        labelNo: null,
       }
 
       // ── Nodes ────────────────────────────────────────────────────────
@@ -1132,6 +1136,7 @@ export const useStore = create((set, get) => ({
       })
     }
 
+    get().assignElementLabels()
     return { newNodeId, w1Id, w2Id, splitOffsetIn: plan.splitOffsetIn }
   },
 
@@ -1739,10 +1744,12 @@ export const useStore = create((set, get) => ({
           floorId,
           classification:   null,
           meta:             null,
+          labelNo:          null,
         },
       },
       pendingWallIds: [],
     }))
+    get().assignElementLabels()
     return null
   },
 
@@ -1866,6 +1873,17 @@ export const useStore = create((set, get) => ({
       )
       return { walls: { ...s.walls, [wallId]: { ...wall, openings } } }
     })
+  },
+
+  // Assign-once spatial-tracking labels (W-001 / R-001 / C-001 / B-001 / S-001).
+  // Idempotent backfill: stamps labelNo on any wall/room/column/beam/slab that
+  // lacks one, per-floor sequential, NEVER reassigning an existing labelNo.
+  // Called at the end of every creation action (mirrors ifcGlobalId stamping)
+  // and once in loadProject. No _save — labelNo rides in subsequent snapshots,
+  // and undo/redo restore it with the entity. See src/boq/elementLabels.js.
+  assignElementLabels() {
+    const { changed, collections } = assignLabelsToState(get())
+    if (changed) set(collections)
   },
 
   renameRoom(roomId, name) {
@@ -2224,6 +2242,9 @@ export const useStore = create((set, get) => ({
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [],
     })
+    // Backfill assign-once spatial-tracking labels for loaded / legacy
+    // projects (entities lacking labelNo get one; existing labelNo preserved).
+    get().assignElementLabels()
   },
 
   // ── BOQ helpers — return feet / sq ft for display ─────────────────────

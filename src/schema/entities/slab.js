@@ -13,6 +13,8 @@ export const slabSchema = Object.freeze({
   fields: Object.freeze({
     id:                  Object.freeze({ type: 'uuid',        required: true,  generator: 'uid' }),
     ifcGlobalId:         Object.freeze({ type: 'ifcGuid',     required: true,  generator: 'uidIfc' }),
+    // Assign-once spatial-tracking label sequence (see src/boq/elementLabels.js).
+    labelNo:             Object.freeze({ type: 'number|null', required: true,  default: null }),
     type:                Object.freeze({ type: 'string',      required: true,  oneOf: Object.freeze(['MAIN', 'SUNKEN']) }),
     roomIds:             Object.freeze({ type: 'array',       required: true,  default: () => [], itemType: 'string' }),
     thicknessIn:         Object.freeze({ type: 'number',      required: true,  default: 5 }),

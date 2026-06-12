@@ -29,6 +29,9 @@ export const beamSchema = Object.freeze({
   fields: Object.freeze({
     id:                  Object.freeze({ type: 'uuid',        required: true,  generator: 'uid' }),
     ifcGlobalId:         Object.freeze({ type: 'ifcGuid',     required: true,  generator: 'uidIfc' }),
+    // Assign-once spatial-tracking label sequence (see src/boq/elementLabels.js).
+    // Explicit beams only; wall-derived beams have no stored entity.
+    labelNo:             Object.freeze({ type: 'number|null', required: true,  default: null }),
     endpoints:           Object.freeze({ type: 'object|null', required: true }),
     level:               Object.freeze({ type: 'string',      required: true,  oneOf: Object.freeze(['plinth', 'lintel', 'roof']) }),
     source:              Object.freeze({ type: 'string',      required: true,  default: 'EXPLICIT', oneOf: Object.freeze(['EXPLICIT', 'WALL_DERIVED']) }),
