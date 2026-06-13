@@ -11,6 +11,8 @@
 import { saveCurrent } from './manager'
 import { buildSnapshot } from './_snapshot.js'
 import { toast } from '../components/ui/Toast'
+import { getCloudConn } from './cloudConn.js'
+import * as cloudSync from './cloudSync.js'
 
 const DEBOUNCE_MS = 30_000
 
@@ -27,6 +29,16 @@ export function installAutosave(store, getProjectId) {
     const snap  = buildSnapshot(state)
     const ok    = saveCurrent(id, snap)
     if (ok !== false) toast.info('Auto-saved', { duration: 1500 })
+
+    // Fire-and-forget cloud push AFTER local save succeeds.
+    // Failures are captured inside syncToCloud and surfaced via the
+    // sync-status store (SyncStatusBadge). We never await this here.
+    if (ok !== false) {
+      getCloudConn(id).then((conn) => {
+        if (!conn) return
+        cloudSync.syncToCloud(state, conn)
+      }).catch(() => { /* getCloudConn errors are non-fatal for autosave */ })
+    }
   }
 
   function schedule() {

@@ -1,0 +1,103 @@
+/* SyncStatusBadge — compact status pill with manual-save button */
+
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+  position: relative;
+}
+
+/* Dot indicator */
+.sync-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.sync-badge--idle    .sync-badge__dot { background: var(--color-text-disabled); }
+.sync-badge--syncing .sync-badge__dot {
+  background: var(--color-primary);
+  animation: sync-pulse 1s ease-in-out infinite;
+}
+.sync-badge--synced   .sync-badge__dot { background: var(--color-success); }
+.sync-badge--unsynced .sync-badge__dot { background: var(--color-warning); }
+.sync-badge--error    .sync-badge__dot { background: var(--color-error); }
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* Label */
+.sync-badge__label {
+  line-height: var(--leading-tight);
+  color: var(--color-text-secondary);
+}
+
+/* Save button — ghost micro-button inside the pill */
+.sync-badge__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  margin-left: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--color-primary);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+.sync-badge__btn:hover:not(:disabled) {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+}
+.sync-badge__btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.sync-badge__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Tooltip on hover — shown via title attribute; custom tooltip for
+   error details since those can be long */
+.sync-badge__tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-text);
+  color: var(--color-text-inverse);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  max-width: 280px;
+  white-space: normal;
+  word-break: break-word;
+  z-index: var(--z-toast);
+  pointer-events: none;
+  line-height: var(--leading-normal);
+  box-shadow: var(--shadow-md);
+}
+
+.sync-badge:hover .sync-badge__tooltip {
+  display: block;
+}
