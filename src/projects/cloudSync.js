@@ -14,6 +14,7 @@
 // SyncStatusBadge subscribes to this store to update its indicator.
 
 import { buildSnapshot } from './_snapshot.js'
+import { buildPackage } from '../boq/buildPackage.js'
 import { getValidAccessToken } from './cloudConn.js'
 
 // ── Sync-status store ────────────────────────────────────────────────────────
@@ -65,7 +66,12 @@ export function getSyncStatus() {
 export async function syncToCloud(state, conn) {
   _setState({ status: 'syncing', lastError: null })
   try {
+    // snapshot = full editor model (cloud backup + restore); package = the
+    // BuildingModelPackage the ERP import engine consumes. Sending both lets the
+    // ERP auto-publish the building model while preserving a full restore copy.
     const snapshot = buildSnapshot(state)
+    let buildingPackage = null
+    try { buildingPackage = buildPackage(state) } catch { buildingPackage = null }
     const accessToken = await getValidAccessToken(conn)
 
     const url = `${conn.erpUrl.replace(/\/$/, '')}/api/v1/editor-projects/${conn.editorProjectId}/snapshot`
@@ -75,7 +81,7 @@ export async function syncToCloud(state, conn) {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(snapshot),
+      body: JSON.stringify({ snapshot, package: buildingPackage }),
     })
 
     if (!res.ok) {
@@ -120,7 +126,9 @@ export async function pullFromCloud(conn) {
       return { ok: false, error: `Pull failed (${res.status}): ${body.slice(0, 200)}` }
     }
 
-    const snapshot = await res.json()
+    const body = await res.json()
+    // The stored payload is { snapshot, package }; older payloads were the bare snapshot.
+    const snapshot = body?.snapshot ?? body
     return { ok: true, snapshot }
   } catch (err) {
     return { ok: false, error: err?.message ?? String(err) }
