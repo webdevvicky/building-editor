@@ -50,7 +50,7 @@ export default function ErpConnection() {
       return
     }
     let cancelled = false
-    getCloudConn(projectId)
+    getCloudConn()
       .then((c) => { if (!cancelled) setConn(c) })
       .catch(() => { if (!cancelled) setConn(null) })
     return () => { cancelled = true }

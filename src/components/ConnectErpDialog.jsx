@@ -87,10 +87,13 @@ export default function ConnectErpDialog({
       return
     }
 
-    // Credentials are valid — persist and notify.
+    // Credentials are valid — persist the global connection, bound to the
+    // current local project. projectName is left null here; it refreshes from
+    // the ERP on the next auth-token refresh (the deep-link flow sets it
+    // directly). One editor = one connection: this replaces any prior link.
     setSaving(true)
     try {
-      await setCloudConn(projectId, conn)
+      await setCloudConn({ ...conn, localProjectId: projectId, projectName: null })
       setTestState('ok')
       toast.success('Connected to ERP cloud.')
       onConnected?.(conn)
@@ -106,7 +109,7 @@ export default function ConnectErpDialog({
   async function handleDisconnect() {
     setSaving(true)
     try {
-      await clearCloudConn(projectId)
+      await clearCloudConn()
       toast.info('Disconnected from ERP cloud.')
       onDisconnected?.()
       onClose()

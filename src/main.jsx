@@ -5,6 +5,7 @@ import App from './App.jsx'
 import { useStore } from './store'
 import { installAutosave } from './projects/autosave'
 import { getCurrentProjectId, bootPersistence } from './projects/manager'
+import { hydrateConnCache } from './projects/cloudConn'
 
 // Phase 2.0 — debounced autosave to the current project (via IDB). Registering
 // the store subscription is safe before boot — flush() reads getProjectId()
@@ -21,6 +22,9 @@ installAutosave(useStore, getCurrentProjectId)
 async function boot() {
   try {
     await bootPersistence()
+    // Hydrate the in-memory cloud-connection mirror so getCachedConn() (autosave
+    // hot path) and the sync badge are correct from first render.
+    await hydrateConnCache()
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[boot] persistence init failed', err)

@@ -150,9 +150,9 @@ async function _runConnectHandoff(deps) {
     setCurrentProjectId(rec.id)
   }
 
-  // 5 — persist the durable connection on the project record.
+  // 5 — persist the global connection, binding it to this local project.
   try {
-    await setCloudConn(localProjectId, conn)
+    await setCloudConn({ ...conn, localProjectId })
   } catch {
     toast.error('Could not connect — failed to save the connection.')
     return true
@@ -168,7 +168,7 @@ async function _runConnectHandoff(deps) {
   } catch { /* non-fatal — connection is set, editor stays on local model */ }
 
   // 7 — surface the connection + refresh the badge.
-  onConnected?.(await getCloudConn(localProjectId).catch(() => conn))
+  onConnected?.(await getCloudConn().catch(() => conn))
   toast.success(`Connected to ${conn.editorProjectId}`)
   return true
 }
