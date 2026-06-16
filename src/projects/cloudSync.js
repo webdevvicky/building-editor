@@ -16,6 +16,7 @@
 import { buildSnapshot } from './_snapshot.js'
 import { buildPackage } from '../boq/buildPackage.js'
 import { getValidAccessToken } from './cloudConn.js'
+import { unwrapErpResponse } from './erpEnvelope.js'
 
 // ── Sync-status store ────────────────────────────────────────────────────────
 
@@ -109,7 +110,8 @@ export async function syncToCloud(state, conn) {
       return { ok: false, error }
     }
 
-    const { snapshotVersion, lastSyncedAt } = await res.json()
+    const envelope = await res.json()
+    const { snapshotVersion, lastSyncedAt } = unwrapErpResponse(envelope)
     _setState({ status: 'synced', lastError: null, lastSyncedAt: lastSyncedAt ?? null })
     return { ok: true, snapshotVersion, lastSyncedAt }
   } catch (err) {
@@ -145,9 +147,10 @@ export async function pullFromCloud(conn) {
       return { ok: false, error: `Pull failed (${res.status}): ${body.slice(0, 200)}` }
     }
 
-    const body = await res.json()
+    const envelope = await res.json()
+    const data = unwrapErpResponse(envelope)
     // The stored payload is { snapshot, package }; older payloads were the bare snapshot.
-    const snapshot = body?.snapshot ?? body
+    const snapshot = data?.snapshot ?? data
     return { ok: true, snapshot }
   } catch (err) {
     return { ok: false, error: err?.message ?? String(err) }

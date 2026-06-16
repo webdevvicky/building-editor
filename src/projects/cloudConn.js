@@ -22,6 +22,7 @@
 // The auth-token cache is in-memory only — never persisted, never logged.
 
 import { DB_STORES } from './storage/indexedDb.js'
+import { unwrapErpResponse } from './erpEnvelope.js'
 
 // ── Global storage key ───────────────────────────────────────────────────────
 const GLOBAL_CONN_KEY = 'cloud:connection'
@@ -199,7 +200,8 @@ export async function getValidAccessToken(conn) {
     throw new Error(`Auth token exchange failed (${res.status}): ${body.slice(0, 200)}`)
   }
 
-  const { accessToken, expiresIn, projectName } = await res.json()
+  const envelope = await res.json()
+  const { accessToken, expiresIn, projectName } = unwrapErpResponse(envelope)
   if (!accessToken) throw new Error('Auth response missing accessToken')
 
   const expEpochMs = now + (expiresIn ?? 3600) * 1000

@@ -17,6 +17,7 @@
 
 import { setCloudConn, getCloudConn } from './cloudConn.js'
 import { pullFromCloud, syncToCloud, markSynced } from './cloudSync.js'
+import { unwrapErpResponse } from './erpEnvelope.js'
 
 /**
  * Parse a `#connect?...` fragment. Returns { erp, pid, code } when the
@@ -53,8 +54,8 @@ async function exchangeCode(erp, pid, code) {
     const body = await res.text().catch(() => '')
     throw new Error(`connect-exchange failed (${res.status}): ${body.slice(0, 200)}`)
   }
-  const response = await res.json()
-  const data = response.data || response
+  const envelope = await res.json()
+  const data = unwrapErpResponse(envelope)
   if (!data?.erpUrl || !data?.editorProjectId || !data?.apiKey) {
     throw new Error('connect-exchange response missing fields')
   }
