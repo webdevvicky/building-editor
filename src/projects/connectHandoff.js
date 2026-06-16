@@ -93,7 +93,20 @@ async function exchangeCode(erp, pid, code) {
  * @returns {Promise<boolean>} true if a connect link was handled (success OR
  *          handled-failure), false if no connect link was present.
  */
-export async function runConnectHandoff(deps) {
+// One-time guard: React StrictMode (dev) mounts effects twice, and the App
+// connect effect would otherwise invoke this twice. The `code` is single-use
+// and the hash is stripped before the first await, so a second invocation would
+// 401 and toast a false error. Cache the in-flight promise so both callers
+// await the SAME exchange. Module-scoped → reset on a real page reload.
+let _handoffPromise = null
+
+export function runConnectHandoff(deps) {
+  if (_handoffPromise) return _handoffPromise
+  _handoffPromise = _runConnectHandoff(deps)
+  return _handoffPromise
+}
+
+async function _runConnectHandoff(deps) {
   const {
     getCurrentProjectId,
     createProject,

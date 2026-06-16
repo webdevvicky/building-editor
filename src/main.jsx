@@ -6,21 +6,30 @@ import { useStore } from './store'
 import { installAutosave } from './projects/autosave'
 import { getCurrentProjectId, bootPersistence } from './projects/manager'
 
-// Phase 4 Tier-2 (Phase B): boot the IDB-backed persistence layer.
-// Migration shim runs once (localStorage → IDB) then hydrates the
-// in-memory cache that ProjectsPanel + autosave both read from. Boot
-// is fire-and-forget — useSyncExternalStore returns empty until
-// notify() fires from bootPersistence.
-bootPersistence().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.warn('[boot] persistence init failed', err)
-})
-
-// Phase 2.0 — debounced autosave to the current project (now via IDB).
+// Phase 2.0 — debounced autosave to the current project (via IDB). Registering
+// the store subscription is safe before boot — flush() reads getProjectId()
+// lazily, so it sees the hydrated current-project id once boot completes.
 installAutosave(useStore, getCurrentProjectId)
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// Deterministic boot: AWAIT the IDB-backed persistence layer before rendering
+// <App/>. The migration shim runs once (localStorage → IDB) and the in-memory
+// cache (current project id, projects list) hydrates here — so by the time the
+// app mounts, getCurrentProjectId() is stable. This removes the boot/handoff
+// race where the #connect deep link read a null current-project id and the
+// hydrate then clobbered the id it had just set. The boot skeleton in
+// index.html covers this window (< 500ms in practice).
+async function boot() {
+  try {
+    await bootPersistence()
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[boot] persistence init failed', err)
+  }
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+}
+
+boot()
