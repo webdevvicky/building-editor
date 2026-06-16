@@ -47,6 +47,14 @@ export function installAutosave(store, getProjectId) {
 
   function schedule() {
     if (disposed) return
+    // Reflect pending edits in the badge immediately (the actual push is
+    // debounced). Only when a connection is bound to the current project —
+    // otherwise the badge stays idle. markUnsynced is a no-op while a push is
+    // in flight, so it won't stomp the 'syncing' state.
+    const conn = getCachedConn()
+    if (conn && conn.localProjectId === getProjectId()) {
+      cloudSync.markUnsynced()
+    }
     if (timer !== null) clearTimeout(timer)
     timer = setTimeout(flush, DEBOUNCE_MS)
   }
