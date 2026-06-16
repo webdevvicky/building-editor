@@ -64,8 +64,6 @@ export function getSyncStatus() {
  * @returns {Promise<{ok:true,snapshotVersion:number,lastSyncedAt:string}|{ok:false,error:string}>}
  */
 export async function syncToCloud(state, conn) {
-  // TEMP debug trace — remove after verifying the connect→sync chain.
-  console.log('[cloudSync] syncToCloud attempt →', conn?.editorProjectId)
   _setState({ status: 'syncing', lastError: null })
   try {
     // snapshot = full editor model (cloud backup + restore); package = the

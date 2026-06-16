@@ -28,8 +28,6 @@ export function installAutosave(store, getProjectId) {
     const state = store.getState()
     const snap  = buildSnapshot(state)
     const ok    = saveCurrent(id, snap)
-    // TEMP debug trace — remove after verifying the connect→sync chain.
-    console.log('[autosave] fired, projectId=', id, 'savedOk=', ok)
     if (ok !== false) toast.info('Auto-saved', { duration: 1500 })
 
     // Fire-and-forget cloud push AFTER local save succeeds. The connection is
