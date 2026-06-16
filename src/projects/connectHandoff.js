@@ -15,9 +15,8 @@
 // Pure parse helper is exported separately so it can be unit-tested without a
 // browser.
 
-import { setCloudConn } from './cloudConn.js'
-import { pullFromCloud } from './cloudSync.js'
-import { getCloudConn } from './cloudConn.js'
+import { setCloudConn, getCloudConn } from './cloudConn.js'
+import { pullFromCloud, syncToCloud, markSynced } from './cloudSync.js'
 
 /**
  * Parse a `#connect?...` fragment. Returns { erp, pid, code } when the
@@ -62,6 +61,7 @@ async function exchangeCode(erp, pid, code) {
     erpUrl: String(data.erpUrl).replace(/\/$/, ''),
     editorProjectId: String(data.editorProjectId),
     apiKey: String(data.apiKey),
+    projectName: data.projectName != null ? String(data.projectName) : null,
   }
 }
 
@@ -73,13 +73,14 @@ async function exchangeCode(erp, pid, code) {
  * toast seams it already holds. This keeps the flow DRY (one code path) and
  * testable.
  *
- * Steps (mirrors the prompt contract):
+ * Steps:
  *   1. parse the fragment; bail if it isn't a connect link.
  *   2. strip the fragment immediately (one-time code must not linger).
- *   3. POST connect-exchange → { erpUrl, editorProjectId, apiKey }.
+ *   3. POST connect-exchange → { erpUrl, editorProjectId, apiKey, projectName }.
  *   4. resolve a local project (reuse current, else create+open one).
- *   5. setCloudConn(localProjectId, conn).
- *   6. pull the snapshot and loadProject(snapshot) so the model shows.
+ *   5. setCloudConn({ ...conn, localProjectId }) — global, bound to this project.
+ *   6. reconcile: adopt ERP snapshot if present (mark synced), else seed ERP by
+ *      pushing the current local model.
  *   7. toast.success; refresh the badge's conn state.
  *
  * @param {object} deps
@@ -88,6 +89,7 @@ async function exchangeCode(erp, pid, code) {
  * @param {(id:string) => any} deps.openProject
  * @param {(id:string) => void} deps.setCurrentProjectId
  * @param {(data:any) => void} deps.loadProject
+ * @param {() => object} [deps.getState]  zustand getState — for seeding the ERP
  * @param {{success:Function, error:Function}} deps.toast
  * @param {(conn:any) => void} [deps.onConnected]
  * @returns {Promise<boolean>} true if a connect link was handled (success OR
@@ -113,6 +115,7 @@ async function _runConnectHandoff(deps) {
     openProject,
     setCurrentProjectId,
     loadProject,
+    getState,
     toast,
     onConnected,
   } = deps
@@ -137,10 +140,13 @@ async function _runConnectHandoff(deps) {
     return true
   }
 
-  // 4 — resolve a local project to attach the connection to.
+  // 4 — resolve a local project to attach the connection to. Boot is awaited
+  //     before the app renders (main.jsx), so getCurrentProjectId() is stable
+  //     here — no race with hydration.
+  const projectLabel = conn.projectName ?? conn.editorProjectId
   let localProjectId = getCurrentProjectId()
   if (!localProjectId) {
-    const rec = createProject(`ERP — ${conn.editorProjectId}`, 'Residential')
+    const rec = createProject(`ERP — ${projectLabel}`, 'Residential')
     if (!rec) {
       toast.error('Could not connect — failed to create a local project.')
       return true
@@ -150,7 +156,8 @@ async function _runConnectHandoff(deps) {
     setCurrentProjectId(rec.id)
   }
 
-  // 5 — persist the global connection, binding it to this local project.
+  // 5 — persist the global connection, binding it to this local project and
+  //     carrying the ERP project name for the badge.
   try {
     await setCloudConn({ ...conn, localProjectId })
   } catch {
@@ -158,17 +165,24 @@ async function _runConnectHandoff(deps) {
     return true
   }
 
-  // 6 — pull the cloud snapshot so the editor opens showing the synced model.
-  //     Pull failure is non-fatal: the connection is set, autosave will push.
+  // 6 — reconcile once. If the ERP already has a snapshot, ADOPT it (ERP is the
+  //     source of truth on connect) → mark synced. If it has none (fresh editor
+  //     project), SEED the ERP by pushing the current local model. Either way
+  //     the badge ends at 'synced' rather than stuck at idle. Non-fatal on
+  //     failure: the connection is set and autosave will push on the next edit.
   try {
     const pulled = await pullFromCloud(conn)
-    if (pulled.ok && pulled.snapshot && pulled.snapshot.projectSettings != null) {
+    const hasRemote = pulled.ok && pulled.snapshot && pulled.snapshot.projectSettings != null
+    if (hasRemote) {
       loadProject(pulled.snapshot)
+      markSynced()
+    } else if (getState) {
+      await syncToCloud(getState(), conn)
     }
-  } catch { /* non-fatal — connection is set, editor stays on local model */ }
+  } catch { /* non-fatal — connection is set; autosave pushes on next edit */ }
 
   // 7 — surface the connection + refresh the badge.
   onConnected?.(await getCloudConn().catch(() => conn))
-  toast.success(`Connected to ${conn.editorProjectId}`)
+  toast.success(`Connected to ${projectLabel}`)
   return true
 }

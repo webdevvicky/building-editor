@@ -146,3 +146,21 @@ export function markUnsynced() {
     _setState({ status: 'unsynced' })
   }
 }
+
+/**
+ * Mark synced without performing a push — used when the editor ADOPTS the ERP
+ * snapshot on connect (ERP is the source of truth, so local already matches the
+ * remote). syncToCloud handles the synced state for actual pushes.
+ * @param {string|null} [lastSyncedAt]
+ */
+export function markSynced(lastSyncedAt = null) {
+  _setState({ status: 'synced', lastError: null, lastSyncedAt })
+}
+
+/**
+ * Reset the badge to idle — used when the active project is no longer the one
+ * bound to the cloud connection (or the connection was cleared).
+ */
+export function markIdle() {
+  _setState({ status: 'idle', lastError: null })
+}

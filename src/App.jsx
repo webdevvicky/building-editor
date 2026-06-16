@@ -89,7 +89,7 @@ export default function App() {
     const loadProject = useStore.getState().loadProject
     runConnectHandoff({
       getCurrentProjectId, createProject, openProject, setCurrentProjectId,
-      loadProject, toast,
+      loadProject, getState: useStore.getState, toast,
     })
       .catch(() => { /* the handler toasts its own failures */ })
       .finally(() => setConnecting(false))
