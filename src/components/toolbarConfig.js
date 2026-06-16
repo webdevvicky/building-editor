@@ -63,6 +63,7 @@ import {
   Link,
   Table2,
   LayoutList,
+  Cloud,
 } from 'lucide-react'
 
 export const TOOL_CLUSTERS = Object.freeze([
@@ -213,8 +214,9 @@ export const TOOL_CLUSTERS = Object.freeze([
     id: 'project',
     label: 'Project',
     items: [
-      { type: 'tool',   toolId: 'projects',  icon: FolderOpen, label: 'Open project list' },
-      { type: 'tool',   toolId: 'revisions', icon: History,    label: 'Revisions' },
+      { type: 'tool',   toolId: 'projects',    icon: FolderOpen, label: 'Open project list' },
+      { type: 'tool',   toolId: 'revisions',   icon: History,    label: 'Revisions' },
+      { type: 'tool',   toolId: 'connect_erp', icon: Cloud,      label: 'Connect to ERP' },
       { type: 'action', actionId: 'save',    icon: Save,       label: 'Save project', shortcut: 'Ctrl+S' },
       { type: 'action', actionId: 'import',  icon: Upload,     label: 'Import JSON' },
       { type: 'action', actionId: 'export',  icon: Download,   label: 'Export JSON' },
