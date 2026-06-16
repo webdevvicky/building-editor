@@ -43,6 +43,15 @@ export const wallSchema = Object.freeze({
     // is preserved across T-junctions, not split).
     splitOrigin:           Object.freeze({ type: 'string',        required: true, default: 'NONE',
                                             oneOf: ['NONE', 'USER_SPLIT'] }),
+    // Reconciliation lineage for the ERP one-way publish (C8: ifcGlobalIds
+    // only, never internal ids). splitWall/joinWalls mint fresh ifcGlobalIds,
+    // which would orphan every ERP execution row (snags, progress, photos)
+    // attached to the old wall on the next publish. This records the
+    // immediate predecessor(s) so the ERP import can REMAP those rows to the
+    // successor instead of dropping them. null = original/baselined wall.
+    // Shape when non-null: { op: 'SPLIT' | 'JOIN', parentIds: string[] }
+    //   parentIds are the ifcGlobalId(s) of the wall(s) this one replaces.
+    provenance:            Object.freeze({ type: 'object|null',   required: true, default: null }),
     // BBS-4 — per-beam-class reinforcement spec overrides for the three
     // wall-derived beams (plinth / lintel / roof) that this wall implies.
     // Default null = no override; resolveBeamReinforcementSpec falls back

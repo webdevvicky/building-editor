@@ -394,15 +394,44 @@ export function buildPackage(state) {
     boqSummary = null
   }
 
+  // ── Reconciliation provenance ────────────────────────────────────────────
+  // Walls minted by splitWall/joinWalls carry the ifcGlobalId(s) of the wall(s)
+  // they replace. Surfacing this lets the ERP import REMAP execution rows
+  // (snags, progress, photos, finishes) from the disappearing parent onto the
+  // successor instead of orphaning them. ifcGlobalIds only (C8).
+  const provenance = buildProvenance(state)
+
   // ── Return package ───────────────────────────────────────────────────────
   return {
     schemaVersion:    1,
     exportedAt:       null,          // caller stamps before upload
     editorProjectId:  state.projectSettings?.editorProjectId ?? null,
     floors,
+    provenance,
     boqSummary,
     elementLabels,
   }
+}
+
+/**
+ * Collect wall lineage into the package-level provenance array.
+ * One entry per wall that was split/join-derived:
+ *   { newId: <ifcGlobalId>, op: 'SPLIT' | 'JOIN', parentIds: [<ifcGlobalId>...] }
+ * Walls with no provenance (originals / baselined) are omitted.
+ */
+function buildProvenance(state) {
+  const out = []
+  for (const wall of Object.values(state.walls ?? {})) {
+    const prov = wall.provenance
+    if (!prov || !prov.op) continue
+    const newId = wall.ifcGlobalId
+    const parentIds = Array.isArray(prov.parentIds)
+      ? prov.parentIds.filter(Boolean)
+      : []
+    if (!newId || parentIds.length === 0) continue
+    out.push({ newId, op: prov.op, parentIds })
+  }
+  return out
 }
 
 export default buildPackage

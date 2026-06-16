@@ -989,6 +989,13 @@ export const useStore = create((set, get) => ({
     const w1Id = uid(), w2Id = uid()
     const w1Ifc = uidIfc(), w2Ifc = uidIfc()
     const newNodeFloorIds = [wallFloorId]
+    // Reconciliation lineage (ERP remap): the split children point back at the
+    // wall they replace. Collapse one level so a re-split before publish still
+    // names the last baselined ancestor the ERP knows.
+    const splitParentIds = Array.from(new Set([
+      wall.ifcGlobalId,
+      ...(wall.provenance?.parentIds ?? []),
+    ].filter(Boolean)))
     const { splitWorld } = plan
 
     set(s => {
@@ -1012,6 +1019,7 @@ export const useStore = create((set, get) => ({
         meta: wall.meta ?? null,
         junctions: w1JunctionIds,
         splitOrigin: 'USER_SPLIT',
+        provenance: { op: 'SPLIT', parentIds: splitParentIds },
         labelNo: null,
       }
       newWalls[w2Id] = {
@@ -1028,6 +1036,7 @@ export const useStore = create((set, get) => ({
         meta: wall.meta ?? null,
         junctions: w2JunctionIds,
         splitOrigin: 'USER_SPLIT',
+        provenance: { op: 'SPLIT', parentIds: splitParentIds },
         labelNo: null,
       }
 
@@ -1261,6 +1270,18 @@ export const useStore = create((set, get) => ({
         openings:    mergedOpenings,
         junctions:   mergedJunctionIds,
         splitOrigin: 'NONE',   // no longer split-derived after re-join
+        // Reconciliation lineage (ERP remap): the survivor keeps its own
+        // ifcGlobalId, but the removed wall's id vanishes — record it (and any
+        // lineage either wall carried) so the ERP repoints the removed wall's
+        // execution rows onto the survivor instead of orphaning them.
+        provenance: {
+          op: 'JOIN',
+          parentIds: Array.from(new Set([
+            removed.ifcGlobalId,
+            ...(removed.provenance?.parentIds ?? []),
+            ...(survivor.provenance?.parentIds ?? []),
+          ].filter(Boolean))),
+        },
       }
 
       // ── Nodes ──

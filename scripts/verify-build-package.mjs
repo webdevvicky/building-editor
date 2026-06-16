@@ -298,6 +298,41 @@ ok('elementLabels.walls is object',  typeof pkgI.elementLabels?.walls === 'objec
 const roomLabelIds = Object.keys(pkgI.elementLabels?.rooms ?? {})
 ok('at least one room label present', roomLabelIds.length > 0)
 
+// ── Section J: reconciliation provenance (split lineage) ──────────────────
+header('J. Reconciliation provenance')
+reset()
+s().addRectangleRoom(0, 0, 10 * FT, 8 * FT, { type: 'OTHER', name: 'SplitRoom' })
+
+// Fresh package before any split → no provenance.
+const pkgJ0 = buildPackage(s())
+ok('provenance is an array', Array.isArray(pkgJ0.provenance))
+ok('no provenance before any split', pkgJ0.provenance.length === 0)
+
+// Pick a horizontal wall (n1.y === n2.y) and split it at its midpoint.
+const wallsJ = Object.values(s().walls)
+const targetWall = wallsJ.find(w => {
+  const a = s().nodes[w.n1], b = s().nodes[w.n2]
+  return a && b && Math.abs(a.y - b.y) < 0.01 && Math.abs(a.x - b.x) > 1
+})
+ok('found a horizontal wall to split', !!targetWall)
+const parentIfc = targetWall?.ifcGlobalId
+const a = s().nodes[targetWall.n1], b = s().nodes[targetWall.n2]
+const splitRes = s().splitWall(targetWall.id, (a.x + b.x) / 2, a.y)
+ok('splitWall succeeded', !splitRes?.error, JSON.stringify(splitRes))
+
+const pkgJ1 = buildPackage(s())
+ok('provenance has two entries after split', pkgJ1.provenance.length === 2,
+   `got ${pkgJ1.provenance.length}`)
+ok('every provenance entry is op=SPLIT',
+   pkgJ1.provenance.every(p => p.op === 'SPLIT'))
+ok('every provenance entry names the parent ifcGlobalId',
+   pkgJ1.provenance.every(p => p.parentIds.includes(parentIfc)))
+ok('provenance newIds are the two new wall ifcGlobalIds',
+   new Set(pkgJ1.provenance.map(p => p.newId)).size === 2 &&
+   pkgJ1.provenance.every(p => p.newId !== parentIfc))
+ok('parent ifcGlobalId no longer present as a wall',
+   !Object.values(s().walls).some(w => w.ifcGlobalId === parentIfc))
+
 // ── Summary ───────────────────────────────────────────────────────────────
 console.log('\n' + '─'.repeat(70))
 console.log(`RESULTS: ${pass} passed, ${fail} failed`)
