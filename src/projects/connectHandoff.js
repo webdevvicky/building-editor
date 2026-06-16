@@ -53,7 +53,8 @@ async function exchangeCode(erp, pid, code) {
     const body = await res.text().catch(() => '')
     throw new Error(`connect-exchange failed (${res.status}): ${body.slice(0, 200)}`)
   }
-  const data = await res.json()
+  const response = await res.json()
+  const data = response.data || response
   if (!data?.erpUrl || !data?.editorProjectId || !data?.apiKey) {
     throw new Error('connect-exchange response missing fields')
   }
@@ -109,6 +110,8 @@ export function runConnectHandoff(deps) {
 }
 
 async function _runConnectHandoff(deps) {
+  console.log('[connectHandoff] _runConnectHandoff started, hash:', typeof window !== 'undefined' ? window.location.hash : 'NO_WINDOW')
+
   const {
     getCurrentProjectId,
     createProject,
@@ -123,6 +126,7 @@ async function _runConnectHandoff(deps) {
   const parsed = parseConnectHash(
     typeof window !== 'undefined' ? window.location.hash : '',
   )
+  console.log('[connectHandoff] parsed:', parsed)
   if (!parsed) return false
 
   // 2 — strip the one-time code from the URL + history immediately, before any
@@ -134,8 +138,11 @@ async function _runConnectHandoff(deps) {
 
   let conn
   try {
+    console.log('[connectHandoff] exchangeCode calling:', { erp: parsed.erp, pid: parsed.pid })
     conn = await exchangeCode(parsed.erp, parsed.pid, parsed.code)
-  } catch {
+    console.log('[connectHandoff] exchangeCode response:', conn)
+  } catch (err) {
+    console.error('[connectHandoff] exchangeCode failed:', err.message)
     toast.error('Could not connect — the link may have expired. Please reopen from the ERP.')
     return true
   }
@@ -171,18 +178,27 @@ async function _runConnectHandoff(deps) {
   //     the badge ends at 'synced' rather than stuck at idle. Non-fatal on
   //     failure: the connection is set and autosave will push on the next edit.
   try {
+    console.log('[connectHandoff] pulling from cloud:', conn.editorProjectId)
     const pulled = await pullFromCloud(conn)
+    console.log('[connectHandoff] pulled:', { ok: pulled.ok, hasSnapshot: !!pulled.snapshot, hasProjectSettings: !!pulled.snapshot?.projectSettings })
     const hasRemote = pulled.ok && pulled.snapshot && pulled.snapshot.projectSettings != null
+    console.log('[connectHandoff] hasRemote:', hasRemote)
     if (hasRemote) {
+      console.log('[connectHandoff] adopting ERP snapshot')
       loadProject(pulled.snapshot)
       markSynced()
     } else if (getState) {
+      console.log('[connectHandoff] pushing local model to ERP')
       await syncToCloud(getState(), conn)
     }
-  } catch { /* non-fatal — connection is set; autosave pushes on next edit */ }
+  } catch (err) {
+    console.error('[connectHandoff] reconcile failed (non-fatal):', err.message)
+  }
 
   // 7 — surface the connection + refresh the badge.
+  console.log('[connectHandoff] setting connection, onConnected callback about to fire')
   onConnected?.(await getCloudConn().catch(() => conn))
+  console.log('[connectHandoff] handoff complete, showing toast')
   toast.success(`Connected to ${projectLabel}`)
   return true
 }
