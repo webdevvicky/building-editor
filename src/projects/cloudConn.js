@@ -22,6 +22,16 @@ function _cacheKey(conn) {
   return `${conn.erpUrl}::${conn.editorProjectId}`
 }
 
+// The cloud connection is stored under its OWN METADATA key — NOT on the
+// PROJECTS record. The manager rewrites the PROJECTS record on its async write
+// queue (createProject's full `put`, saveCurrent's read-modify-write); storing
+// `cloud` there raced with / was clobbered by those writes (esp. the deep-link
+// new-project handoff), so the connection vanished and autosave never synced.
+// METADATA is owned solely by cloudConn → the connection can't be lost.
+function _cloudKey(projectId) {
+  return `cloud::${projectId}`
+}
+
 // ── Persistence helpers ──────────────────────────────────────────────────────
 // manager.js exposes its _persistence only during the boot sequence and
 // doesn't re-export the storage adapter. We reach it by importing the
@@ -47,9 +57,13 @@ async function _getStorage() {
  * @returns {Promise<{erpUrl:string,editorProjectId:string,apiKey:string}|null>}
  */
 export async function getCloudConn(projectId) {
+  if (!projectId) return null
   const storage = await _getStorage()
-  const rec = await storage.get(DB_STORES.PROJECTS, projectId)
-  return rec?.cloud ?? null
+  const rec = await storage.get(DB_STORES.METADATA, _cloudKey(projectId))
+  const conn = rec?.value ?? null
+  // TEMP debug trace — remove after verifying the connect→sync chain.
+  console.log('[cloudConn] getCloudConn', projectId, '→', conn ? 'CONNECTED' : 'null')
+  return conn
 }
 
 /**
@@ -59,9 +73,12 @@ export async function getCloudConn(projectId) {
  */
 export async function setCloudConn(projectId, conn) {
   const storage = await _getStorage()
-  const rec = await storage.get(DB_STORES.PROJECTS, projectId)
-  if (!rec) throw new Error(`setCloudConn: project ${projectId} not found`)
-  await storage.put(DB_STORES.PROJECTS, projectId, { ...rec, cloud: conn })
+  // Independent of the PROJECTS record's lifecycle: survives createProject /
+  // saveCurrent and never throws on a not-yet-persisted project (the deep-link
+  // new-project handoff case).
+  await storage.put(DB_STORES.METADATA, _cloudKey(projectId), { value: conn })
+  // TEMP debug trace — remove after verifying the connect→sync chain.
+  console.log('[cloudConn] setCloudConn', projectId, '→ saved')
 }
 
 /**
@@ -71,13 +88,10 @@ export async function setCloudConn(projectId, conn) {
  */
 export async function clearCloudConn(projectId) {
   const storage = await _getStorage()
-  const rec = await storage.get(DB_STORES.PROJECTS, projectId)
-  if (!rec) return
-  const conn = rec.cloud
+  const existing = await storage.get(DB_STORES.METADATA, _cloudKey(projectId))
+  const conn = existing?.value
   if (conn) _tokenCache.delete(_cacheKey(conn))
-  const updated = { ...rec }
-  delete updated.cloud
-  await storage.put(DB_STORES.PROJECTS, projectId, updated)
+  await storage.delete(DB_STORES.METADATA, _cloudKey(projectId))
 }
 
 /**

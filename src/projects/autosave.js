@@ -28,6 +28,8 @@ export function installAutosave(store, getProjectId) {
     const state = store.getState()
     const snap  = buildSnapshot(state)
     const ok    = saveCurrent(id, snap)
+    // TEMP debug trace — remove after verifying the connect→sync chain.
+    console.log('[autosave] fired, projectId=', id, 'savedOk=', ok)
     if (ok !== false) toast.info('Auto-saved', { duration: 1500 })
 
     // Fire-and-forget cloud push AFTER local save succeeds.
@@ -35,6 +37,8 @@ export function installAutosave(store, getProjectId) {
     // sync-status store (SyncStatusBadge). We never await this here.
     if (ok !== false) {
       getCloudConn(id).then((conn) => {
+        // TEMP debug trace — remove after verifying the connect→sync chain.
+        console.log('[autosave] getCloudConn →', conn ? 'CONNECTED → syncing' : 'null → skip sync')
         if (!conn) return
         cloudSync.syncToCloud(state, conn)
       }).catch(() => { /* getCloudConn errors are non-fatal for autosave */ })
