@@ -14,13 +14,8 @@
 
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useStore } from '../store'
-import {
-  getCurrentProjectId, subscribe,
-  createProject, openProject, setCurrentProjectId,
-} from '../projects/manager'
+import { getCurrentProjectId, subscribe } from '../projects/manager'
 import { getCloudConn } from '../projects/cloudConn'
-import { runConnectHandoff } from '../projects/connectHandoff'
-import { toast } from './ui/Toast'
 import ConnectErpDialog from './ConnectErpDialog'
 import SyncStatusBadge from './SyncStatusBadge'
 
@@ -44,20 +39,11 @@ export default function ErpConnection() {
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((k) => k + 1)
 
-  // Deep-link auto-connect — runs exactly once on load. If the URL fragment is
-  // a `#connect?erp=…&pid=…&code=…` handoff, exchange the one-time code, attach
-  // the connection to a local project, and pull the snapshot. Reuses the same
-  // manager + store + toast seams this container already owns (DRY); `reload`
-  // refreshes the badge's conn after a successful connect.
-  useEffect(() => {
-    const loadProject = useStore.getState().loadProject
-    runConnectHandoff({
-      getCurrentProjectId, createProject, openProject, setCurrentProjectId,
-      loadProject, toast, onConnected: reload,
-    }).catch(() => { /* swallow — handler toasts its own failures */ })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
+  // Note: the deep-link auto-connect (#connect handoff) runs in App.jsx BEFORE
+  // any UI mounts (so the one-time exchange completes before the Projects
+  // dialog can appear). By the time this container mounts, the connection is
+  // already attached to the current project; the conn-loading effect below
+  // picks it up via the projectId change.
   useEffect(() => {
     if (!projectId) {
       setConn(null)
