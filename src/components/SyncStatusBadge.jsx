@@ -1,37 +1,31 @@
-// SyncStatusBadge — subscribes to the cloudSync status store and renders
-// a compact pill showing synced / unsynced / syncing / error.
+// SyncStatusBadge — subscribes to the cloudSync status store and renders a
+// compact pill: "● <project name> — <status>".
 //
-// A "Save to cloud" micro-button triggers an immediate push and is shown
-// when status is 'unsynced' or 'error'. It is hidden while syncing.
+// A "Sync now" button triggers an immediate push (bypassing the autosave
+// debounce); shown whenever the connection is bound to the open project and a
+// push isn't already in flight.
 //
-// Usage (mount near the toolbar, once per active project):
-//   <SyncStatusBadge conn={conn} />
-// where conn is the cloud connection record from getCloudConn(projectId).
+// Props:
+//   conn   the global cloud connection record (from getCachedConn) — required
+//   bound  true when the OPEN local project is the one bound to this connection
+//          (conn.localProjectId === currentProjectId). When false, the global
+//          sync-status store reflects a different project, so we show a neutral
+//          "not syncing this project" state.
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { subscribeSyncStatus, syncToCloud } from '../projects/cloudSync'
 import './SyncStatusBadge.css'
 
-const LABELS = {
-  idle:     'Cloud: idle',
-  syncing:  'Syncing…',
-  synced:   'Synced',
-  unsynced: 'Unsaved changes',
-  error:    'Sync error',
+const STATUS_WORD = {
+  idle:     'idle',
+  syncing:  'syncing…',
+  synced:   'synced',
+  unsynced: 'unsynced',
+  error:    'sync error',
 }
 
-const TOOLTIPS = {
-  idle:     'No cloud sync has run yet for this session.',
-  syncing:  'Uploading snapshot to ERP…',
-  synced:   'All changes saved to ERP cloud.',
-  unsynced: 'Local changes have not been pushed to the ERP yet.',
-}
-
-/**
- * @param {{ conn: {erpUrl:string, editorProjectId:string, apiKey:string} }} props
- */
-export default function SyncStatusBadge({ conn }) {
+export default function SyncStatusBadge({ conn, bound = true }) {
   const [syncState, setSyncState] = useState({ status: 'idle', lastError: null, lastSyncedAt: null })
   const [pushing, setPushing] = useState(false)
 
@@ -40,46 +34,53 @@ export default function SyncStatusBadge({ conn }) {
     return unsub
   }, [])
 
-  const { status, lastError, lastSyncedAt } = syncState
+  const name = conn?.projectName || conn?.editorProjectId || 'ERP'
 
-  const tooltipText = status === 'error'
-    ? (lastError ?? 'Unknown error')
-    : status === 'synced' && lastSyncedAt
-      ? `Last synced: ${new Date(lastSyncedAt).toLocaleTimeString()}`
-      : TOOLTIPS[status] ?? ''
+  // When the open project isn't the bound one, the global status store reflects
+  // a DIFFERENT project — ignore it and show a neutral state.
+  const status = bound ? syncState.status : 'idle'
+  const statusText = bound ? (STATUS_WORD[status] ?? status) : 'not syncing this project'
 
-  async function handleSaveNow() {
-    if (pushing || status === 'syncing') return
+  const { lastError, lastSyncedAt } = syncState
+  const tooltipText = !bound
+    ? 'This local project is not the one linked to the ERP. Open the linked project to sync.'
+    : status === 'error'
+      ? (lastError ?? 'Unknown error')
+      : status === 'synced' && lastSyncedAt
+        ? `Last synced: ${new Date(lastSyncedAt).toLocaleTimeString()}`
+        : ''
+
+  async function handleSyncNow() {
+    if (pushing || status === 'syncing' || !conn || !bound) return
     setPushing(true)
     try {
-      const state = useStore.getState()
-      await syncToCloud(state, conn)
+      await syncToCloud(useStore.getState(), conn)
     } finally {
       setPushing(false)
     }
   }
 
-  const showSaveBtn = conn && (status === 'unsynced' || status === 'error' || status === 'idle')
+  const showSyncBtn = bound && !!conn && status !== 'syncing'
   const saving = pushing || status === 'syncing'
 
   return (
     <div
       className={`sync-badge sync-badge--${status}`}
       role="status"
-      aria-label={LABELS[status] ?? status}
+      aria-label={`${name} — ${statusText}`}
     >
       <span className="sync-badge__dot" aria-hidden="true" />
-      <span className="sync-badge__label">{LABELS[status] ?? status}</span>
+      <span className="sync-badge__label">{name} — {statusText}</span>
 
-      {showSaveBtn && (
+      {showSyncBtn && (
         <button
           type="button"
           className="sync-badge__btn"
-          onClick={handleSaveNow}
-          disabled={saving || !conn}
-          aria-label="Save to cloud now"
+          onClick={handleSyncNow}
+          disabled={saving}
+          aria-label="Sync now"
         >
-          {saving ? 'Saving…' : 'Save now'}
+          {saving ? 'Syncing…' : 'Sync now'}
         </button>
       )}
 
