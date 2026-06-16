@@ -69,12 +69,28 @@ export async function syncToCloud(state, conn) {
     // snapshot = full editor model (cloud backup + restore); package = the
     // BuildingModelPackage the ERP import engine consumes. Sending both lets the
     // ERP auto-publish the building model while preserving a full restore copy.
+    console.log('[syncToCloud] Building snapshot...')
     const snapshot = buildSnapshot(state)
+    console.log('[syncToCloud] Snapshot built, building package...')
+
     let buildingPackage = null
-    try { buildingPackage = buildPackage(state) } catch { buildingPackage = null }
+    try {
+      console.log('[syncToCloud] Starting buildPackage...')
+      buildingPackage = buildPackage(state)
+      console.log('[syncToCloud] Package built successfully')
+    } catch (err) {
+      console.error('[syncToCloud] buildPackage failed (continuing with package:null):', err)
+      buildingPackage = null
+    }
+
+    console.log('[syncToCloud] Getting auth token...')
     const accessToken = await getValidAccessToken(conn)
+    console.log('[syncToCloud] Auth token obtained')
 
     const url = `${conn.erpUrl.replace(/\/$/, '')}/api/v1/editor-projects/${conn.editorProjectId}/snapshot`
+    console.log('[syncToCloud] PUT request URL:', url)
+    console.log('[syncToCloud] Payload size - snapshot:', JSON.stringify(snapshot).length, 'bytes; package:', buildingPackage ? JSON.stringify(buildingPackage).length : 'null')
+
     const res = await fetch(url, {
       method: 'PUT',
       headers: {
@@ -83,10 +99,12 @@ export async function syncToCloud(state, conn) {
       },
       body: JSON.stringify({ snapshot, package: buildingPackage }),
     })
+    console.log('[syncToCloud] Response status:', res.status)
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       const error = `Push failed (${res.status}): ${body.slice(0, 200)}`
+      console.error('[syncToCloud] HTTP error:', error)
       _setState({ status: 'error', lastError: error })
       return { ok: false, error }
     }
@@ -96,6 +114,7 @@ export async function syncToCloud(state, conn) {
     return { ok: true, snapshotVersion, lastSyncedAt }
   } catch (err) {
     const error = err?.message ?? String(err)
+    console.error('[syncToCloud] Exception thrown:', error, err)
     _setState({ status: 'error', lastError: error })
     return { ok: false, error }
   }
