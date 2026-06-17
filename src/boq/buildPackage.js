@@ -317,6 +317,112 @@ function buildSlabs(state, floorId, elementLabels) {
   return out
 }
 
+// ── Unified element export (structural + MEP anchor) ───────────────────────
+
+// Any 36-char UUID string is an INTERNAL editor id (rotates, useless to the
+// ERP, and forbidden in the package by the C8 ID-exposure policy). The element
+// spec is a JSONB blob of the entity's descriptive/dimensional fields ONLY —
+// every internal id graph reference is stripped. Cross-element anchoring is
+// expressed exclusively via resolved ifcGlobalIds (roomIfcId / wallIfcId).
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function sanitizeSpec(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeSpec).filter(v => v !== undefined)
+  }
+  if (value && typeof value === 'object') {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) {
+      if (k === 'id' || k === 'ifcGlobalId') continue
+      const sv = sanitizeSpec(v)
+      if (sv !== undefined) out[k] = sv
+    }
+    return out
+  }
+  if (typeof value === 'string' && _UUID_RE.test(value)) return undefined
+  return value
+}
+
+/** Resolve an entity's room/wall references to ifcGlobalIds (never internal ids). */
+function resolveElementAnchor(state, entity) {
+  const anchor = {}
+  const room = entity.roomId ? state.rooms?.[entity.roomId] : null
+  if (room?.ifcGlobalId) anchor.roomIfcId = room.ifcGlobalId
+  const wall = entity.wallId ? state.walls?.[entity.wallId] : null
+  if (wall?.ifcGlobalId) anchor.wallIfcId = wall.ifcGlobalId
+  return anchor
+}
+
+// Editor MEP state collection → BuildingElement kind.
+const MEP_ELEMENT_COLLECTIONS = [
+  ['plumbingFixtures', 'MEP_PLUMBING'],
+  ['electricalPoints', 'MEP_ELECTRICAL'],
+  ['hvacUnits',        'MEP_HVAC'],
+  ['fireDevices',      'MEP_FIRE'],
+  ['elvDevices',       'MEP_ELV'],
+  ['solarEquipment',   'MEP_SOLAR'],
+]
+
+/**
+ * buildElements(state, floorId, elementLabels) → ImportElement[]
+ *
+ * Emits every floor-scoped structural + MEP entity (and risers anchored to
+ * their from-floor) as a kind-discriminated element carrying its ifcGlobalId,
+ * label, optional room/wall anchor, and a UUID-stripped JSONB spec. The ERP
+ * imports these into ONE generic BuildingElement table (kind + spec), never
+ * 16 typed tables. Wall-derived beams are skipped (computed overlay, not
+ * persisted). Pure; no Date.now()/Math.random().
+ */
+function buildElements(state, floorId, elementLabels) {
+  const out = []
+  const push = (kind, entity, labelMap) => {
+    if (!entity?.ifcGlobalId) return
+    const label = labelMap?.[entity.id]
+    out.push({
+      ifcGlobalId: entity.ifcGlobalId,
+      labelNo:     label?.labelNo ?? entity.labelNo ?? null,
+      kind,
+      name:        entity.name ?? null,
+      ...resolveElementAnchor(state, entity),
+      spec:        sanitizeSpec(entity),
+    })
+  }
+
+  for (const col of Object.values(state.columns ?? {})) {
+    if ((col.baseFloorId ?? col.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    push('COLUMN', col, elementLabels?.columns)
+  }
+  for (const beam of Object.values(state.beams ?? {})) {
+    if ((beam.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    if (beam.source === 'WALL_DERIVED') continue // computed overlay, not persisted
+    push('BEAM', beam, elementLabels?.beams)
+  }
+  for (const slab of Object.values(state.slabs ?? {})) {
+    if ((slab.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    push('SLAB', slab, elementLabels?.slabs)
+  }
+  for (const f of Object.values(state.foundations ?? {})) {
+    if ((f.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    push('FOUNDATION', f, elementLabels?.foundations)
+  }
+  for (const sc of Object.values(state.staircases ?? {})) {
+    if ((sc.floorId ?? sc.fromFloorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    push('STAIRCASE', sc, elementLabels?.staircases)
+  }
+  for (const [collectionKey, kind] of MEP_ELEMENT_COLLECTIONS) {
+    for (const e of Object.values(state[collectionKey] ?? {})) {
+      if ((e.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+      push(kind, e)
+    }
+  }
+  // Risers span floors; emit once, anchored to their from-floor.
+  for (const r of Object.values(state.risers ?? {})) {
+    if ((r.fromFloorId ?? r.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    push('RISER', r)
+  }
+  return out
+}
+
 // ── Main export ────────────────────────────────────────────────────────────
 
 /**
@@ -377,6 +483,7 @@ export function buildPackage(state) {
       columns:  buildColumns(state, floorId, elementLabels),
       beams:    buildBeams(state, floorId, elementLabels),
       slabs:    buildSlabs(state, floorId, elementLabels),
+      elements: buildElements(state, floorId, elementLabels),
     }
   })
 

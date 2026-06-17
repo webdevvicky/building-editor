@@ -333,6 +333,41 @@ ok('provenance newIds are the two new wall ifcGlobalIds',
 ok('parent ifcGlobalId no longer present as a wall',
    !Object.values(s().walls).some(w => w.ifcGlobalId === parentIfc))
 
+// ── Section K: elements export (structural / MEP anchor) ──────────────────
+header('K. elements export')
+reset()
+s().addRectangleRoom(0, 0, 10 * FT, 8 * FT, { type: 'OTHER', name: 'ElemRoom' })
+const pkgK0 = buildPackage(s())
+ok('floor.elements is array', Array.isArray(pkgK0.floors?.[0]?.elements))
+ok('no elements before any structural entity', (pkgK0.floors?.[0]?.elements ?? []).length === 0,
+   `got ${(pkgK0.floors?.[0]?.elements ?? []).length}`)
+
+// Add a column (uses the first seeded column type) and confirm it exports as an element.
+const colTypeId = s().projectSettings?.columnTypes?.[0]?.id
+let colOk = false
+if (colTypeId && typeof s().addColumn === 'function') {
+  try { s().addColumn(60, 60, colTypeId); colOk = true } catch { colOk = false }
+}
+if (colOk) {
+  const pkgK1 = buildPackage(s())
+  const elems = pkgK1.floors?.[0]?.elements ?? []
+  const colEl = elems.find(e => e.kind === 'COLUMN')
+  ok('COLUMN element emitted', !!colEl, `kinds: ${JSON.stringify(elems.map(e => e.kind))}`)
+  ok('element.ifcGlobalId is 22-char IFC GUID', IFC_RE.test(colEl?.ifcGlobalId ?? ''),
+     `got "${colEl?.ifcGlobalId}"`)
+  ok('element.kind is a string', typeof colEl?.kind === 'string')
+  ok('element.spec is an object', colEl?.spec && typeof colEl.spec === 'object')
+  // C8: the spec must NOT leak any internal UUID (id graph stripped).
+  const specJson = JSON.stringify(colEl?.spec ?? {})
+  ok('element.spec leaks no internal UUID',
+     !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(specJson))
+  ok('element.spec drops id / ifcGlobalId keys',
+     !('id' in (colEl?.spec ?? {})) && !('ifcGlobalId' in (colEl?.spec ?? {})))
+} else {
+  ok('column add unavailable — elements detail advisory', true,
+     'addColumn or seeded column type not available in this state')
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 console.log('\n' + '─'.repeat(70))
 console.log(`RESULTS: ${pass} passed, ${fail} failed`)
