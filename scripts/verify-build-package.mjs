@@ -109,7 +109,7 @@ reset()
 s().addRectangleRoom(0, 0, 10 * FT, 8 * FT, { type: 'BEDROOM', name: 'Master' })
 const pkgB = buildPackage(s())
 
-ok('schemaVersion === 1', pkgB.schemaVersion === 1)
+ok('schemaVersion === 2', pkgB.schemaVersion === 2)
 ok('exportedAt === null', pkgB.exportedAt === null)
 ok('floors is array', Array.isArray(pkgB.floors))
 ok('elementLabels is object', typeof pkgB.elementLabels === 'object' && pkgB.elementLabels !== null)
@@ -363,6 +363,32 @@ if (colOk) {
      !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(specJson))
   ok('element.spec drops id / ifcGlobalId keys',
      !('id' in (colEl?.spec ?? {})) && !('ifcGlobalId' in (colEl?.spec ?? {})))
+
+  // schemaVersion 2: typed structural fields + per-element BBS snapshot.
+  const st = colEl?.structural
+  ok('COLUMN element carries structural sub-object', st && typeof st === 'object',
+     `structural: ${JSON.stringify(st)}`)
+  ok('structural.sectionShape present', typeof st?.sectionShape === 'string')
+  ok('structural.heightMm is a number', typeof st?.heightMm === 'number',
+     `got ${st?.heightMm}`)
+  ok('structural.concreteM3 is a number ≥ 0', typeof st?.concreteM3 === 'number' && st.concreteM3 >= 0,
+     `got ${st?.concreteM3}`)
+  ok('structural.steelGrade present', typeof st?.steelGrade === 'string')
+  // bbs may be null if the fixture lacks reinforcement specs — but when present
+  // it must be a well-formed snapshot keyed by this element.
+  if (colEl?.bbs) {
+    ok('bbs.rows is a non-empty array', Array.isArray(colEl.bbs.rows) && colEl.bbs.rows.length > 0,
+       `rows: ${colEl.bbs.rows?.length}`)
+    ok('bbs.totalWeightKg is a number ≥ 0',
+       typeof colEl.bbs.totalWeightKg === 'number' && colEl.bbs.totalWeightKg >= 0)
+    const row = colEl.bbs.rows?.[0]
+    ok('bbs row has markId/diaMm/cuttingLengthMm/count',
+       typeof row?.markId === 'string' && typeof row?.diaMm === 'number' &&
+       typeof row?.cuttingLengthMm === 'number' && typeof row?.count === 'number',
+       `row: ${JSON.stringify(row)}`)
+  } else {
+    ok('bbs absent (no reinforcement spec in fixture) — advisory', true)
+  }
 } else {
   ok('column add unavailable — elements detail advisory', true,
      'addColumn or seeded column type not available in this state')

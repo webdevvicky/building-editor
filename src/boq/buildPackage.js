@@ -38,8 +38,23 @@ import { getBoqLines } from './lines.js'
 import { getRoomArea, getRoomGeometry } from '../topology/rooms.js'
 import { getWallAdjacencyCount } from '../topology/walls.js'
 import { resolveBeamEndpoint } from '../topology/beams.js'
+import { computeRebarGroups, ELEMENT_TYPE } from '../bbs/index.js'
+import { getColumnHeightFt, getColumnAreaFt2 } from '../topology/columns.js'
+import {
+  resolveColumnTypeForColumn,
+  resolveColumnReinforcementSpecForColumn,
+  resolveBeamReinforcementSpec,
+  resolveSlabReinforcementSpecForSlab,
+} from '../specs/resolution.js'
 
 const DEFAULT_FLOOR_ID = 'F1'
+
+// schemaVersion 2 (2026-06-22): structural elements (COLUMN/BEAM/SLAB) now carry
+// a typed `structural` sub-object (resolved section/height/length/concrete +
+// steel grade) and a `bbs` sub-object (per-element bar-bending schedule rows
+// lifted from computeRebarGroups). The editor is the single source of truth —
+// the ERP stores these as an authoritative snapshot and NEVER recalculates BBS.
+const PACKAGE_SCHEMA_VERSION = 2
 
 // ── Unit conversion helpers ────────────────────────────────────────────────
 
@@ -51,6 +66,21 @@ function inToMm(inches) {
 /** Convert inches to feet (ERP height/length boundary). */
 function inToFt(inches) {
   return inches / 12
+}
+
+/** Convert feet to integer millimetres. */
+function ftToMm(feet) {
+  return Math.round(feet * 304.8)
+}
+
+/** Convert cubic feet to cubic metres (3 dp). */
+function ft3ToM3(ft3) {
+  return Math.round(ft3 * 0.0283168 * 1000) / 1000
+}
+
+/** Round kg to 2 dp for stable JSON output. */
+function roundKg(kg) {
+  return Math.round(kg * 100) / 100
 }
 
 // ── Wall adjacency map ─────────────────────────────────────────────────────
@@ -363,8 +393,133 @@ const MEP_ELEMENT_COLLECTIONS = [
   ['solarEquipment',   'MEP_SOLAR'],
 ]
 
+// ── Typed structural spec + per-element BBS (schemaVersion 2) ───────────────
+
 /**
- * buildElements(state, floorId, elementLabels) → ImportElement[]
+ * Compress a RebarGroup[] (from computeRebarGroups) into a compact, ERP-bound
+ * per-element BBS snapshot. The editor's IS-2502/IS-456/IS-13920 engine is
+ * authoritative; the ERP stores these rows verbatim and never recalculates.
+ * Returns null when the element has no resolved rebar (keeps the package lean).
+ */
+function buildElementBbs(groups) {
+  if (!groups || groups.length === 0) return null
+  const byDiaKg = {}
+  let totalWeightKg = 0
+  const rows = groups.map(g => {
+    totalWeightKg += g.totalWeightKg
+    byDiaKg[g.diaMm] = roundKg((byDiaKg[g.diaMm] ?? 0) + g.totalWeightKg)
+    return {
+      markId:          g.markId,
+      role:            g.role,
+      diaMm:           g.diaMm,
+      shapeCode:       g.shapeCode,
+      cuttingLengthMm: Math.round(g.cuttingLengthMm),
+      count:           g.count,
+      totalLengthM:    Math.round(g.totalLengthM * 1000) / 1000,
+      totalWeightKg:   roundKg(g.totalWeightKg),
+      bbsCategory:     g.meta?.bbsCategory ?? null,
+    }
+  })
+  return {
+    rows,
+    totalWeightKg: roundKg(totalWeightKg),
+    byDiaKg,
+    steelGrade:    groups[0]?.steelGrade ?? 'Fe500D',
+  }
+}
+
+/** Typed structural fields for a COLUMN (position, section, height, concrete, steel). */
+function buildColumnStructural(state, col) {
+  try {
+    const columnTypes = state.projectSettings?.columnTypes ?? []
+    const ct = resolveColumnTypeForColumn(state, col, columnTypes)
+    const heightFt = getColumnHeightFt(state, col)
+    const areaFt2 = ct ? getColumnAreaFt2(ct) : 0
+    const resolved = resolveColumnReinforcementSpecForColumn(state, col, ct)
+    // World position in mm (prefer attached node — mirrors buildColumns()).
+    let xMm = null, yMm = null
+    if (col.attachedNodeId) {
+      const node = state.nodes?.[col.attachedNodeId]
+      if (node) { xMm = inToMm(node.x); yMm = inToMm(node.y) }
+    }
+    if (xMm === null) { xMm = inToMm(col.x ?? 0); yMm = inToMm(col.y ?? 0) }
+    return {
+      xMm,
+      yMm,
+      sectionShape:   ct?.shape ?? 'rect',
+      sectionWidthMm: ct?.widthIn != null ? inToMm(ct.widthIn) : null,
+      sectionDepthMm: ct?.depthIn != null ? inToMm(ct.depthIn) : null,
+      diamMm:         ct?.diamIn  != null ? inToMm(ct.diamIn)  : null,
+      heightMm:       Number.isFinite(heightFt) ? ftToMm(heightFt) : null,
+      concreteM3:     ft3ToM3(areaFt2 * (heightFt || 0)),
+      steelGrade:     resolved.spec?.steelGrade ?? 'Fe500D',
+      reinforcementSpecLabel: resolved.specLabel,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Typed structural fields for a BEAM (section, span, concrete, steel). */
+function buildBeamStructural(state, beam) {
+  try {
+    const dims = state.projectSettings?.beamDimensions?.[beam.level] ?? null
+    const fromPos = resolveBeamEndpoint(state, beam.endpoints?.from)
+    const toPos   = resolveBeamEndpoint(state, beam.endpoints?.to)
+    const lengthFt = (fromPos && toPos)
+      ? inToFt(Math.hypot(toPos.x - fromPos.x, toPos.y - fromPos.y))
+      : 0
+    const sectionFt2 = dims ? (dims.widthIn * dims.depthIn) / 144 : 0
+    const resolved = resolveBeamReinforcementSpec(state, beam)
+    return {
+      level:          beam.level ?? null,
+      sectionWidthMm: dims?.widthIn != null ? inToMm(dims.widthIn) : null,
+      sectionDepthMm: dims?.depthIn != null ? inToMm(dims.depthIn) : null,
+      lengthMm:       ftToMm(lengthFt),
+      // Resolved endpoint world coords (mm) so the viewer can draw the beam line.
+      fromPointMm:    fromPos ? { xMm: inToMm(fromPos.x), yMm: inToMm(fromPos.y) } : null,
+      toPointMm:      toPos   ? { xMm: inToMm(toPos.x),   yMm: inToMm(toPos.y)   } : null,
+      concreteM3:     ft3ToM3(sectionFt2 * lengthFt),
+      steelGrade:     resolved.spec?.steelGrade ?? 'Fe500D',
+      reinforcementSpecLabel: resolved.specLabel,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Typed structural fields for a SLAB (thickness, area, role, concrete, steel). */
+function buildSlabStructural(state, slab) {
+  try {
+    let areaFt2 = 0
+    const roomIfcIds = []
+    for (const rid of (slab.roomIds ?? [])) {
+      areaFt2 += getRoomArea(state, rid)
+      const ifc = state.rooms?.[rid]?.ifcGlobalId
+      if (ifc) roomIfcIds.push(ifc)
+    }
+    const thicknessIn = slab.thicknessIn ?? 5
+    const resolved = resolveSlabReinforcementSpecForSlab(state, slab)
+    return {
+      type:         slab.type ?? null,
+      role:         slab.role ?? null,
+      thicknessMm:  inToMm(thicknessIn),
+      sinkDepthMm:  slab.sinkDepthIn != null ? inToMm(slab.sinkDepthIn) : null,
+      grade:        slab.grade ?? null,
+      areaSqft:     Math.round(areaFt2 * 100) / 100,
+      // ifcGlobalIds of the rooms this slab covers — the viewer shades their polygons.
+      roomIfcIds,
+      concreteM3:   ft3ToM3(areaFt2 * (thicknessIn / 12)),
+      steelGrade:   resolved.spec?.steelGrade ?? 'Fe500D',
+      reinforcementSpecLabel: resolved.specLabel,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * buildElements(state, floorId, elementLabels, rebarByElement) → ImportElement[]
  *
  * Emits every floor-scoped structural + MEP entity (and risers anchored to
  * their from-floor) as a kind-discriminated element carrying its ifcGlobalId,
@@ -372,20 +527,37 @@ const MEP_ELEMENT_COLLECTIONS = [
  * imports these into ONE generic BuildingElement table (kind + spec), never
  * 16 typed tables. Wall-derived beams are skipped (computed overlay, not
  * persisted). Pure; no Date.now()/Math.random().
+ *
+ * schemaVersion 2: COLUMN/BEAM/SLAB elements additionally carry `structural`
+ * (typed geometry + concrete + steel) and `bbs` (per-element bar schedule).
+ * `rebarByElement` is the `byElement` map from computeRebarGroups(state).
  */
-function buildElements(state, floorId, elementLabels) {
+function buildElements(state, floorId, elementLabels, rebarByElement) {
   const out = []
+  const bbsFor = (elementType, entityId) =>
+    buildElementBbs(rebarByElement?.[elementType]?.[entityId])
   const push = (kind, entity, labelMap) => {
     if (!entity?.ifcGlobalId) return
     const label = labelMap?.[entity.id]
-    out.push({
+    const el = {
       ifcGlobalId: entity.ifcGlobalId,
       labelNo:     label?.labelNo ?? entity.labelNo ?? null,
       kind,
       name:        entity.name ?? null,
       ...resolveElementAnchor(state, entity),
       spec:        sanitizeSpec(entity),
-    })
+    }
+    if (kind === 'COLUMN') {
+      el.structural = buildColumnStructural(state, entity)
+      el.bbs = bbsFor(ELEMENT_TYPE.COLUMN, entity.id)
+    } else if (kind === 'BEAM') {
+      el.structural = buildBeamStructural(state, entity)
+      el.bbs = bbsFor(ELEMENT_TYPE.BEAM, entity.id)
+    } else if (kind === 'SLAB') {
+      el.structural = buildSlabStructural(state, entity)
+      el.bbs = bbsFor(ELEMENT_TYPE.SLAB, entity.id)
+    }
+    out.push(el)
   }
 
   for (const col of Object.values(state.columns ?? {})) {
@@ -443,6 +615,18 @@ export function buildPackage(state) {
   // ── Wall adjacency map (used for faceType on all floors in one pass) ────
   const adjCount = buildWallAdjacency(state)
 
+  // ── Bar-bending schedule (computed once; sliced per element below) ──────
+  // The editor's IS-2502 engine is the single source of truth. Computed once
+  // for the whole project and indexed by elementId so each element carries its
+  // own authoritative BBS snapshot. Wrapped — verify fixtures may lack the full
+  // projectSettings BBS needs; a null map degrades to "no bbs" gracefully.
+  let rebarByElement = null
+  try {
+    rebarByElement = computeRebarGroups(state).byElement
+  } catch {
+    rebarByElement = null
+  }
+
   // ── Floor list ──────────────────────────────────────────────────────────
   const floorDefs = (state.projectSettings?.floors ?? [])
     .slice()
@@ -483,7 +667,7 @@ export function buildPackage(state) {
       columns:  buildColumns(state, floorId, elementLabels),
       beams:    buildBeams(state, floorId, elementLabels),
       slabs:    buildSlabs(state, floorId, elementLabels),
-      elements: buildElements(state, floorId, elementLabels),
+      elements: buildElements(state, floorId, elementLabels, rebarByElement),
     }
   })
 
@@ -510,7 +694,7 @@ export function buildPackage(state) {
 
   // ── Return package ───────────────────────────────────────────────────────
   return {
-    schemaVersion:    1,
+    schemaVersion:    PACKAGE_SCHEMA_VERSION,
     exportedAt:       null,          // caller stamps before upload
     editorProjectId:  state.projectSettings?.editorProjectId ?? null,
     floors,
