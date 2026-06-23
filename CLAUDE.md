@@ -209,6 +209,42 @@ On failure, git hook blocks the commit. Fix the code, re-run.
 
 ---
 
+## ERP Sync — Package Export & Cloud Safety (2026-06-23)
+
+This editor is the **source of truth** for a connected JRM ERP. `buildPackage(state)`
+(`src/boq/buildPackage.js`) produces the `BuildingModelPackage` the ERP imports;
+`src/projects/` carries the cloud sync.
+
+### `buildPackage` — `schemaVersion` (currently **3**)
+- **1** — spatial shell: floors → rooms (`vertices[]`/`posXMm`), per-room walls
+  (dims + `faceType` + openings), columns/beams/slabs arrays, MEP `elements[]`.
+- **2** — each COLUMN/BEAM/SLAB element carries a typed **`structural`** sub-object
+  (resolved section/height/span/`concreteM3` + steel grade) + a **`bbs`** sub-object
+  (per-element IS-2502 rows from `computeRebarGroups`). The ERP stores these verbatim
+  and **never recalculates BBS**.
+- **3** — each floor carries the authoritative **wall node graph**: `nodes[]`
+  (`{ifcGlobalId, xMm, yMm, zMm:null, kind: CORNER|TJUNCTION, onWallIfcId}`) + `walls[]`
+  (`{ifcGlobalId, n1IfcId, n2IfcId}`), and `openings[]` gain `positionMm`. The graph
+  is the editor's own `state.nodes`/`wall.n1|n2` exported verbatim (shared-node model →
+  BIM/IFC-grade). `zMm` is null today; future 3-D elevation needs no schema change.
+- Units at the boundary: coords → **mm integer**, lengths/heights → **feet**,
+  thickness → **inches**. IDs: `ifcGlobalId` only (internal UUIDs stripped). Bump the
+  version + extend `scripts/verify-build-package.mjs` when adding geometry.
+
+### Cloud sync — DATA SAFETY (locked)
+- **Autosave writes LOCAL IDB only** (`src/projects/autosave.js`) — it must NEVER push
+  to the cloud. Cloud sync is **explicit**: the user clicks "Sync Now"
+  (`SyncStatusBadge` → `cloudSync.syncToCloud`). An empty-canvas manual sync over a
+  real remote requires a confirm (empty-model guard).
+- **Connect handoff** (`src/projects/connectHandoff.js`) pulls/adopts on connect and
+  **never auto-pushes**; on a no-snapshot it starts blank, on a pull failure it tries
+  DB recovery then surfaces an error — it never overwrites the remote. The ERP's
+  destructive-change guard can return `{quarantined:true}` (held, not synced).
+- Why: an earlier autosave auto-push wiped a connected building's ERP model. These
+  rules exist to make that impossible.
+
+---
+
 ## Development
 
 **Install:**
