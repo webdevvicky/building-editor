@@ -49,12 +49,17 @@ import {
 
 const DEFAULT_FLOOR_ID = 'F1'
 
-// schemaVersion 2 (2026-06-22): structural elements (COLUMN/BEAM/SLAB) now carry
-// a typed `structural` sub-object (resolved section/height/length/concrete +
-// steel grade) and a `bbs` sub-object (per-element bar-bending schedule rows
-// lifted from computeRebarGroups). The editor is the single source of truth —
-// the ERP stores these as an authoritative snapshot and NEVER recalculates BBS.
-const PACKAGE_SCHEMA_VERSION = 2
+// schemaVersion history:
+//   2 — structural elements (COLUMN/BEAM/SLAB) carry a typed `structural`
+//       sub-object (section/height/length/concrete + steel) + a `bbs` sub-object
+//       (per-element bar-bending rows from computeRebarGroups).
+//   3 — each floor carries the authoritative WALL NODE GRAPH: `nodes[]`
+//       ({ifcGlobalId,xMm,yMm,zMm,kind,onWallIfcId}) + `walls[]`
+//       ({ifcGlobalId,n1IfcId,n2IfcId}); openings gain `positionMm`. Lets the
+//       ERP store/render real wall geometry (no reconstruction). zMm is null
+//       today (2-D) — future 3-D elevation needs no schema change.
+// The editor is the single source of truth; the ERP stores these verbatim.
+const PACKAGE_SCHEMA_VERSION = 3
 
 // ── Unit conversion helpers ────────────────────────────────────────────────
 
@@ -184,6 +189,7 @@ function buildRoomWalls(state, room, adjCount, elementLabels) {
       widthFt:    inToFt(o.width  ?? 0),
       heightFt:   inToFt(o.height ?? 0),
       positionFt: inToFt(o.offset ?? 0),  // offset from wall n1 along wall
+      positionMm: inToMm(o.offset ?? 0),  // schemaVersion 3 — 2-D placement along the wall axis
     }))
 
     const wallLabel = elementLabels?.walls?.[wid]
@@ -200,6 +206,51 @@ function buildRoomWalls(state, room, adjCount, elementLabels) {
     })
   }
   return out
+}
+
+/**
+ * buildFloorGeometry(state, floorId) → { nodes, walls }   (schemaVersion 3)
+ *
+ * The authoritative WALL NODE GRAPH for a floor. Walls reference nodes by
+ * ifcGlobalId (shared-node model — a corner/T-junction is one node referenced by
+ * every incident wall). Only emits walls whose BOTH endpoints resolve to a node
+ * with an ifcGlobalId (plot/virtual walls excluded). `zMm` is null (2-D); it
+ * becomes a real value when the editor gains floor elevation — no schema change.
+ * Pure; no Date.now()/Math.random().
+ */
+function buildFloorGeometry(state, floorId) {
+  const walls = []
+  const nodeIds = new Set()
+  for (const wall of Object.values(state.walls ?? {})) {
+    if ((wall.floorId ?? DEFAULT_FLOOR_ID) !== floorId) continue
+    if (wall.isPlot || wall.isVirtual) continue
+    const n1 = state.nodes?.[wall.n1]
+    const n2 = state.nodes?.[wall.n2]
+    if (!n1?.ifcGlobalId || !n2?.ifcGlobalId || !wall.ifcGlobalId) continue
+    walls.push({
+      ifcGlobalId: wall.ifcGlobalId,
+      n1IfcId:     n1.ifcGlobalId,
+      n2IfcId:     n2.ifcGlobalId,
+    })
+    nodeIds.add(wall.n1)
+    nodeIds.add(wall.n2)
+  }
+
+  const nodes = []
+  for (const nid of nodeIds) {
+    const n = state.nodes?.[nid]
+    if (!n?.ifcGlobalId) continue
+    nodes.push({
+      ifcGlobalId: n.ifcGlobalId,
+      xMm:         inToMm(n.x ?? 0),
+      yMm:         inToMm(n.y ?? 0),
+      zMm:         null,                      // 2-D today; future 3-D elevation
+      kind:        n.kind ?? 'CORNER',        // 'CORNER' | 'TJUNCTION'
+      onWallIfcId: n.onWallId ? (state.walls?.[n.onWallId]?.ifcGlobalId ?? null) : null,
+    })
+  }
+
+  return { nodes, walls }
 }
 
 function buildRooms(state, floorRooms, adjCount, elementLabels) {
@@ -656,6 +707,8 @@ export function buildPackage(state) {
       .slice()
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
 
+    const geometry = buildFloorGeometry(state, floorId)
+
     return {
       ifcGlobalId:    floor.ifcGlobalId ?? null,   // floors may not have an ifcGlobalId — null if absent
       labelNo:        floor.labelNo     ?? null,
@@ -664,6 +717,9 @@ export function buildPackage(state) {
       heightFt:       floor.floorHeightFt   ?? 10,
       plinthHeightFt: floor.plinthHeightFt  ?? 1.5,
       rooms:    buildRooms(state, floorRooms, adjCount, elementLabels),
+      // schemaVersion 3 — the authoritative wall node graph for this floor.
+      nodes:    geometry.nodes,
+      walls:    geometry.walls,
       columns:  buildColumns(state, floorId, elementLabels),
       beams:    buildBeams(state, floorId, elementLabels),
       slabs:    buildSlabs(state, floorId, elementLabels),
@@ -675,7 +731,7 @@ export function buildPackage(state) {
   // computeBoqPresentationModel requires BOQ lines as first arg.
   // We call getBoqLines with the full-project state and pass through.
   const rates = state.ratesByKey ?? {}
-  let boqSummary = null
+  let boqSummary
   try {
     const lines = getBoqLines(state, rates, {})
     boqSummary = computeBoqPresentationModel(lines, rates, state)

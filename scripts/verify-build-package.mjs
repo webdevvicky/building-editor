@@ -109,7 +109,7 @@ reset()
 s().addRectangleRoom(0, 0, 10 * FT, 8 * FT, { type: 'BEDROOM', name: 'Master' })
 const pkgB = buildPackage(s())
 
-ok('schemaVersion === 2', pkgB.schemaVersion === 2)
+ok('schemaVersion === 3', pkgB.schemaVersion === 3)
 ok('exportedAt === null', pkgB.exportedAt === null)
 ok('floors is array', Array.isArray(pkgB.floors))
 ok('elementLabels is object', typeof pkgB.elementLabels === 'object' && pkgB.elementLabels !== null)
@@ -119,9 +119,28 @@ ok('floor.rooms is array', Array.isArray(floorB?.rooms))
 ok('floor.columns is array', Array.isArray(floorB?.columns))
 ok('floor.beams is array', Array.isArray(floorB?.beams))
 ok('floor.slabs is array', Array.isArray(floorB?.slabs))
+ok('floor.nodes is array', Array.isArray(floorB?.nodes))
+ok('floor.walls is array', Array.isArray(floorB?.walls))
 ok('floor.heightFt is number', typeof floorB?.heightFt === 'number')
 ok('floor.plinthHeightFt is number', typeof floorB?.plinthHeightFt === 'number')
 ok('floor.sequence is number', typeof floorB?.sequence === 'number')
+
+// ── schemaVersion 3 — wall node graph + opening positions ─────────────────
+// A 10×8 rectangle room → 4 corner nodes + 4 walls referencing them by ifc id.
+ok('node graph has ≥ 4 nodes (rect room corners)', (floorB?.nodes?.length ?? 0) >= 4,
+   `got ${floorB?.nodes?.length}`)
+ok('node graph has ≥ 4 walls', (floorB?.walls?.length ?? 0) >= 4,
+   `got ${floorB?.walls?.length}`)
+const nodeB = floorB?.nodes?.[0]
+ok('node has 22-char ifcGlobalId', /^[0-9A-Za-z_$]{22}$/.test(nodeB?.ifcGlobalId ?? ''), `got "${nodeB?.ifcGlobalId}"`)
+ok('node.xMm / yMm are numbers', typeof nodeB?.xMm === 'number' && typeof nodeB?.yMm === 'number')
+ok('node.zMm is null (2-D today)', nodeB?.zMm === null, `got ${nodeB?.zMm}`)
+ok('node.kind is CORNER|TJUNCTION', nodeB?.kind === 'CORNER' || nodeB?.kind === 'TJUNCTION', `got "${nodeB?.kind}"`)
+const wallGeoB = floorB?.walls?.[0]
+ok('wall.n1IfcId / n2IfcId present + distinct', !!wallGeoB?.n1IfcId && !!wallGeoB?.n2IfcId && wallGeoB.n1IfcId !== wallGeoB.n2IfcId)
+const wallNodeIds = new Set(floorB?.nodes?.map((n) => n.ifcGlobalId))
+ok('wall endpoints reference real exported nodes',
+   wallNodeIds.has(wallGeoB?.n1IfcId) && wallNodeIds.has(wallGeoB?.n2IfcId))
 
 const roomB = floorB?.rooms?.[0]
 ok('room.ifcGlobalId present', typeof roomB?.ifcGlobalId === 'string')
@@ -244,6 +263,7 @@ if (wallForDoor && wallWithOpening) {
   ok('opening.widthFt = 3 (36in/12)', Math.abs(op.widthFt - 3) < 0.001, `got ${op.widthFt}`)
   ok('opening.heightFt = 7 (84in/12)', Math.abs(op.heightFt - 7) < 0.001, `got ${op.heightFt}`)
   ok('opening.positionFt = 1 (12in/12)', Math.abs(op.positionFt - 1) < 0.001, `got ${op.positionFt}`)
+  ok('opening.positionMm = 305 (12in × 25.4, schemaVersion 3)', op.positionMm === 305, `got ${op.positionMm}`)
 } else {
   ok('opening section skipped (addOpening not available or no wall found)', true,
      '— wall or addOpening() unavailable in this state; test is advisory')
