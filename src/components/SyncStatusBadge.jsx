@@ -14,7 +14,8 @@
 
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { subscribeSyncStatus, syncToCloud } from '../projects/cloudSync'
+import { subscribeSyncStatus, syncToCloud, pullFromCloud } from '../projects/cloudSync'
+import { dialog } from './ui/Dialog'
 import './SyncStatusBadge.css'
 
 const STATUS_WORD = {
@@ -52,6 +53,28 @@ export default function SyncStatusBadge({ conn, bound = true }) {
 
   async function handleSyncNow() {
     if (pushing || status === 'syncing' || !conn || !bound) return
+
+    // Empty-model guard: pushing an empty canvas over a real remote snapshot is
+    // destructive. If the local model has no rooms/walls AND the ERP still holds
+    // a snapshot, require an explicit confirmation before overwriting it. (A pull
+    // failure leaves the remote state unknown → treat as "has data" and confirm,
+    // erring on the side of data safety.)
+    const local = useStore.getState()
+    const isEmpty =
+      Object.keys(local.rooms ?? {}).length === 0 &&
+      Object.keys(local.walls ?? {}).length === 0
+    if (isEmpty) {
+      const pulled = await pullFromCloud(conn)
+      const remoteHasSnapshot = pulled.ok ? !!pulled.hasSnapshot : true
+      if (remoteHasSnapshot) {
+        const proceed = await dialog.confirm(
+          'Your canvas is empty. Syncing will overwrite the saved building model on the ERP. Are you sure?',
+          { title: 'Overwrite saved model?', confirmLabel: 'Overwrite', cancelLabel: 'Cancel', variant: 'danger' },
+        )
+        if (!proceed) return
+      }
+    }
+
     setPushing(true)
     try {
       await syncToCloud(useStore.getState(), conn)
