@@ -168,6 +168,33 @@ export async function pullFromCloud(conn) {
 }
 
 /**
+ * Last-resort recovery: ask the ERP to reconstruct a snapshot from its DB when
+ * the R2 snapshot is lost. Read-only on the server (never writes R2). Same
+ * outcome shape as pullFromCloud.
+ *
+ * @param {{erpUrl:string,editorProjectId:string,apiKey:string}} conn
+ */
+export async function recoverFromCloud(conn) {
+  try {
+    const accessToken = await getValidAccessToken(conn)
+    const url = `${conn.erpUrl.replace(/\/$/, '')}/api/v1/editor-projects/${conn.editorProjectId}/recover-snapshot`
+    const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${accessToken}` } })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      return { ok: false, status: res.status, error: `Recover failed (${res.status}): ${body.slice(0, 200)}` }
+    }
+    const envelope = await res.json()
+    const data = unwrapErpResponse(envelope)
+    if (!data || data.hasSnapshot === false) {
+      return { ok: true, hasSnapshot: false, snapshot: null }
+    }
+    return { ok: true, hasSnapshot: true, snapshot: data?.snapshot ?? null }
+  } catch (err) {
+    return { ok: false, status: 0, error: err?.message ?? String(err) }
+  }
+}
+
+/**
  * Mark the local project as unsynced (call when the user makes edits after
  * the last successful push, so the badge reflects the true state).
  */

@@ -16,7 +16,7 @@
 // browser.
 
 import { setCloudConn, getCloudConn } from './cloudConn.js'
-import { pullFromCloud, markSynced, markUnsynced, markError } from './cloudSync.js'
+import { pullFromCloud, recoverFromCloud, markSynced, markUnsynced, markError } from './cloudSync.js'
 import { unwrapErpResponse } from './erpEnvelope.js'
 
 /**
@@ -119,6 +119,7 @@ async function _runConnectHandoff(deps) {
     openProject,
     setCurrentProjectId,
     loadProject,
+    getState,
     toast,
     onConnected,
   } = deps
@@ -186,21 +187,33 @@ async function _runConnectHandoff(deps) {
       loadProject(pulled.snapshot)
       markSynced()
       outcome = 'adopted'
-    } else if (pulled.ok && pulled.hasSnapshot === false) {
-      // Bug 2: legitimate brand-new editor project (no snapshot yet). Start blank;
-      // do NOT push — the first real edit syncs. This is NOT a failure.
-      markUnsynced()
-      outcome = 'new'
-    } else if (pulled.ok) {
-      // Connected, but the snapshot is present-yet-unusable (no projectSettings).
-      // Start blank without pushing — never overwrite the remote.
-      markUnsynced()
-      outcome = 'blank'
     } else {
-      // Pull FAILED (network / auth / server). Preserve the remote snapshot — do
-      // NOT push, do NOT overwrite. Surface the error so the user can retry.
-      markError(pulled.error || 'Could not load your model from the ERP.')
-      outcome = 'error'
+      // No usable R2 snapshot (brand-new project, present-yet-unusable, or a pull
+      // failure). Bug 3: try DB recovery before giving up — and NEVER push the
+      // local model over the connection.
+      const recovered = await recoverFromCloud(conn)
+      if (recovered.ok && recovered.hasSnapshot && recovered.snapshot?.projectSettings != null) {
+        // Reconstructed from the ERP DB. Merge the compact recovered settings over
+        // the local defaults so nothing in projectSettings is missing, then load.
+        const defaults = getState ? getState().projectSettings : null
+        const ps = recovered.snapshot.projectSettings || {}
+        loadProject({
+          ...recovered.snapshot,
+          projectSettings: defaults ? { ...defaults, ...ps } : ps,
+        })
+        markUnsynced() // recovered ≠ synced — prompt the user to re-sync to restore R2
+        outcome = 'recovered'
+      } else if (pulled.ok) {
+        // Legitimately no snapshot AND nothing to recover → brand-new project, blank.
+        // Do NOT push; the first real edit syncs.
+        markUnsynced()
+        outcome = 'new'
+      } else {
+        // Pull failed AND recovery failed. Preserve the remote — do NOT push, do
+        // NOT overwrite. Surface the error so the user can retry.
+        markError(pulled.error || 'Could not load your model from the ERP.')
+        outcome = 'error'
+      }
     }
   } catch (err) {
     markError(err?.message || 'Could not load your model from the ERP.')
@@ -211,6 +224,8 @@ async function _runConnectHandoff(deps) {
   onConnected?.(await getCloudConn().catch(() => conn))
   if (outcome === 'error') {
     toast.error('Connected, but could not load your saved model. Your ERP data is safe — please retry from the ERP.')
+  } else if (outcome === 'recovered') {
+    toast.success(`Recovered ${projectLabel} from the ERP database — re-sync to restore the cloud backup.`)
   } else {
     toast.success(`Connected to ${projectLabel}`)
   }
