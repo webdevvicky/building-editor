@@ -127,8 +127,13 @@ export async function syncToCloud(state, conn) {
 /**
  * Fetch the latest snapshot from the ERP.
  *
+ * Distinguishes three outcomes so the caller never confuses "no snapshot yet"
+ * with a real failure:
+ *   - { ok:true, hasSnapshot:true,  snapshot }  → adopt it
+ *   - { ok:true, hasSnapshot:false, snapshot:null } → legitimate new project
+ *   - { ok:false, status, error }               → network/auth/server failure
+ *
  * @param {{erpUrl:string,editorProjectId:string,apiKey:string}} conn
- * @returns {Promise<{ok:true,snapshot:object}|{ok:false,error:string}>}
  */
 export async function pullFromCloud(conn) {
   try {
@@ -144,16 +149,21 @@ export async function pullFromCloud(conn) {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      return { ok: false, error: `Pull failed (${res.status}): ${body.slice(0, 200)}` }
+      return { ok: false, status: res.status, error: `Pull failed (${res.status}): ${body.slice(0, 200)}` }
     }
 
     const envelope = await res.json()
     const data = unwrapErpResponse(envelope)
-    // The stored payload is { snapshot, package }; older payloads were the bare snapshot.
+    // No snapshot synced yet → ERP returns { hasSnapshot:false } (200, not 404).
+    if (data && data.hasSnapshot === false) {
+      return { ok: true, hasSnapshot: false, snapshot: null }
+    }
+    // Present payload is { hasSnapshot?, snapshot, package }; older payloads were
+    // the bare snapshot object.
     const snapshot = data?.snapshot ?? data
-    return { ok: true, snapshot }
+    return { ok: true, hasSnapshot: true, snapshot }
   } catch (err) {
-    return { ok: false, error: err?.message ?? String(err) }
+    return { ok: false, status: 0, error: err?.message ?? String(err) }
   }
 }
 

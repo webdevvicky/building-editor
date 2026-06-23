@@ -180,14 +180,20 @@ async function _runConnectHandoff(deps) {
   let outcome
   try {
     const pulled = await pullFromCloud(conn)
-    const hasRemote = pulled.ok && pulled.snapshot && pulled.snapshot.projectSettings != null
+    const hasRemote = pulled.ok && pulled.hasSnapshot && pulled.snapshot?.projectSettings != null
     if (hasRemote) {
+      // ERP snapshot present → adopt (source of truth on connect).
       loadProject(pulled.snapshot)
       markSynced()
       outcome = 'adopted'
+    } else if (pulled.ok && pulled.hasSnapshot === false) {
+      // Bug 2: legitimate brand-new editor project (no snapshot yet). Start blank;
+      // do NOT push — the first real edit syncs. This is NOT a failure.
+      markUnsynced()
+      outcome = 'new'
     } else if (pulled.ok) {
-      // Connected, but the ERP has no usable snapshot → start blank. Do NOT push;
-      // the first real edit syncs. Never seed an empty model over the connection.
+      // Connected, but the snapshot is present-yet-unusable (no projectSettings).
+      // Start blank without pushing — never overwrite the remote.
       markUnsynced()
       outcome = 'blank'
     } else {
