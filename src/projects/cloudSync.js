@@ -111,7 +111,18 @@ export async function syncToCloud(state, conn) {
     }
 
     const envelope = await res.json()
-    const { snapshotVersion, lastSyncedAt } = unwrapErpResponse(envelope)
+    const data = unwrapErpResponse(envelope)
+
+    // The ERP's destructive-change guard can HOLD a push (empty/large deletion):
+    // the version is stored but NOT promoted and the live model is unchanged.
+    // Surface it clearly — the user's saved model is safe, not synced.
+    if (data?.quarantined) {
+      const error = `Sync held for review — this change looked destructive (${data.reason ?? 'empty or large deletion'}). Your saved ERP model was NOT changed.`
+      _setState({ status: 'error', lastError: error })
+      return { ok: false, quarantined: true, reason: data.reason ?? null, error }
+    }
+
+    const { snapshotVersion, lastSyncedAt } = data ?? {}
     _setState({ status: 'synced', lastError: null, lastSyncedAt: lastSyncedAt ?? null })
     return { ok: true, snapshotVersion, lastSyncedAt }
   } catch (err) {
