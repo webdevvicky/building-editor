@@ -16,7 +16,7 @@
 // browser.
 
 import { setCloudConn, getCloudConn } from './cloudConn.js'
-import { pullFromCloud, syncToCloud, markSynced } from './cloudSync.js'
+import { pullFromCloud, markSynced, markUnsynced, markError } from './cloudSync.js'
 import { unwrapErpResponse } from './erpEnvelope.js'
 
 /**
@@ -119,7 +119,6 @@ async function _runConnectHandoff(deps) {
     openProject,
     setCurrentProjectId,
     loadProject,
-    getState,
     toast,
     onConnected,
   } = deps
@@ -173,33 +172,41 @@ async function _runConnectHandoff(deps) {
     return true
   }
 
-  // 6 — reconcile once. If the ERP already has a snapshot, ADOPT it (ERP is the
-  //     source of truth on connect) → mark synced. If it has none (fresh editor
-  //     project), SEED the ERP by pushing the current local model. Either way
-  //     the badge ends at 'synced' rather than stuck at idle. Non-fatal on
-  //     failure: the connection is set and autosave will push on the next edit.
+  // 6 — reconcile once. DATA SAFETY (Bug 1): the editor must NEVER auto-push the
+  //     local model on connect. A failed pull previously seeded the ERP with the
+  //     empty canvas, permanently destroying the real snapshot. Now: adopt the
+  //     remote when present; otherwise start blank WITHOUT pushing; and on a pull
+  //     failure surface an error + preserve the remote (the user can retry).
+  let outcome
   try {
-    console.log('[connectHandoff] pulling from cloud:', conn.editorProjectId)
     const pulled = await pullFromCloud(conn)
-    console.log('[connectHandoff] pulled:', { ok: pulled.ok, hasSnapshot: !!pulled.snapshot, hasProjectSettings: !!pulled.snapshot?.projectSettings })
     const hasRemote = pulled.ok && pulled.snapshot && pulled.snapshot.projectSettings != null
-    console.log('[connectHandoff] hasRemote:', hasRemote)
     if (hasRemote) {
-      console.log('[connectHandoff] adopting ERP snapshot')
       loadProject(pulled.snapshot)
       markSynced()
-    } else if (getState) {
-      console.log('[connectHandoff] pushing local model to ERP')
-      await syncToCloud(getState(), conn)
+      outcome = 'adopted'
+    } else if (pulled.ok) {
+      // Connected, but the ERP has no usable snapshot → start blank. Do NOT push;
+      // the first real edit syncs. Never seed an empty model over the connection.
+      markUnsynced()
+      outcome = 'blank'
+    } else {
+      // Pull FAILED (network / auth / server). Preserve the remote snapshot — do
+      // NOT push, do NOT overwrite. Surface the error so the user can retry.
+      markError(pulled.error || 'Could not load your model from the ERP.')
+      outcome = 'error'
     }
   } catch (err) {
-    console.error('[connectHandoff] reconcile failed (non-fatal):', err.message)
+    markError(err?.message || 'Could not load your model from the ERP.')
+    outcome = 'error'
   }
 
-  // 7 — surface the connection + refresh the badge.
-  console.log('[connectHandoff] setting connection, onConnected callback about to fire')
+  // 7 — surface the connection + an outcome-appropriate toast.
   onConnected?.(await getCloudConn().catch(() => conn))
-  console.log('[connectHandoff] handoff complete, showing toast')
-  toast.success(`Connected to ${projectLabel}`)
+  if (outcome === 'error') {
+    toast.error('Connected, but could not load your saved model. Your ERP data is safe — please retry from the ERP.')
+  } else {
+    toast.success(`Connected to ${projectLabel}`)
+  }
   return true
 }

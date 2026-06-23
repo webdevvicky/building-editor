@@ -184,3 +184,13 @@ export function markSynced(lastSyncedAt = null) {
 export function markIdle() {
   _setState({ status: 'idle', lastError: null })
 }
+
+/**
+ * Flag a load/pull failure on the badge WITHOUT touching the remote. Used by the
+ * connect handoff when the ERP snapshot could not be pulled — we must surface the
+ * error and let the user retry, never silently push an empty model over it.
+ * @param {string} message
+ */
+export function markError(message) {
+  _setState({ status: 'error', lastError: message ?? 'Sync error' })
+}
