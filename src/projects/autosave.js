@@ -30,17 +30,14 @@ export function installAutosave(store, getProjectId) {
     const ok    = saveCurrent(id, snap)
     if (ok !== false) toast.info('Auto-saved', { duration: 1500 })
 
-    // Fire-and-forget cloud push AFTER local save succeeds. The connection is
-    // global; only push when it is BOUND to the project we just saved
-    // (conn.localProjectId === id) — never push an unrelated local project to
-    // the connected ERP project. Failures are captured inside syncToCloud and
-    // surfaced via the sync-status store (SyncStatusBadge).
-    if (ok !== false) {
-      const conn = getCachedConn()
-      if (conn && conn.localProjectId === id) {
-        cloudSync.syncToCloud(state, conn)
-      }
-    }
+    // DATA SAFETY: autosave writes to LOCAL IDB ONLY. It must NEVER push to the
+    // ERP cloud — an automatic push here was firing on every store change once a
+    // connection was bound (incl. during the connect handoff, before the remote
+    // snapshot was adopted), overwriting the real R2 snapshot with the empty
+    // canvas and wiping the DB on re-import. Cloud sync is now EXPLICIT only:
+    // `schedule()` flags the badge unsynced, and the user pushes via the
+    // "Sync Now" button (SyncStatusBadge → syncToCloud). The connect handoff
+    // pulls/adopts and likewise never pushes.
   }
 
   function schedule() {
