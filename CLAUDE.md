@@ -10,7 +10,7 @@ A Vite + React 19 + Zustand 5 SPA for architectural + MEP design documentation i
 
 - **Entry:** `src/main.jsx` → `src/App.jsx` → Canvas + Panels
 - **State:** Zustand store in `src/store.js` (2700+ lines, 10+ slices)
-- **Quality:** 42 gate-every-commit verify scripts (not Jest/Vitest)
+- **Quality:** 38 gate-every-commit verify scripts (not Jest/Vitest)
 - **Export:** PDF (jsPDF), Excel (SheetJS), CSV
 - **Deploy:** Cloudflare Workers (`wrangler deploy`)
 
@@ -161,9 +161,9 @@ export function useWallSelection() {
 
 ---
 
-## Verification (42 Scripts)
+## Verification (38 Scripts)
 
-No Jest/Vitest. Instead, **42 Node.js scripts** verify by assertion at commit time.
+No Jest/Vitest. Instead, **38 Node.js scripts** verify by assertion at commit time.
 
 **Run all:**
 ```bash
