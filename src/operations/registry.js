@@ -22,6 +22,17 @@ import { OP_KIND } from './types.js'
 
 // Helper used inside apply functions — never call crypto.randomUUID()
 // here. Pure setter on the target slice.
+
+function _elementSlice(kind) {
+  const map = {
+    FOUNDATION: 'foundations', STAIRCASE: 'staircases', RISER: 'risers',
+    PLUMBING: 'plumbingFixtures', ELECTRICAL: 'electricalPoints',
+    HVAC: 'hvacUnits', FIRE: 'fireDevices', ELV: 'elvDevices',
+    SOLAR: 'solarEquipment',
+  }
+  return map[kind] ?? 'elements'
+}
+
 function _replaceCollection(state, slice, id, entity) {
   return { ...state, [slice]: { ...(state[slice] ?? {}), [id]: entity } }
 }
@@ -282,6 +293,262 @@ export const OPERATIONS = Object.freeze({
       // payload: { entityType, entityId, action }
       // No state change at apply time — repair logic runs upstream;
       // this op records the audit trail entry.
+      return { nextState: state, inverse: null }
+    },
+  }),
+
+  // ── Phase E additions ────────────────────────────────────────────────────
+
+  UPDATE_WALL: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId ?? payload.id
+      const wall = state.walls[id]
+      if (!wall) return { nextState: state, inverse: null }
+      const patch = {}
+      if (payload.materialKey !== undefined) patch.materialKey = payload.materialKey
+      if (payload.height !== undefined) patch.height = payload.height
+      if (payload.thickness !== undefined) patch.thickness = payload.thickness
+      if (payload.angleDeg !== undefined) patch.angleDeg = payload.angleDeg
+      if (payload.orientation !== undefined) patch.orientation = payload.orientation
+      const updated = { ...wall, ...patch }
+      const nextState = _replaceCollection(state, 'walls', id, updated)
+      return { nextState, inverse: { type: 'UPDATE_WALL', payload: { ...wall, ifcGlobalId: id } } }
+    },
+  }),
+
+  ADD_ROOM: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      if (!id) return { nextState: state, inverse: null }
+      const room = { id, ...payload }
+      const nextState = _replaceCollection(state, 'rooms', id, room)
+      return { nextState, inverse: { type: 'DELETE_ROOM', payload: { ifcGlobalId: id } } }
+    },
+  }),
+
+  UPDATE_ROOM: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const room = state.rooms?.[id]
+      if (!room) return { nextState: state, inverse: null }
+      const updated = { ...room, ...payload }
+      const nextState = _replaceCollection(state, 'rooms', id, updated)
+      return { nextState, inverse: { type: 'UPDATE_ROOM', payload: { ...room, ifcGlobalId: id } } }
+    },
+  }),
+
+  DELETE_ROOM: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const room = state.rooms?.[id]
+      if (!room) return { nextState: state, inverse: null }
+      const nextState = _removeFromCollection(state, 'rooms', id)
+      return { nextState, inverse: { type: 'ADD_ROOM', payload: { ...room, ifcGlobalId: id } } }
+    },
+  }),
+
+  SAVE_ROOM_VERTICES: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      return { nextState: state, inverse: null }
+    },
+  }),
+
+  UPDATE_OPENING: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      // openings may be nested in walls; state-neutral for registry
+      return { nextState: state, inverse: null }
+    },
+  }),
+
+  ADD_NODE: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      if (!id) return { nextState: state, inverse: null }
+      const node = { id, ...payload }
+      const nextState = _replaceCollection(state, 'nodes', id, node)
+      return { nextState, inverse: { type: 'DELETE_NODE', payload: { ifcGlobalId: id } } }
+    },
+  }),
+
+  UPDATE_NODE: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const node = state.nodes?.[id]
+      if (!node) return { nextState: state, inverse: null }
+      const updated = { ...node, ...payload }
+      const nextState = _replaceCollection(state, 'nodes', id, updated)
+      return { nextState, inverse: { type: 'UPDATE_NODE', payload: { ...node, ifcGlobalId: id } } }
+    },
+  }),
+
+  DELETE_NODE: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const node = state.nodes?.[id]
+      if (!node) return { nextState: state, inverse: null }
+      const nextState = _removeFromCollection(state, 'nodes', id)
+      return { nextState, inverse: { type: 'ADD_NODE', payload: { ...node, ifcGlobalId: id } } }
+    },
+  }),
+
+  UPDATE_COLUMN: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const col = state.columns?.[id]
+      if (!col) return { nextState: state, inverse: null }
+      const updated = { ...col, ...payload }
+      const nextState = _replaceCollection(state, 'columns', id, updated)
+      return { nextState, inverse: { type: 'UPDATE_COLUMN', payload: { ...col, ifcGlobalId: id } } }
+    },
+  }),
+
+  ADD_BEAM: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      if (!id) return { nextState: state, inverse: null }
+      const beam = { id, ...payload }
+      const nextState = _replaceCollection(state, 'beams', id, beam)
+      return { nextState, inverse: { type: 'DELETE_BEAM', payload: { ifcGlobalId: id } } }
+    },
+  }),
+
+  UPDATE_BEAM: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const beam = state.beams?.[id]
+      if (!beam) return { nextState: state, inverse: null }
+      const updated = { ...beam, ...payload }
+      const nextState = _replaceCollection(state, 'beams', id, updated)
+      return { nextState, inverse: { type: 'UPDATE_BEAM', payload: { ...beam, ifcGlobalId: id } } }
+    },
+  }),
+
+  DELETE_BEAM: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const beam = state.beams?.[id]
+      if (!beam) return { nextState: state, inverse: null }
+      const nextState = _removeFromCollection(state, 'beams', id)
+      return { nextState, inverse: { type: 'ADD_BEAM', payload: { ...beam, ifcGlobalId: id } } }
+    },
+  }),
+
+  ADD_SLAB: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      if (!id) return { nextState: state, inverse: null }
+      const slab = { id, ...payload }
+      const nextState = _replaceCollection(state, 'slabs', id, slab)
+      return { nextState, inverse: { type: 'DELETE_SLAB', payload: { ifcGlobalId: id } } }
+    },
+  }),
+
+  UPDATE_SLAB: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const slab = state.slabs?.[id]
+      if (!slab) return { nextState: state, inverse: null }
+      const updated = { ...slab, ...payload }
+      const nextState = _replaceCollection(state, 'slabs', id, updated)
+      return { nextState, inverse: { type: 'UPDATE_SLAB', payload: { ...slab, ifcGlobalId: id } } }
+    },
+  }),
+
+  DELETE_SLAB: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const slab = state.slabs?.[id]
+      if (!slab) return { nextState: state, inverse: null }
+      const nextState = _removeFromCollection(state, 'slabs', id)
+      return { nextState, inverse: { type: 'ADD_SLAB', payload: { ...slab, ifcGlobalId: id } } }
+    },
+  }),
+
+  ADD_ELEMENT: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      if (!id) return { nextState: state, inverse: null }
+      const slice = _elementSlice(payload.kind)
+      const elem = { id, ...payload }
+      const nextState = _replaceCollection(state, slice, id, elem)
+      return { nextState, inverse: { type: 'DELETE_ELEMENT', payload: { ifcGlobalId: id, kind: payload.kind } } }
+    },
+  }),
+
+  UPDATE_ELEMENT: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const slice = _elementSlice(payload.kind)
+      const elem = state[slice]?.[id]
+      if (!elem) return { nextState: state, inverse: null }
+      const updated = { ...elem, ...payload }
+      const nextState = _replaceCollection(state, slice, id, updated)
+      return { nextState, inverse: { type: 'UPDATE_ELEMENT', payload: { ...elem, ifcGlobalId: id } } }
+    },
+  }),
+
+  DELETE_ELEMENT: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      const id = payload.ifcGlobalId
+      const slice = _elementSlice(payload.kind)
+      const elem = state[slice]?.[id]
+      if (!elem) return { nextState: state, inverse: null }
+      const nextState = _removeFromCollection(state, slice, id)
+      return { nextState, inverse: { type: 'ADD_ELEMENT', payload: { ...elem, ifcGlobalId: id } } }
+    },
+  }),
+
+  SPLIT_WALL: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
+      return { nextState: state, inverse: null }
+    },
+  }),
+
+  JOIN_WALLS: Object.freeze({
+    version: 1,
+    kind:    OP_KIND.USER,
+    apply(state, payload) {
       return { nextState: state, inverse: null }
     },
   }),

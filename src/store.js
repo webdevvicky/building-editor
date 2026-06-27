@@ -59,6 +59,7 @@ import {
 } from './constants/joinery.js'
 import { uid, uidIfc, newEntityIds } from './lib/ids.js'
 import { assignLabelsToState } from './boq/elementLabels.js'
+import { getLiveMode, getLiveConn, fireLiveOp } from './projects/liveSync.js'
 
 // Default opening subtype — pure heuristic by size + type. Used at creation
 // time (addOpening) and as loadProject fallback when subtype is absent.
@@ -513,6 +514,11 @@ export const useStore = create((set, get) => ({
       walls: { ...s.walls, [id]: { id, ifcGlobalId, n1, n2, height: DEFAULT_WALL_HEIGHT_IN, thickness: DEFAULT_WALL_THICK_IN, materialKey: 'IS_MODULAR_BRICK', isPlot: false, isVirtual, openings: [], hasPlinthBeam: null, hasLintelBeam: null, hasRoofBeam: null, floorId, classification: null, meta: null, junctions: [], splitOrigin: 'NONE', labelNo: null } },
       drawStartId: null,
     }))
+    // TODO(liveSync): walls created without roomErpId context — sent via ADD_ROOM batch instead
+    if (getLiveMode()) {
+      const _lsConn = getLiveConn()
+      // console.debug('[liveSync] addWall deferred — no roomErpId context at wall creation time')
+    }
     get().assignElementLabels()
   },
 
@@ -871,6 +877,10 @@ export const useStore = create((set, get) => ({
         return out
       })
     }
+    if (getLiveMode()) {
+      const _lsConn = getLiveConn()
+      if (_lsConn) fireLiveOp('DELETE_WALL', { ifcGlobalId: wall?.ifcGlobalId ?? wallId }, _lsConn).catch(err => console.error('[liveSync]', err))
+    }
     return { ok: true, purgedRoomIds, purgedRoomNames }
   },
 
@@ -1146,6 +1156,10 @@ export const useStore = create((set, get) => ({
     }
 
     get().assignElementLabels()
+    if (getLiveMode()) {
+      const _lsConn = getLiveConn()
+      if (_lsConn) fireLiveOp('SPLIT_WALL', { ifcGlobalId: wall?.ifcGlobalId ?? wallId, wallErpId: null, atFractions: [0.5], newWalls: [] }, _lsConn).catch(err => console.error('[liveSync]', err))
+    }
     return { newNodeId, w1Id, w2Id, splitOffsetIn: plan.splitOffsetIn }
   },
 
@@ -1395,6 +1409,10 @@ export const useStore = create((set, get) => ({
       return { rooms: refreshedRooms }
     })
 
+    if (getLiveMode()) {
+      const _lsConn = getLiveConn()
+      if (_lsConn) fireLiveOp('JOIN_WALLS', { wallIfcIds: [wA?.ifcGlobalId ?? w1Id, wB?.ifcGlobalId ?? w2Id], mergedIfcGlobalId: null, height: 120, thickness: 9 }, _lsConn).catch(err => console.error('[liveSync]', err))
+    }
     return { survivorId, removedId, wasSplit, sharedNodeId }
   },
 
@@ -1444,6 +1462,10 @@ export const useStore = create((set, get) => ({
       const opening = { ...seed, subtype, subtypeSource: SUBTYPE_SOURCE.HEURISTIC, hasGrill: null }
       return { walls: { ...s.walls, [wallId]: { ...wall, openings: [...(wall.openings || []), opening] } } }
     })
+    if (getLiveMode()) {
+      const _lsConn = getLiveConn()
+      if (_lsConn) fireLiveOp('ADD_OPENING', { wallErpId: null, wallIfcId: wallId, ifcGlobalId: get().walls?.[wallId]?.openings?.at(-1)?.ifcGlobalId, type, width, height, offset }, _lsConn).catch(err => console.error('[liveSync]', err))
+    }
   },
 
   // Rev 2 — explicit per-opening subtype assignment (panel-driven).
