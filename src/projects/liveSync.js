@@ -1,6 +1,8 @@
 // liveSync.js — REST middleware for live ERP sync (Phase E)
 // Lives behind a liveMode flag; blob sync (cloudSync.js) continues unchanged.
 
+import { reconstructSnapshot } from './erpReconstruct.js'
+
 const IN_TO_MM = 25.4
 function inToMm(v) { return Math.round(v * IN_TO_MM) }
 
@@ -15,8 +17,10 @@ export function getLiveMode() { return _liveMode }
 export function getLiveConn() { return _conn }
 
 export function initLiveSync(conn) {
+  console.log('[LIVE] initLiveSync called with:', conn)
   _conn = conn
   _liveMode = true
+  console.log('[LIVE] _liveMode set to true')
 }
 
 export function teardownLiveSync() {
@@ -78,6 +82,13 @@ function _extractErpId(res) {
   return res?.data?.id ?? res?.id ?? null
 }
 
+// Map editor room ifcGlobalIds → ERP room UUIDs (slab/element roomIds are
+// @IsUUID on the backend, so unresolved editor ids must be dropped).
+function _resolveRoomIds(roomIfcIds, conn) {
+  if (!Array.isArray(roomIfcIds)) return []
+  return roomIfcIds.map((ifc) => _resolveId(ifc, conn)).filter(Boolean)
+}
+
 // ─── Main dispatch ────────────────────────────────────────────────────────────
 
 export async function fireLiveOp(opType, payload, conn) {
@@ -93,7 +104,7 @@ export async function fireLiveOp(opType, payload, conn) {
       res = await _request('POST', `/geometry/rooms/${roomErpId}/walls`, {
         sourceEditorId: payload.ifcGlobalId,
         wallMaterial: payload.materialKey ?? null,
-        orientation: payload.orientation ?? 'UNSPECIFIED',
+        orientation: payload.orientation ?? 'INTERNAL',
         lengthMm: payload.lengthMm ?? 0,
         heightMm: inToMm(payload.height ?? 120),
         thicknessMm: inToMm(payload.thickness ?? 9),
@@ -137,7 +148,7 @@ export async function fireLiveOp(opType, payload, conn) {
           lengthMm: w.lengthMm ?? 0,
           heightMm: inToMm(w.height ?? 120),
           thicknessMm: inToMm(w.thickness ?? 9),
-          orientation: w.orientation ?? 'UNSPECIFIED',
+          orientation: w.orientation ?? 'INTERNAL',
           ...(w.materialKey ? { wallMaterial: w.materialKey } : {}),
           ...(w.angleDeg !== undefined ? { angleDeg: w.angleDeg } : {}),
           ...(w.n1IfcId ? { n1NodeId: _resolveId(w.n1IfcId, c) } : {}),
@@ -156,7 +167,7 @@ export async function fireLiveOp(opType, payload, conn) {
           lengthMm: payload.lengthMm ?? 0,
           heightMm: inToMm(payload.height ?? 120),
           thicknessMm: inToMm(payload.thickness ?? 9),
-          orientation: payload.orientation ?? 'UNSPECIFIED',
+          orientation: payload.orientation ?? 'INTERNAL',
           ...(payload.materialKey ? { wallMaterial: payload.materialKey } : {}),
           ...(payload.angleDeg !== undefined ? { angleDeg: payload.angleDeg } : {}),
         },
@@ -374,8 +385,9 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.areaSqft !== undefined ? { areaSqft: payload.areaSqft } : {}),
         ...(payload.slabRole !== undefined ? { slabRole: payload.slabRole } : {}),
         ...(payload.slabType !== undefined ? { slabType: payload.slabType } : {}),
-        ...(payload.roomIds !== undefined ? { roomIds: payload.roomIds } : {}),
       }
+      const slabRoomIds = _resolveRoomIds(payload.roomIds, c)
+      if (slabRoomIds.length) body.roomIds = slabRoomIds
       res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
       const erpId = _extractErpId(res)
       if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
@@ -409,13 +421,22 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.heightMm !== undefined ? { heightMm: payload.heightMm } : {}),
         ...(payload.thicknessMm !== undefined ? { thicknessMm: payload.thicknessMm } : {}),
         ...(payload.spanMm !== undefined ? { spanMm: payload.spanMm } : {}),
+        ...(payload.fromXMm !== undefined ? { fromXMm: payload.fromXMm } : {}),
+        ...(payload.fromYMm !== undefined ? { fromYMm: payload.fromYMm } : {}),
+        ...(payload.toXMm !== undefined ? { toXMm: payload.toXMm } : {}),
+        ...(payload.toYMm !== undefined ? { toYMm: payload.toYMm } : {}),
+        ...(payload.sectionWidthMm !== undefined ? { sectionWidthMm: payload.sectionWidthMm } : {}),
+        ...(payload.sectionDepthMm !== undefined ? { sectionDepthMm: payload.sectionDepthMm } : {}),
+        ...(payload.diameterMm !== undefined ? { diameterMm: payload.diameterMm } : {}),
+        ...(payload.structuralLevel !== undefined ? { structuralLevel: payload.structuralLevel } : {}),
         ...(payload.areaSqft !== undefined ? { areaSqft: payload.areaSqft } : {}),
         ...(payload.concreteM3 !== undefined ? { concreteM3: payload.concreteM3 } : {}),
-        ...(payload.roomIds !== undefined ? { roomIds: payload.roomIds } : {}),
         ...(payload.slabRole !== undefined ? { slabRole: payload.slabRole } : {}),
         ...(payload.slabType !== undefined ? { slabType: payload.slabType } : {}),
         ...(payload.bars !== undefined ? { bars: payload.bars } : {}),
       }
+      const elemRoomIds = _resolveRoomIds(payload.roomIds, c)
+      if (elemRoomIds.length) body.roomIds = elemRoomIds
       res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
       const erpId = _extractErpId(res)
       if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
@@ -437,6 +458,18 @@ export async function fireLiveOp(opType, payload, conn) {
       break
     }
 
+    // ── Shared wall: second WallSurface for an adjacent room ────────────────────
+    case 'ADD_WALL_SURFACE': {
+      const wallErpId = payload.wallErpId ?? _resolveId(payload.wallIfcId, c)
+      const adjacentRoomId = payload.roomErpId ?? _resolveId(payload.roomIfcId, c)
+      const body = {
+        adjacentRoomId,
+        ...(payload.segmentLengthMm !== undefined ? { segmentLengthMm: payload.segmentLengthMm } : {}),
+      }
+      res = await _request('POST', `/building-structure/walls/${wallErpId}/surfaces/adjacent`, body, c)
+      break
+    }
+
     default:
       throw new Error('[liveSync] fireLiveOp: unknown op type: ' + opType)
   }
@@ -446,24 +479,27 @@ export async function fireLiveOp(opType, payload, conn) {
 
 // ─── Hydration & polling ──────────────────────────────────────────────────────
 
-export async function hydrateFromErp(conn, setState) {
+// Reconstruct the editor canvas from the ERP building state.
+//   1. seed the id-map (sourceEditorId → ERP id) for EVERY entity FIRST, so any
+//      immediate edit resolves to an UPDATE (never a duplicate create),
+//   2. map the state into a loadProject() snapshot (mm→inch, rebuilt topology),
+//   3. loadProject(snapshot) → render. The sync engine seeds its shadow AFTER
+//      this (erpSession), so reconstruction itself emits ZERO ops.
+// `loadProject` is injected (keeps this module store-agnostic).
+export async function hydrateFromErp(conn, loadProject) {
   const c = conn ?? _conn
   const data = await _request('GET', `/geometry/buildings/${c.buildingId}/state`, undefined, c)
-  // Populate idMap from response sourceEditorId → id mappings
-  const entities = data?.data ?? data ?? {}
-  function _walkEntities(obj) {
-    if (!obj || typeof obj !== 'object') return
-    if (Array.isArray(obj)) { obj.forEach(_walkEntities); return }
-    if (obj.sourceEditorId && obj.id) {
-      _idMap.set(obj.sourceEditorId, obj.id)
-    }
-    Object.values(obj).forEach(_walkEntities)
+  const state = data?.data ?? data ?? {}
+
+  const seed = (arr) => {
+    for (const e of arr ?? []) if (e?.sourceEditorId && e?.id) _idMap.set(e.sourceEditorId, e.id)
   }
-  _walkEntities(entities)
-  if (typeof setState === 'function') {
-    setState({ erpStateOverlay: entities })
+  seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements)
+
+  if (typeof loadProject === 'function') {
+    loadProject(reconstructSnapshot(state))
   }
-  return entities
+  return state
 }
 
 export function startStatePolling(conn, setState, intervalMs = 30000) {

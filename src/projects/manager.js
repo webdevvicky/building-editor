@@ -39,6 +39,7 @@ import {
   createPersistence, DB_STORES,
 } from './storage/indexedDb.js'
 import { getAssetStorage } from './storage/getAssetStorage.js'
+import { getErpLaunchContext } from './erpLaunchContext.js'
 
 const LEGACY_STORAGE_KEY = 'boq_projects'
 const LEGACY_CURRENT_KEY = 'boq_current_project_id'
@@ -190,6 +191,14 @@ async function _hydrateCache() {
   for (const rec of _projectsCache) {
     const data = await _persistence.openProject(rec.id)
     _projectDataCache.set(rec.id, data ?? null)
+  }
+  // ERP-driven launch: the editor is bound to the ERP building, not a local IDB
+  // project. Do NOT restore the persisted current-project id — leaving it null
+  // keeps the Projects dialog closed (ProjectsPanel) and autosave a no-op, so a
+  // stale local project never shadows the live ERP session.
+  if (getErpLaunchContext()) {
+    _currentIdCache = null
+    return
   }
   const cur = await storage.get(DB_STORES.METADATA, CURRENT_ID_META_KEY)
   _currentIdCache = cur?.value ?? null

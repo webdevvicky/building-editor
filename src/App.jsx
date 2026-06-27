@@ -32,6 +32,7 @@ import IsoView from './components/IsoView'
 import HelpGuide from './components/HelpGuide'
 import RoomBreakdownPanel from './components/RoomBreakdownPanel'
 import ErpConnection from './components/ErpConnection'
+import SyncStatusBadge from './components/SyncStatusBadge'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -145,6 +146,7 @@ export default function App() {
         <Canvas />
         <DialogHost />
         <ToastHost />
+        <SyncStatusBadge />
       </div>
     </DesktopGate>
   )

@@ -4,6 +4,7 @@ import {
   listProjects, createProject, openProject, renameProject, deleteProject,
   getCurrentProjectId, setCurrentProjectId, subscribe,
 } from '../projects/manager'
+import { isErpLaunchMode } from '../projects/erpLaunchContext'
 import {
   listTemplates as listTemplatesApi, deleteTemplate, renameTemplate,
   createSnapshotFromTemplate,
@@ -111,11 +112,15 @@ export default function ProjectsPanel() {
     return () => { cancelled = true }
   }, [tab, templatesRev])
 
-  // On mount: if no current project id is set, force the modal open.
-  const [forceOpen, setForceOpen] = useState(false)
-  useEffect(() => {
-    if (!getCurrentProjectId()) setForceOpen(true)
-  }, [])
+  // On mount: if no current project id is set, force the modal open. In
+  // ERP-launch mode the editor is bound to the ERP building (no local current
+  // project by design), so the "new project" dialog must NOT force open.
+  // bootPersistence + the ERP launch context are both resolved before this
+  // component mounts (main.jsx awaits them), so the lazy initializer reads
+  // stable values — no setState-in-effect needed.
+  const [forceOpen, setForceOpen] = useState(
+    () => !isErpLaunchMode() && !getCurrentProjectId(),
+  )
 
   const open = forceOpen || activeTool === 'projects'
 
