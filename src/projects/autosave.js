@@ -11,8 +11,6 @@
 import { saveCurrent } from './manager'
 import { buildSnapshot } from './_snapshot.js'
 import { toast } from '../components/ui/Toast'
-import { getCachedConn } from './cloudConn.js'
-import * as cloudSync from './cloudSync.js'
 
 const DEBOUNCE_MS = 30_000
 
@@ -31,25 +29,11 @@ export function installAutosave(store, getProjectId) {
     if (ok !== false) toast.info('Auto-saved', { duration: 1500 })
 
     // DATA SAFETY: autosave writes to LOCAL IDB ONLY. It must NEVER push to the
-    // ERP cloud — an automatic push here was firing on every store change once a
-    // connection was bound (incl. during the connect handoff, before the remote
-    // snapshot was adopted), overwriting the real R2 snapshot with the empty
-    // canvas and wiping the DB on re-import. Cloud sync is now EXPLICIT only:
-    // `schedule()` flags the badge unsynced, and the user pushes via the
-    // "Sync Now" button (SyncStatusBadge → syncToCloud). The connect handoff
-    // pulls/adopts and likewise never pushes.
+    // ERP cloud. Per-mutation live sync is handled by liveSync.js + registry.js.
   }
 
   function schedule() {
     if (disposed) return
-    // Reflect pending edits in the badge immediately (the actual push is
-    // debounced). Only when a connection is bound to the current project —
-    // otherwise the badge stays idle. markUnsynced is a no-op while a push is
-    // in flight, so it won't stomp the 'syncing' state.
-    const conn = getCachedConn()
-    if (conn && conn.localProjectId === getProjectId()) {
-      cloudSync.markUnsynced()
-    }
     if (timer !== null) clearTimeout(timer)
     timer = setTimeout(flush, DEBOUNCE_MS)
   }

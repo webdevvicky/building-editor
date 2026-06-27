@@ -16,7 +16,6 @@
 // browser.
 
 import { setCloudConn, getCloudConn } from './cloudConn.js'
-import { pullFromCloud, recoverFromCloud, markSynced, markUnsynced, markError } from './cloudSync.js'
 import { unwrapErpResponse } from './erpEnvelope.js'
 
 /**
@@ -81,17 +80,14 @@ async function exchangeCode(erp, pid, code) {
  *   3. POST connect-exchange → { erpUrl, editorProjectId, apiKey, projectName }.
  *   4. resolve a local project (reuse current, else create+open one).
  *   5. setCloudConn({ ...conn, localProjectId }) — global, bound to this project.
- *   6. reconcile: adopt ERP snapshot if present (mark synced), else seed ERP by
- *      pushing the current local model.
- *   7. toast.success; refresh the badge's conn state.
+ *   6. State hydration is handled by liveSync.js (per-mutation REST path).
+ *   7. toast.success; refresh the conn state.
  *
  * @param {object} deps
  * @param {() => string|null} deps.getCurrentProjectId
  * @param {(name:string, type?:string) => {id:string}} deps.createProject
  * @param {(id:string) => any} deps.openProject
  * @param {(id:string) => void} deps.setCurrentProjectId
- * @param {(data:any) => void} deps.loadProject
- * @param {() => object} [deps.getState]  zustand getState — for seeding the ERP
  * @param {{success:Function, error:Function}} deps.toast
  * @param {(conn:any) => void} [deps.onConnected]
  * @returns {Promise<boolean>} true if a connect link was handled (success OR
@@ -118,8 +114,6 @@ async function _runConnectHandoff(deps) {
     createProject,
     openProject,
     setCurrentProjectId,
-    loadProject,
-    getState,
     toast,
     onConnected,
   } = deps
@@ -173,61 +167,11 @@ async function _runConnectHandoff(deps) {
     return true
   }
 
-  // 6 — reconcile once. DATA SAFETY (Bug 1): the editor must NEVER auto-push the
-  //     local model on connect. A failed pull previously seeded the ERP with the
-  //     empty canvas, permanently destroying the real snapshot. Now: adopt the
-  //     remote when present; otherwise start blank WITHOUT pushing; and on a pull
-  //     failure surface an error + preserve the remote (the user can retry).
-  let outcome
-  try {
-    const pulled = await pullFromCloud(conn)
-    const hasRemote = pulled.ok && pulled.hasSnapshot && pulled.snapshot?.projectSettings != null
-    if (hasRemote) {
-      // ERP snapshot present → adopt (source of truth on connect).
-      loadProject(pulled.snapshot)
-      markSynced()
-      outcome = 'adopted'
-    } else {
-      // No usable R2 snapshot (brand-new project, present-yet-unusable, or a pull
-      // failure). Bug 3: try DB recovery before giving up — and NEVER push the
-      // local model over the connection.
-      const recovered = await recoverFromCloud(conn)
-      if (recovered.ok && recovered.hasSnapshot && recovered.snapshot?.projectSettings != null) {
-        // Reconstructed from the ERP DB. Merge the compact recovered settings over
-        // the local defaults so nothing in projectSettings is missing, then load.
-        const defaults = getState ? getState().projectSettings : null
-        const ps = recovered.snapshot.projectSettings || {}
-        loadProject({
-          ...recovered.snapshot,
-          projectSettings: defaults ? { ...defaults, ...ps } : ps,
-        })
-        markUnsynced() // recovered ≠ synced — prompt the user to re-sync to restore R2
-        outcome = 'recovered'
-      } else if (pulled.ok) {
-        // Legitimately no snapshot AND nothing to recover → brand-new project, blank.
-        // Do NOT push; the first real edit syncs.
-        markUnsynced()
-        outcome = 'new'
-      } else {
-        // Pull failed AND recovery failed. Preserve the remote — do NOT push, do
-        // NOT overwrite. Surface the error so the user can retry.
-        markError(pulled.error || 'Could not load your model from the ERP.')
-        outcome = 'error'
-      }
-    }
-  } catch (err) {
-    markError(err?.message || 'Could not load your model from the ERP.')
-    outcome = 'error'
-  }
+  // 6 — State is hydrated via per-mutation live sync (liveSync.js). The
+  //     blob-snapshot pull is no longer part of the connect flow.
 
-  // 7 — surface the connection + an outcome-appropriate toast.
+  // 7 — surface the connection.
   onConnected?.(await getCloudConn().catch(() => conn))
-  if (outcome === 'error') {
-    toast.error('Connected, but could not load your saved model. Your ERP data is safe — please retry from the ERP.')
-  } else if (outcome === 'recovered') {
-    toast.success(`Recovered ${projectLabel} from the ERP database — re-sync to restore the cloud backup.`)
-  } else {
-    toast.success(`Connected to ${projectLabel}`)
-  }
+  toast.success(`Connected to ${projectLabel}`)
   return true
 }
