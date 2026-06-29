@@ -84,7 +84,7 @@ async function _loadPersisted() {
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
-export async function initCanonicalSyncQueue(conn, buildingId) {
+export async function initCanonicalSyncQueue(conn, buildingId, opts = {}) {
   _conn = conn
   _buildingId = buildingId
   _active = true
@@ -93,14 +93,18 @@ export async function initCanonicalSyncQueue(conn, buildingId) {
   _conflicts = 0
   _lastError = null
   await _loadPersisted() // restores baseVersion + any unsent-dirty flag from a prior session
-  // Seed the authoritative baseVersion from the server (the VERSION only — the
-  // payload is ignored here; the canvas still reopens from the PG projection, so
-  // this is NOT a read-path change). Offline → keep persisted/0; the 409 path
-  // corrects baseVersion on the first upload.
-  try {
-    const doc = await getCanonicalDocument(conn, buildingId)
-    if (doc && typeof doc.snapshotVersion === 'number') _baseVersion = doc.snapshotVersion
-  } catch { /* offline — tolerated */ }
+  // Seed the authoritative baseVersion. The Phase 2 reopen already fetched the
+  // canonical document, so it passes knownBaseVersion to avoid a second GET;
+  // otherwise fetch the version (the VERSION only — payload ignored, no read-path
+  // change). Offline → keep persisted/0; the 409 path corrects it on first upload.
+  if (typeof opts.knownBaseVersion === 'number') {
+    _baseVersion = opts.knownBaseVersion
+  } else {
+    try {
+      const doc = await getCanonicalDocument(conn, buildingId)
+      if (doc && typeof doc.snapshotVersion === 'number') _baseVersion = doc.snapshotVersion
+    } catch { /* offline — tolerated */ }
+  }
   await _persist()
   _notify()
   if (_dirty) _pump() // resume an unsent snapshot from a crashed/closed session

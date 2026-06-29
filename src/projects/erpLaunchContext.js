@@ -40,9 +40,13 @@ export function parseErpLaunchHash(hash) {
   const token = params.get('token')
   const erpUrl = params.get('erpUrl')
   if (!buildingId || !token || !erpUrl) return null
-  const result = { buildingId, token, erpUrl: erpUrl.replace(/\/$/, '') }
+  // Optional TEMPORARY dev rollback flag: reopen=reconstruct forces the legacy PG
+  // reconstruction reopen. Absent → production canonical reopen (R2 → IDB).
+  // Removed in Phase 3.
+  const reopen = params.get('reopen')
+  const result = { buildingId, token, erpUrl: erpUrl.replace(/\/$/, ''), ...(reopen ? { reopen } : {}) }
   // SECURITY: sanitized — never log the token itself.
-  console.log('[ERP] parsed launch context', { buildingId, erpUrl: result.erpUrl, hasToken: !!token })
+  console.log('[ERP] parsed launch context', { buildingId, erpUrl: result.erpUrl, hasToken: !!token, reopen: reopen ?? null })
   return result
 }
 

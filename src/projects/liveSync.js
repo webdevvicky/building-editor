@@ -486,7 +486,11 @@ export async function fireLiveOp(opType, payload, conn) {
 //   3. loadProject(snapshot) → render. The sync engine seeds its shadow AFTER
 //      this (erpSession), so reconstruction itself emits ZERO ops.
 // `loadProject` is injected (keeps this module store-agnostic).
-export async function hydrateFromErp(conn, loadProject) {
+// Seed the id-map (sourceEditorId → ERP id) from the live geometry projection so
+// subsequent edits resolve to UPDATE (never a duplicate ADD). This is the PERMANENT,
+// clean half of the old hydrate: it reads the projection for ID RESOLUTION only and
+// NEVER loads the canvas. Returns the raw state for callers that want it.
+export async function seedIdMapFromErp(conn) {
   const c = conn ?? _conn
   const data = await _request('GET', `/geometry/buildings/${c.buildingId}/state`, undefined, c)
   const state = data?.data ?? data ?? {}
@@ -495,7 +499,15 @@ export async function hydrateFromErp(conn, loadProject) {
     for (const e of arr ?? []) if (e?.sourceEditorId && e?.id) _idMap.set(e.sourceEditorId, e.id)
   }
   seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements)
+  return state
+}
 
+// EMERGENCY / dev-rollback ONLY: seed the id-map, then rebuild the canvas from the
+// PostgreSQL projection (lossy reconstruction). The production reopen path uses the
+// canonical document (canonicalReopen.js); this is reached only via the temporary
+// `reopen=reconstruct` flag and is deleted in Phase 3. Contract unchanged.
+export async function hydrateFromErp(conn, loadProject) {
+  const state = await seedIdMapFromErp(conn)
   if (typeof loadProject === 'function') {
     loadProject(reconstructSnapshot(state))
   }

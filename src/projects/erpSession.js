@@ -23,6 +23,7 @@ import { initLiveSyncQueue, setResyncBuilder } from './liveSyncQueue.js'
 import { startSyncEngine } from './syncEngine.js'
 import { buildFullSyncOps } from './syncEmitters.js'
 import { initCanonicalSyncQueue, installCanonicalAutosave } from './canonicalSyncQueue.js'
+import { reopenCanvas } from './canonicalReopen.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
 
@@ -119,13 +120,27 @@ export async function initErpSession() {
   await initLiveSyncQueue(ctx.buildingId)
   setResyncBuilder(() => buildFullSyncOps(useStore.getState()))
 
-  // Reconstruct the canvas from existing ERP geometry: seeds the id-map AND
-  // loads the rebuilt snapshot into the store (mm→inch, topology rebuilt). A
-  // brand-new building has nothing to hydrate — skip and start on a blank canvas.
+  // Phase 2 — REOPEN from the canonical Building Document (R2 → IDB → empty),
+  // integrity-gated, with the id-map seeded in every path. PostgreSQL
+  // reconstruction is reached ONLY via the temporary dev rollback flag
+  // (reopen=reconstruct), removed in Phase 3. A brand-new building has nothing to
+  // load — start on a blank canvas.
+  let reopenVersion = null
   if (!isNewBuilding) {
-    await hydrateFromErp(conn, useStore.getState().loadProject).catch((err) => {
-      console.warn('[erpSession] hydrateFromErp failed', err)
-    })
+    const loadProject = useStore.getState().loadProject
+    if (ctx.reopen === 'reconstruct') {
+      // Temporary dev rollback: legacy lossy PG reconstruction.
+      await hydrateFromErp(conn, loadProject).catch((err) => {
+        console.warn('[erpSession] hydrateFromErp (dev rollback) failed', err)
+      })
+    } else {
+      const res = await reopenCanvas(conn, ctx.buildingId, loadProject).catch((err) => {
+        console.warn('[erpSession] reopenCanvas failed', err)
+        return null
+      })
+      reopenVersion = res?.snapshotVersion ?? null
+      console.log('[erpSession] reopen source', res?.source ?? 'unknown')
+    }
   }
 
   // The ONE wiring point: subscribe to the store and emit ordered ops on every
@@ -133,15 +148,14 @@ export async function initErpSession() {
   // seeded with the loaded geometry — the reconstruction itself emits NOTHING.
   startSyncEngine(useStore)
 
-  // Phase 1 — begin WRITING the canonical Building Document (R2-backed) without
-  // touching the reopen path: the canvas above still reconstructed from the
-  // PostgreSQL projection. The durable upload outbox seeds its baseVersion from
-  // the server (version only — no payload load, no reconstruction change), and
-  // the ERP-mode autosave persists the model to IDB + enqueues an upload on every
-  // committed change. Failures are swallowed so a canonical sync hiccup never
-  // blocks the editor. This path NEVER touches liveSyncQueue or the PG projection.
+  // Continue WRITING the canonical Building Document (R2-backed): the durable
+  // upload outbox + the ERP-mode autosave that persists the model to IDB and
+  // enqueues an upload on every committed change. The reopen above already
+  // fetched the canonical version, so pass it as knownBaseVersion (no extra GET).
+  // Failures are swallowed so a canonical sync hiccup never blocks the editor.
+  // This path NEVER touches liveSyncQueue or the PG projection.
   try {
-    await initCanonicalSyncQueue(conn, ctx.buildingId)
+    await initCanonicalSyncQueue(conn, ctx.buildingId, { knownBaseVersion: reopenVersion })
     installCanonicalAutosave(useStore, ctx.buildingId)
   } catch (err) {
     console.warn('[erpSession] canonical document sync init failed', err)
