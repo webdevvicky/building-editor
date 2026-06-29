@@ -125,13 +125,20 @@ export async function initErpSession() {
   // reconstruction is reached ONLY via the temporary dev rollback flag
   // (reopen=reconstruct), removed in Phase 3. A brand-new building has nothing to
   // load — start on a blank canvas.
+  // RECONSTRUCT INSPECTION MODE (temporary dev rollback). When launched with
+  // reopen=reconstruct, the canvas is loaded from a PG-DERIVED reconstruction for
+  // inspection/comparison ONLY. NO writers are wired — neither the projection
+  // (startSyncEngine) nor the canonical document (autosave/upload). This makes it
+  // impossible for a reconstructed model to become the canonical source of truth
+  // (Invariant #6) and emits no /geometry/* ops. Removed with reconstruction in Phase 3.
+  const inspectionMode = ctx.reopen === 'reconstruct'
+
   let reopenVersion = null
   if (!isNewBuilding) {
     const loadProject = useStore.getState().loadProject
-    if (ctx.reopen === 'reconstruct') {
-      // Temporary dev rollback: legacy lossy PG reconstruction.
+    if (inspectionMode) {
       await hydrateFromErp(conn, loadProject).catch((err) => {
-        console.warn('[erpSession] hydrateFromErp (dev rollback) failed', err)
+        console.warn('[erpSession] reconstruct inspection load failed', err)
       })
     } else {
       const res = await reopenCanvas(conn, ctx.buildingId, loadProject).catch((err) => {
@@ -143,9 +150,17 @@ export async function initErpSession() {
     }
   }
 
+  if (inspectionMode) {
+    // Read-only inspection: surface the mode, wire NO writers, then stop.
+    try { useStore.getState().setErpInspectionMode(true) } catch { /* non-fatal */ }
+    if (typeof document !== 'undefined') document.title = 'Reconstructed model — DEV INSPECTION (read-only)'
+    console.warn('[erpSession] RECONSTRUCT INSPECTION MODE — canonical + projection writes DISABLED')
+    return true
+  }
+
   // The ONE wiring point: subscribe to the store and emit ordered ops on every
-  // committed geometry change. Started AFTER reconstruction so its shadow is
-  // seeded with the loaded geometry — the reconstruction itself emits NOTHING.
+  // committed geometry change. Started AFTER reopen so its shadow is seeded with
+  // the loaded geometry — the reopen itself emits NOTHING.
   startSyncEngine(useStore)
 
   // Continue WRITING the canonical Building Document (R2-backed): the durable

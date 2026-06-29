@@ -163,6 +163,12 @@ export const useStore = create((set, get) => ({
   showDimensions: false,
   layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
 
+  // ERP reconstruct INSPECTION mode (temporary dev rollback, reopen=reconstruct).
+  // When true, the canvas was loaded from a PG-derived reconstruction for
+  // inspection ONLY and NO writers are wired (canonical or projection). Drives a
+  // read-only banner. Removed with reconstruction in Phase 3.
+  erpInspectionMode: false,
+
   // UI state for floor switcher (Phase 1.9 UI). Stage 0 stays on F1.
   // Excluded from history snapshots — switching floors is a view operation.
   currentFloorId: DEFAULT_FLOOR_ID,
@@ -313,6 +319,7 @@ export const useStore = create((set, get) => ({
   setDraftOpening(data)  { set({ draftOpening: data }) },
   setLayerVisibility(partial) { set(s => ({ layerVisibility: { ...s.layerVisibility, ...partial } })) },
   setCurrentFloorId(id)  { set({ currentFloorId: id }) },
+  setErpInspectionMode(v) { set({ erpInspectionMode: !!v }) },
 
   // ── Nodes ─────────────────────────────────────────────────────────────
 

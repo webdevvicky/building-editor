@@ -33,6 +33,7 @@ import HelpGuide from './components/HelpGuide'
 import RoomBreakdownPanel from './components/RoomBreakdownPanel'
 import ErpConnection from './components/ErpConnection'
 import SyncStatusBadge from './components/SyncStatusBadge'
+import ReconstructInspectionBanner from './components/ReconstructInspectionBanner'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -147,6 +148,7 @@ export default function App() {
         <DialogHost />
         <ToastHost />
         <SyncStatusBadge />
+        <ReconstructInspectionBanner />
       </div>
     </DesktopGate>
   )
