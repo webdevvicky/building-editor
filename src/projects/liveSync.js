@@ -38,7 +38,7 @@ export const GEOMETRY_OPS = [
   'ADD_WALL', 'UPDATE_WALL', 'DELETE_WALL', 'SET_WALL_MATERIAL', 'SET_WALL_HEIGHT',
   'SPLIT_WALL', 'JOIN_WALLS',
   'ADD_OPENING', 'UPDATE_OPENING', 'DELETE_OPENING',
-  'ADD_FLOOR', 'UPDATE_FLOOR',
+  'ADD_FLOOR', 'UPDATE_FLOOR', 'DELETE_FLOOR',
   'ADD_ROOM', 'UPDATE_ROOM', 'DELETE_ROOM', 'SAVE_ROOM_VERTICES',
   'ADD_NODE', 'UPDATE_NODE', 'DELETE_NODE',
   'ADD_COLUMN', 'UPDATE_COLUMN', 'DELETE_COLUMN',
@@ -248,6 +248,18 @@ export async function fireLiveOp(opType, payload, conn) {
       break
     }
 
+    // A floor removed mid-session. payload.ifcGlobalId is the floor's editor id
+    // (the c.floorIds / _idMap key ADD_FLOOR registered under). Emitted AFTER its
+    // child room/wall/opening deletes, so the cascade order satisfies the FK.
+    case 'DELETE_FLOOR': {
+      const floorErpId = payload.floorErpId ?? c?.floorIds?.[payload.ifcGlobalId] ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!floorErpId) { res = { ok: true, noop: true }; break }
+      res = await _request('DELETE', `/geometry/floors/${floorErpId}`, undefined, c)
+      break
+    }
+
     // ── Rooms ─────────────────────────────────────────────────────────────────
     case 'ADD_ROOM': {
       const floorErpId = payload.floorErpId ?? c?.floorIds?.[payload.floorId ?? 'F1'] ?? _resolveId(payload.floorId ?? 'F1', c)
@@ -260,6 +272,7 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.posXMm !== undefined ? { posXMm: payload.posXMm } : {}),
         ...(payload.posYMm !== undefined ? { posYMm: payload.posYMm } : {}),
         roomShape: payload.roomShape ?? 'POLYGON',
+        ...(payload.name ? { name: payload.name } : {}),
         ...(payload.computedAreaSqft !== undefined ? { computedAreaSqft: payload.computedAreaSqft } : {}),
       }
       res = await _request('POST', `/geometry/floors/${floorErpId}/rooms`, body, c)
@@ -463,9 +476,15 @@ export async function fireLiveOp(opType, payload, conn) {
     // ── Generic elements ──────────────────────────────────────────────────────
     case 'ADD_ELEMENT': {
       const buildingId = c?.buildingId
+      // Resolve the element's editor floor id → ERP floor uuid (floors are emitted
+      // before elements, so this resolves). Omit (never send null) if unresolved.
+      const elemFloorErpId = payload.floorId
+        ? (c?.floorIds?.[payload.floorId] ?? _resolveId(payload.floorId, c))
+        : null
       const body = {
         sourceEditorId: payload.ifcGlobalId,
         kind: payload.kind,
+        ...(elemFloorErpId ? { floorId: elemFloorErpId } : {}),
         ...(payload.posXMm !== undefined ? { posXMm: payload.posXMm } : {}),
         ...(payload.posYMm !== undefined ? { posYMm: payload.posYMm } : {}),
         ...(payload.heightMm !== undefined ? { heightMm: payload.heightMm } : {}),
@@ -545,6 +564,10 @@ export async function seedIdMapFromErp(conn) {
     for (const e of arr ?? []) if (e?.sourceEditorId && e?.id) _idMap.set(e.sourceEditorId, e.id)
   }
   seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements); seed(state.floors)
+  // Openings live nested under walls[].openings[] (no top-level array), so iterate
+  // walls and seed each opening (sourceEditorId → id) so reopened openings
+  // round-trip to UPDATE/DELETE instead of a duplicate ADD.
+  for (const w of state.walls ?? []) seed(w.openings)
 
   // Rebuild/merge the floor map (sourceEditorId → ERP id) so floors created in a
   // prior session resolve after reopen. A mid-session ADD_FLOOR already populates

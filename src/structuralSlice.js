@@ -593,12 +593,39 @@ export const createStructuralSlice = (set, get, uid) => ({
     return id
   },
 
-  removeFloor: (id) => set(state => ({
-    projectSettings: {
-      ...state.projectSettings,
-      floors: (state.projectSettings.floors ?? DEFAULT_FLOORS).filter(f => f.id !== id),
-    },
-  })),
+  // Removing a floor also drops the rooms that sit ON it, so the canonical never
+  // holds a room on a deleted floor and the sync diff emits the child DELETE_ROOMs
+  // BEFORE the floor's own DELETE_FLOOR (FK: room.floorId → floor). Rooms are
+  // removed exactly like deleteRoom does (map delete only — that path does not
+  // cascade walls/nodes, so neither does this; see report note).
+  removeFloor: (id) => set(state => {
+    // Cascade the deleted floor's geometry out of canonical so it never holds
+    // rooms/walls/nodes on a non-existent floor — keeping canonical consistent with
+    // the backend deleteFloor cascade (the diff then emits child DELETE_* ops, which
+    // drain before DELETE_FLOOR).
+    const rooms = { ...state.rooms }
+    for (const rid of Object.keys(rooms)) {
+      if ((rooms[rid].floorId ?? DEFAULT_FLOOR_ID) === id) delete rooms[rid]
+    }
+    const walls = { ...state.walls }
+    for (const wid of Object.keys(walls)) {
+      if ((walls[wid].floorId ?? DEFAULT_FLOOR_ID) === id) delete walls[wid]
+    }
+    const nodes = { ...state.nodes }
+    for (const nid of Object.keys(nodes)) {
+      const fids = nodes[nid].floorIds ?? [DEFAULT_FLOOR_ID]
+      if (fids.length && fids.every(f => f === id)) delete nodes[nid] // only on this floor
+    }
+    return {
+      rooms,
+      walls,
+      nodes,
+      projectSettings: {
+        ...state.projectSettings,
+        floors: (state.projectSettings.floors ?? DEFAULT_FLOORS).filter(f => f.id !== id),
+      },
+    }
+  }),
 
   updateFloor: (id, partial) => set(state => ({
     projectSettings: {

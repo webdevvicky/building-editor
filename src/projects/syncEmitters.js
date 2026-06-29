@@ -49,6 +49,13 @@ export function floorAddOp(floor) {
 export function floorUpdateOp(floor) {
   return { opType: 'UPDATE_FLOOR', payload: _floorPayload(floor) }
 }
+// A floor removed mid-session. ifcGlobalId is the floor's editor id (== the
+// c.floorIds / _idMap key ADD_FLOOR registered under), so the dispatch resolves a
+// real floorErpId. Ordered LAST in the ops array (after child deletes) so the
+// floor row is dropped only AFTER its rooms/walls/openings are gone.
+export function floorDeleteOp(floor) {
+  return { opType: 'DELETE_FLOOR', payload: { ifcGlobalId: floor.id } }
+}
 // Change signature over a floor's synced fields (excludes label/meta/underlay) —
 // drives whether a mutated floor emits UPDATE_FLOOR.
 export function floorSignature(floor) {
@@ -59,7 +66,7 @@ export function floorSignature(floor) {
 // intentionally omitted (editor types ≠ taxonomy codes → would 422). The ERP
 // defaults the room type to OTHER; staff set it there.
 export function roomAddOp(room) {
-  return { opType: 'ADD_ROOM', payload: { ifcGlobalId: room.ifcGlobalId, floorId: room.floorId ?? 'F1', roomShape: 'POLYGON' } }
+  return { opType: 'ADD_ROOM', payload: { ifcGlobalId: room.ifcGlobalId, floorId: room.floorId ?? 'F1', roomShape: 'POLYGON', ...(room.name ? { name: room.name } : {}) } }
 }
 export function roomDeleteOp(ifcGlobalId) {
   return { opType: 'DELETE_ROOM', payload: { ifcGlobalId } }
@@ -145,7 +152,13 @@ export function openingDeleteOp(ifcGlobalId) {
 // All element kinds go through the generic ADD/UPDATE_ELEMENT op; the registry
 // entry owns the field+coordinate mapping and supplies `erpKind`.
 export function elementAddOp(state, entry, el) {
-  return { opType: entry.erpOpType, payload: { ...entry.toErpPayload(el, state), kind: entry.erpKind } }
+  // The element's EDITOR floor id (columns span floors via baseFloorId; every
+  // other kind carries a single floorId). Lives ONLY on the ADD payload (resolved
+  // to BuildingElement.floorId at send time) — NOT in toErpPayload, so it never
+  // leaks into the SHAPE-only UPDATE body or the change signature. Omitted (never
+  // null) if an element genuinely has no floor.
+  const floorId = el.baseFloorId ?? el.floorId ?? null
+  return { opType: entry.erpOpType, payload: { ...entry.toErpPayload(el, state), kind: entry.erpKind, ...(floorId ? { floorId } : {}) } }
 }
 export function elementUpdateOp(state, entry, el) {
   // UPDATE body is SHAPE-only — must NOT carry `kind` (not whitelisted by PATCH).

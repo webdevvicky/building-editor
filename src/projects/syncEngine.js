@@ -92,7 +92,7 @@ function _flush(stateOverride) {
   const prev = _shadow
   const owner = E._wallOwnerRoom(st)
 
-  const floorAddOps = [], floorUpdateOps = []
+  const floorAddOps = [], floorUpdateOps = [], floorDeleteOps = []
   const nodeOps = [], roomOps = [], verticesOps = [], wallOps = [], surfaceOps = [], openingOps = []
   const elemOps = [], updateOps = [], deleteOps = []
 
@@ -106,6 +106,11 @@ function _flush(stateOverride) {
     if (!p) floorAddOps.push(E.floorAddOp(curFloors[id]))
     else if (E.floorSignature(curFloors[id]) !== E.floorSignature(p)) floorUpdateOps.push(E.floorUpdateOp(curFloors[id]))
   }
+  // DELETE — floors removed this flush. Emitted LAST (see ops array below) so the
+  // floor row is dropped only AFTER its child rooms/walls/openings DELETE — the
+  // canonical removeFloor cascades the floor's rooms, so those child DELETE_ROOMs
+  // are already in deleteOps and land first (FK: room.floorId → floor).
+  for (const id in prevFloors) if (!curFloors[id]) floorDeleteOps.push(E.floorDeleteOp(prevFloors[id]))
   _floorShadow = curFloors
   const emittedNodes = new Set()
   const verticesRoomIds = new Set() // rooms already queued for a vertex emit (dedup)
@@ -194,6 +199,6 @@ function _flush(stateOverride) {
 
   _shadow = cur
 
-  const ops = [...floorAddOps, ...nodeOps, ...roomOps, ...verticesOps, ...wallOps, ...surfaceOps, ...openingOps, ...elemOps, ...floorUpdateOps, ...updateOps, ...deleteOps]
+  const ops = [...floorAddOps, ...nodeOps, ...roomOps, ...verticesOps, ...wallOps, ...surfaceOps, ...openingOps, ...elemOps, ...floorUpdateOps, ...updateOps, ...deleteOps, ...floorDeleteOps]
   if (ops.length) enqueueGeometryOps(ops)
 }

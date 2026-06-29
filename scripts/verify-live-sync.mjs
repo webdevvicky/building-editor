@@ -41,6 +41,7 @@ const OP_TEST_CASES = [
   // Floors
   ['ADD_FLOOR',         { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 10 }],
   ['UPDATE_FLOOR',      { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 11 }],
+  ['DELETE_FLOOR',      { ifcGlobalId: 'F1' }], // resolves via mockConn.floorIds.F1 → erpFloor1
   // Walls
   ['ADD_WALL',          { ifcGlobalId: 'WallIfc000000000000002', materialKey: 'IS_MODULAR_BRICK', height: 120, thickness: 9, roomErpId: 'erpRoom1' }],
   ['UPDATE_WALL',       { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', height: 130 }],
