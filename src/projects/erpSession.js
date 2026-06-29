@@ -4,7 +4,7 @@
 //   1. parse + strip the #erpLaunch hash      (erpLaunchContext)
 //   2. bootPersistence                         (IDB; current-project skipped in ERP mode)
 //   3. initErpSession  → initLiveSync          (THIS FILE — activates _liveMode)
-//   4. initErpSession  → hydrateFromErp        (THIS FILE — populates the id-map)
+//   4. initErpSession  → reopenCanvas          (THIS FILE — canonical reopen + id-map)
 //   5. render <App/>
 //
 // initLiveSync needs a `conn` carrying { buildingId, floorIds, erpUrl, getToken }.
@@ -14,11 +14,11 @@
 //   - c.erpUrl + c.getToken() → request base URL + Bearer auth
 //
 // We deliberately DON'T pass resolveErpId/registerErpId — liveSync.js falls back
-// to its own internal _idMap, which hydrateFromErp populates. One id-map, one
-// source of truth.
+// to its own internal _idMap, which reopenCanvas/seedIdMapFromErp populates. One
+// id-map, one source of truth.
 
 import { getErpLaunchContext } from './erpLaunchContext.js'
-import { initLiveSync, hydrateFromErp, getLiveMode } from './liveSync.js'
+import { initLiveSync, getLiveMode } from './liveSync.js'
 import { initLiveSyncQueue, setResyncBuilder } from './liveSyncQueue.js'
 import { startSyncEngine } from './syncEngine.js'
 import { startSyncCoordinator } from './syncCoordinator.js'
@@ -121,42 +121,18 @@ export async function initErpSession() {
   await initLiveSyncQueue(ctx.buildingId)
   setResyncBuilder(() => buildFullSyncOps(useStore.getState()))
 
-  // Phase 2 — REOPEN from the canonical Building Document (R2 → IDB → empty),
-  // integrity-gated, with the id-map seeded in every path. PostgreSQL
-  // reconstruction is reached ONLY via the temporary dev rollback flag
-  // (reopen=reconstruct), removed in Phase 3. A brand-new building has nothing to
-  // load — start on a blank canvas.
-  // RECONSTRUCT INSPECTION MODE (temporary dev rollback). When launched with
-  // reopen=reconstruct, the canvas is loaded from a PG-DERIVED reconstruction for
-  // inspection/comparison ONLY. NO writers are wired — neither the projection
-  // (startSyncEngine) nor the canonical document (autosave/upload). This makes it
-  // impossible for a reconstructed model to become the canonical source of truth
-  // (Invariant #6) and emits no /geometry/* ops. Removed with reconstruction in Phase 3.
-  const inspectionMode = ctx.reopen === 'reconstruct'
-
+  // REOPEN from the canonical Building Document (R2 → IDB → empty), integrity-gated,
+  // with the id-map seeded in every path. A brand-new building has nothing to load —
+  // start on a blank canvas.
   let reopenVersion = null
   if (!isNewBuilding) {
     const loadProject = useStore.getState().loadProject
-    if (inspectionMode) {
-      await hydrateFromErp(conn, loadProject).catch((err) => {
-        console.warn('[erpSession] reconstruct inspection load failed', err)
-      })
-    } else {
-      const res = await reopenCanvas(conn, ctx.buildingId, loadProject).catch((err) => {
-        console.warn('[erpSession] reopenCanvas failed', err)
-        return null
-      })
-      reopenVersion = res?.snapshotVersion ?? null
-      console.log('[erpSession] reopen source', res?.source ?? 'unknown')
-    }
-  }
-
-  if (inspectionMode) {
-    // Read-only inspection: surface the mode, wire NO writers, then stop.
-    try { useStore.getState().setErpInspectionMode(true) } catch { /* non-fatal */ }
-    if (typeof document !== 'undefined') document.title = 'Reconstructed model — DEV INSPECTION (read-only)'
-    console.warn('[erpSession] RECONSTRUCT INSPECTION MODE — canonical + projection writes DISABLED')
-    return true
+    const res = await reopenCanvas(conn, ctx.buildingId, loadProject).catch((err) => {
+      console.warn('[erpSession] reopenCanvas failed', err)
+      return null
+    })
+    reopenVersion = res?.snapshotVersion ?? null
+    console.log('[erpSession] reopen source', res?.source ?? 'unknown')
   }
 
   // The ONE ORDERED write pipeline (Invariants #5/#7). Init the canonical upload

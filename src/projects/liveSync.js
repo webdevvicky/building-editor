@@ -1,15 +1,12 @@
 // liveSync.js — REST middleware for live ERP sync (Phase E)
 // Lives behind a liveMode flag; blob sync (cloudSync.js) continues unchanged.
 
-import { reconstructSnapshot } from './erpReconstruct.js'
-
 const IN_TO_MM = 25.4
 function inToMm(v) { return Math.round(v * IN_TO_MM) }
 
 let _liveMode = false
 let _conn = null
 const _idMap = new Map()
-let _pollInterval = null
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -27,7 +24,6 @@ export function teardownLiveSync() {
   _conn = null
   _liveMode = false
   _idMap.clear()
-  stopStatePolling()
 }
 
 export function registerErpId(editorIfcId, erpId) {
@@ -134,6 +130,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_WALL': {
       const wallErpId = payload.wallErpId ?? _resolveId(payload.ifcGlobalId ?? payload.id, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!wallErpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/walls/${wallErpId}`, undefined, c)
       break
     }
@@ -209,6 +208,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_OPENING': {
       const openingErpId = payload.openingErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!openingErpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/openings/${openingErpId}`, undefined, c)
       break
     }
@@ -244,6 +246,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_ROOM': {
       const roomErpId = payload.roomErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!roomErpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/rooms/${roomErpId}`, undefined, c)
       break
     }
@@ -291,6 +296,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_NODE': {
       const nodeErpId = payload.nodeErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!nodeErpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/nodes/${nodeErpId}`, undefined, c)
       break
     }
@@ -334,6 +342,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_COLUMN': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!erpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
       break
     }
@@ -371,6 +382,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_BEAM': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!erpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
       break
     }
@@ -406,6 +420,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_SLAB': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!erpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
       break
     }
@@ -454,6 +471,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_ELEMENT': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → no projection row exists to delete: a delete of a
+      // non-existent row is a successful no-op (never request /geometry/.../null).
+      if (!erpId) { res = { ok: true, noop: true }; break }
       res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
       break
     }
@@ -466,7 +486,7 @@ export async function fireLiveOp(opType, payload, conn) {
         adjacentRoomId,
         ...(payload.segmentLengthMm !== undefined ? { segmentLengthMm: payload.segmentLengthMm } : {}),
       }
-      res = await _request('POST', `/building-structure/walls/${wallErpId}/surfaces/adjacent`, body, c)
+      res = await _request('POST', `/geometry/walls/${wallErpId}/surfaces/adjacent`, body, c)
       break
     }
 
@@ -477,19 +497,12 @@ export async function fireLiveOp(opType, payload, conn) {
   return res
 }
 
-// ─── Hydration & polling ──────────────────────────────────────────────────────
+// ─── ID-map seeding ───────────────────────────────────────────────────────────
 
-// Reconstruct the editor canvas from the ERP building state.
-//   1. seed the id-map (sourceEditorId → ERP id) for EVERY entity FIRST, so any
-//      immediate edit resolves to an UPDATE (never a duplicate create),
-//   2. map the state into a loadProject() snapshot (mm→inch, rebuilt topology),
-//   3. loadProject(snapshot) → render. The sync engine seeds its shadow AFTER
-//      this (erpSession), so reconstruction itself emits ZERO ops.
-// `loadProject` is injected (keeps this module store-agnostic).
 // Seed the id-map (sourceEditorId → ERP id) from the live geometry projection so
-// subsequent edits resolve to UPDATE (never a duplicate ADD). This is the PERMANENT,
-// clean half of the old hydrate: it reads the projection for ID RESOLUTION only and
-// NEVER loads the canvas. Returns the raw state for callers that want it.
+// subsequent edits resolve to UPDATE (never a duplicate ADD). It reads the
+// projection for ID RESOLUTION only and NEVER loads the canvas (the canonical
+// document drives reopen). Returns the raw state for callers that want it.
 export async function seedIdMapFromErp(conn) {
   const c = conn ?? _conn
   const data = await _request('GET', `/geometry/buildings/${c.buildingId}/state`, undefined, c)
@@ -500,30 +513,4 @@ export async function seedIdMapFromErp(conn) {
   }
   seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements)
   return state
-}
-
-// EMERGENCY / dev-rollback ONLY: seed the id-map, then rebuild the canvas from the
-// PostgreSQL projection (lossy reconstruction). The production reopen path uses the
-// canonical document (canonicalReopen.js); this is reached only via the temporary
-// `reopen=reconstruct` flag and is deleted in Phase 3. Contract unchanged.
-export async function hydrateFromErp(conn, loadProject) {
-  const state = await seedIdMapFromErp(conn)
-  if (typeof loadProject === 'function') {
-    loadProject(reconstructSnapshot(state))
-  }
-  return state
-}
-
-export function startStatePolling(conn, setState, intervalMs = 30000) {
-  stopStatePolling()
-  _pollInterval = setInterval(() => {
-    hydrateFromErp(conn, setState).catch(err => console.error('[liveSync] poll error:', err))
-  }, intervalMs)
-}
-
-export function stopStatePolling() {
-  if (_pollInterval != null) {
-    clearInterval(_pollInterval)
-    _pollInterval = null
-  }
 }

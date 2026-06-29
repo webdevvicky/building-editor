@@ -38,6 +38,12 @@ async function _loadPersisted() {
     const rec = await getAssetStorage().get(DB_STORES.METADATA, _idbKey())
     if (rec && Array.isArray(rec.value)) {
       _queue = rec.value
+      // Prune stale dead/failed DELETE_* artifacts left by the old /null bug: a
+      // DELETE whose target id never resolved used to request /geometry/.../null →
+      // 404 → dead-lettered. Deletes are idempotent no-ops (deleting a row that
+      // doesn't exist is success), so these are not real failures — drop them.
+      _queue = _queue.filter((o) =>
+        !((o.status === 'dead' || o.status === 'failed') && String(o.opType).startsWith('DELETE_')))
       // Anything mid-flight when we last died resumes as pending.
       for (const o of _queue) if (o.status === 'inflight') o.status = 'pending'
     }
