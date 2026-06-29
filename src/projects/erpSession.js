@@ -22,6 +22,7 @@ import { initLiveSync, hydrateFromErp, getLiveMode } from './liveSync.js'
 import { initLiveSyncQueue, setResyncBuilder } from './liveSyncQueue.js'
 import { startSyncEngine } from './syncEngine.js'
 import { buildFullSyncOps } from './syncEmitters.js'
+import { initCanonicalSyncQueue, installCanonicalAutosave } from './canonicalSyncQueue.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
 
@@ -131,6 +132,20 @@ export async function initErpSession() {
   // committed geometry change. Started AFTER reconstruction so its shadow is
   // seeded with the loaded geometry — the reconstruction itself emits NOTHING.
   startSyncEngine(useStore)
+
+  // Phase 1 — begin WRITING the canonical Building Document (R2-backed) without
+  // touching the reopen path: the canvas above still reconstructed from the
+  // PostgreSQL projection. The durable upload outbox seeds its baseVersion from
+  // the server (version only — no payload load, no reconstruction change), and
+  // the ERP-mode autosave persists the model to IDB + enqueues an upload on every
+  // committed change. Failures are swallowed so a canonical sync hiccup never
+  // blocks the editor. This path NEVER touches liveSyncQueue or the PG projection.
+  try {
+    await initCanonicalSyncQueue(conn, ctx.buildingId)
+    installCanonicalAutosave(useStore, ctx.buildingId)
+  } catch (err) {
+    console.warn('[erpSession] canonical document sync init failed', err)
+  }
 
   // Editor name reflects the ERP project + building (not a local IDB name).
   // Done AFTER loadProject so it isn't overwritten; projectSettings isn't a
