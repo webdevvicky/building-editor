@@ -23,6 +23,7 @@ let _active = false
 let _unsub = null
 let _scheduled = false
 let _shadow = {}
+let _floorShadow = {}
 let _coordinated = false
 
 function _snapshot(st) {
@@ -31,12 +32,22 @@ function _snapshot(st) {
   return snap
 }
 
+// Floors are NOT a top-level store collection — they live in
+// projectSettings.floors[]. Snapshot them as an { id → floor } map so the diff
+// can detect new/changed floors the same way COLLECTIONS are diffed.
+function _floorMap(st) {
+  const m = {}
+  for (const f of (st.projectSettings?.floors ?? [])) if (f && f.id) m[f.id] = f
+  return m
+}
+
 export function startSyncEngine(store, opts = {}) {
   if (_active) return
   _store = store
   _active = true
   _coordinated = !!opts.coordinated
   _shadow = _snapshot(store.getState()) // seed: existing geometry is NOT re-emitted
+  _floorShadow = _floorMap(store.getState()) // seed: existing/reopened floors are NOT re-emitted
   // In COORDINATED mode the sync coordinator is the SOLE driver: it calls
   // flushSyncEngine() only AFTER the canonical pipeline has durably accepted the
   // mutation (Invariant #5), so the engine must NOT self-subscribe.
@@ -45,13 +56,16 @@ export function startSyncEngine(store, opts = {}) {
 
 export function stopSyncEngine() {
   if (_unsub) { _unsub(); _unsub = null }
-  _active = false; _store = null; _shadow = {}; _scheduled = false; _coordinated = false
+  _active = false; _store = null; _shadow = {}; _floorShadow = {}; _scheduled = false; _coordinated = false
 }
 
 /** Re-baseline the shadow to current state WITHOUT emitting (used after a
  *  semantic op the diff shouldn't re-derive). */
 export function reconcileSyncEngine() {
-  if (_active && _store) _shadow = _snapshot(_store.getState())
+  if (_active && _store) {
+    _shadow = _snapshot(_store.getState())
+    _floorShadow = _floorMap(_store.getState())
+  }
 }
 
 /**
@@ -78,8 +92,21 @@ function _flush(stateOverride) {
   const prev = _shadow
   const owner = E._wallOwnerRoom(st)
 
+  const floorAddOps = [], floorUpdateOps = []
   const nodeOps = [], roomOps = [], verticesOps = [], wallOps = [], surfaceOps = [], openingOps = []
   const elemOps = [], updateOps = [], deleteOps = []
+
+  // ADDS/UPDATES — floors (special-cased: projectSettings.floors[], not a store
+  // collection). A new floor must reach the ERP BEFORE any room placed on it, so
+  // floor ADDs are ordered first in the emitted ops array (below).
+  const curFloors = _floorMap(st)
+  const prevFloors = _floorShadow
+  for (const id in curFloors) {
+    const p = prevFloors[id]
+    if (!p) floorAddOps.push(E.floorAddOp(curFloors[id]))
+    else if (E.floorSignature(curFloors[id]) !== E.floorSignature(p)) floorUpdateOps.push(E.floorUpdateOp(curFloors[id]))
+  }
+  _floorShadow = curFloors
   const emittedNodes = new Set()
   const verticesRoomIds = new Set() // rooms already queued for a vertex emit (dedup)
   const movedNodes = new Set()      // nodes that moved this flush → re-emit owning rooms' vertices
@@ -167,6 +194,6 @@ function _flush(stateOverride) {
 
   _shadow = cur
 
-  const ops = [...nodeOps, ...roomOps, ...verticesOps, ...wallOps, ...surfaceOps, ...openingOps, ...elemOps, ...updateOps, ...deleteOps]
+  const ops = [...floorAddOps, ...nodeOps, ...roomOps, ...verticesOps, ...wallOps, ...surfaceOps, ...openingOps, ...elemOps, ...floorUpdateOps, ...updateOps, ...deleteOps]
   if (ops.length) enqueueGeometryOps(ops)
 }

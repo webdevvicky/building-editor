@@ -38,6 +38,7 @@ export const GEOMETRY_OPS = [
   'ADD_WALL', 'UPDATE_WALL', 'DELETE_WALL', 'SET_WALL_MATERIAL', 'SET_WALL_HEIGHT',
   'SPLIT_WALL', 'JOIN_WALLS',
   'ADD_OPENING', 'UPDATE_OPENING', 'DELETE_OPENING',
+  'ADD_FLOOR', 'UPDATE_FLOOR',
   'ADD_ROOM', 'UPDATE_ROOM', 'DELETE_ROOM', 'SAVE_ROOM_VERTICES',
   'ADD_NODE', 'UPDATE_NODE', 'DELETE_NODE',
   'ADD_COLUMN', 'UPDATE_COLUMN', 'DELETE_COLUMN',
@@ -215,9 +216,41 @@ export async function fireLiveOp(opType, payload, conn) {
       break
     }
 
+    // ── Floors ──────────────────────────────────────────────────────────────
+    // A floor created mid-session (editor addFloor → projectSettings.floors[])
+    // must reach the ERP before any room is placed on it. payload.ifcGlobalId is
+    // the floor's editor id (== room.floorId == the c.floorIds key), so the room
+    // that follows resolves a real floorErpId. Register the returned id in BOTH
+    // _idMap (the _resolveId fallback) and c.floorIds (the primary ADD_ROOM lookup,
+    // which is the SAME conn object the new-building F1 bootstrap seeds).
+    case 'ADD_FLOOR': {
+      const body = {
+        floorNumber: payload.floorNumber ?? 1,
+        sourceEditorId: payload.ifcGlobalId,
+        ...(payload.floorHeight !== undefined ? { floorHeight: payload.floorHeight } : {}),
+        ...(payload.floorLength !== undefined ? { floorLength: payload.floorLength } : {}),
+        ...(payload.floorWidth !== undefined ? { floorWidth: payload.floorWidth } : {}),
+      }
+      res = await _request('POST', `/geometry/buildings/${c.buildingId}/floors`, body, c)
+      const erpId = _extractErpId(res)
+      if (erpId && payload.ifcGlobalId) {
+        _registerId(payload.ifcGlobalId, erpId, c)
+        if (c) { c.floorIds = c.floorIds ?? {}; c.floorIds[payload.ifcGlobalId] = erpId }
+      }
+      break
+    }
+
+    // No PATCH route exists on /geometry for floors (only POST + GET state), and a
+    // floor's synced fields (height/dims) aren't load-bearing for room attachment,
+    // so a floor change is a projection no-op rather than a 404.
+    case 'UPDATE_FLOOR': {
+      res = { ok: true, noop: true }
+      break
+    }
+
     // ── Rooms ─────────────────────────────────────────────────────────────────
     case 'ADD_ROOM': {
-      const floorErpId = payload.floorErpId ?? c?.floorIds?.[payload.floorId ?? 'F1']
+      const floorErpId = payload.floorErpId ?? c?.floorIds?.[payload.floorId ?? 'F1'] ?? _resolveId(payload.floorId ?? 'F1', c)
       const body = {
         sourceEditorId: payload.ifcGlobalId,
         ...(payload.roomTypeCode ? { roomTypeCode: payload.roomTypeCode } : {}),
@@ -511,6 +544,14 @@ export async function seedIdMapFromErp(conn) {
   const seed = (arr) => {
     for (const e of arr ?? []) if (e?.sourceEditorId && e?.id) _idMap.set(e.sourceEditorId, e.id)
   }
-  seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements)
+  seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements); seed(state.floors)
+
+  // Rebuild/merge the floor map (sourceEditorId → ERP id) so floors created in a
+  // prior session resolve after reopen. A mid-session ADD_FLOOR already populates
+  // c.floorIds + _idMap; this re-hydrates them on a fresh reopen from getBuildingState.
+  if (c && Array.isArray(state.floors)) {
+    c.floorIds = c.floorIds ?? {}
+    for (const f of state.floors) if (f?.sourceEditorId && f?.id) c.floorIds[f.sourceEditorId] = f.id
+  }
   return state
 }

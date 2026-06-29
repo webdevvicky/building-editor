@@ -31,8 +31,16 @@ const mockConn = {
   getToken: async () => 'mock-jwt-token',
 }
 
+// Ops that intentionally fire NO REST call (handled client-side as a no-op).
+// UPDATE_FLOOR has no PATCH route on /geometry (only POST + GET state), so a
+// floor change is a projection no-op rather than a 404.
+const NOOP_OPS = new Set(['UPDATE_FLOOR'])
+
 // ── Test cases ────────────────────────────────────────────────────────────────
 const OP_TEST_CASES = [
+  // Floors
+  ['ADD_FLOOR',         { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 10 }],
+  ['UPDATE_FLOOR',      { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 11 }],
   // Walls
   ['ADD_WALL',          { ifcGlobalId: 'WallIfc000000000000002', materialKey: 'IS_MODULAR_BRICK', height: 120, thickness: 9, roomErpId: 'erpRoom1' }],
   ['UPDATE_WALL',       { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', height: 130 }],
@@ -86,10 +94,13 @@ for (const [opType, payload] of OP_TEST_CASES) {
     threw = true
     throwMsg = e.message
   }
+  const expected = NOOP_OPS.has(opType) ? 0 : 1
   if (threw) {
     failed.push(`${opType}: threw — ${throwMsg}`)
-  } else if (fetchCalls.length !== 1) {
-    failed.push(`${opType}: expected exactly 1 fetch call, got ${fetchCalls.length}`)
+  } else if (fetchCalls.length !== expected) {
+    failed.push(`${opType}: expected exactly ${expected} fetch call(s), got ${fetchCalls.length}`)
+  } else if (expected === 0) {
+    passed.push(`${opType}: → no-op (no REST call, by design)`)
   } else {
     passed.push(`${opType}: → ${fetchCalls[0].method} ${fetchCalls[0].url.replace('https://erp.test/api/v1', '')}`)
   }

@@ -26,6 +26,35 @@ export function nodeDeleteOp(ifcGlobalId) {
   return { opType: 'DELETE_NODE', payload: { ifcGlobalId } }
 }
 
+// ── Floors ───────────────────────────────────────────────────────────────────
+// Floors live in projectSettings.floors[] (NOT a synced store collection), so the
+// sync engine special-cases them. The floor's editor `id` IS the floor identity
+// used end-to-end: it is exactly room.floorId (the key ADD_ROOM resolves against),
+// the `sourceEditorId` the ERP stores + round-trips, and the key c.floorIds /
+// _idMap register + resolve under. The default floor's id is DEFAULT_FLOOR_ID
+// ('F1'), matching the new-building F1 bootstrap in erpSession._buildFloorIdsMap.
+// floorNumber is 1-based (editor sequence 0 → ERP floorNumber 1, same as bootstrap).
+function _floorPayload(floor) {
+  return {
+    ifcGlobalId: floor.id,
+    floorNumber: (floor.sequence ?? 0) + 1,
+    floorHeight: floor.floorHeightFt ?? 10,
+    ...(floor.floorLength !== undefined ? { floorLength: floor.floorLength } : {}),
+    ...(floor.floorWidth !== undefined ? { floorWidth: floor.floorWidth } : {}),
+  }
+}
+export function floorAddOp(floor) {
+  return { opType: 'ADD_FLOOR', payload: _floorPayload(floor) }
+}
+export function floorUpdateOp(floor) {
+  return { opType: 'UPDATE_FLOOR', payload: _floorPayload(floor) }
+}
+// Change signature over a floor's synced fields (excludes label/meta/underlay) —
+// drives whether a mutated floor emits UPDATE_FLOOR.
+export function floorSignature(floor) {
+  return `${floor.sequence ?? 0},${floor.floorHeightFt ?? 10},${floor.floorLength ?? ''},${floor.floorWidth ?? ''}`
+}
+
 // roomShape is the only whitelisted shape enum we can assert; roomTypeCode is
 // intentionally omitted (editor types ≠ taxonomy codes → would 422). The ERP
 // defaults the room type to OTHER; staff set it there.
@@ -147,6 +176,9 @@ const _SIG_STATE = {}
 // Order: nodes → rooms → walls → elements. Idempotent via sourceEditorId.
 export function buildFullSyncOps(state) {
   const ops = []
+  // Floors FIRST — a room's POST targets /geometry/floors/:id/rooms, so the floor
+  // must exist (and be id-mapped) before any room ADD.
+  for (const f of (state.projectSettings?.floors ?? [])) ops.push(floorAddOp(f))
   for (const n of Object.values(state.nodes ?? {})) ops.push(nodeAddOp(n))
   for (const r of Object.values(state.rooms ?? {})) {
     ops.push(roomAddOp(r))
