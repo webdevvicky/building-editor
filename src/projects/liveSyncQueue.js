@@ -112,7 +112,11 @@ function _isPermanent(err) {
   const match = m.match(/→ (\d{3}):/) // liveSync throws "… → <status>: <body>"
   if (!match) return false // network/unknown → retryable
   const code = Number(match[1])
-  return code >= 400 && code < 500 && code !== 408 && code !== 429
+  // Only genuine "won't fix on retry" validation failures dead-letter. 401/403 are
+  // transient auth (token expiry / refresh), 408/429 are backpressure, and 5xx are
+  // server-side — all of those MUST retry, never drop the op (Phase 0: no silent
+  // data loss). Permanent ⇔ 400 (bad request), 404 (gone), 409 (conflict), 422.
+  return code === 400 || code === 404 || code === 409 || code === 422
 }
 
 async function _drain() {

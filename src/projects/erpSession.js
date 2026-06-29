@@ -94,8 +94,11 @@ async function _buildFloorIdsMap({ erpUrl, token, buildingId }) {
  * @returns {Promise<boolean>} true when live sync was activated.
  */
 export async function initErpSession() {
-  console.log('[ERP] initErpSession called, context:', getErpLaunchContext())
   const ctx = getErpLaunchContext()
+  // SECURITY: sanitized — never log the token.
+  console.log('[ERP] initErpSession called', ctx
+    ? { buildingId: ctx.buildingId, erpUrl: ctx.erpUrl, hasToken: !!ctx.token }
+    : null)
   if (!ctx) return false
 
   const { floorIds, isNewBuilding } = await _buildFloorIdsMap(ctx)

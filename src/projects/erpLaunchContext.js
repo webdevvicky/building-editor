@@ -31,7 +31,7 @@ let _ctx = null
  * @returns {{buildingId:string, token:string, erpUrl:string}|null}
  */
 export function parseErpLaunchHash(hash) {
-  console.log('[ERP] raw hash:', typeof window !== 'undefined' ? window.location.hash : hash)
+  // SECURITY: never log the raw hash — it carries the JWT.
   if (!hash) return null
   const raw = hash.startsWith('#') ? hash.slice(1) : hash
   if (!raw.startsWith('erpLaunch?')) return null
@@ -41,7 +41,8 @@ export function parseErpLaunchHash(hash) {
   const erpUrl = params.get('erpUrl')
   if (!buildingId || !token || !erpUrl) return null
   const result = { buildingId, token, erpUrl: erpUrl.replace(/\/$/, '') }
-  console.log('[ERP] parsed context:', result)
+  // SECURITY: sanitized — never log the token itself.
+  console.log('[ERP] parsed launch context', { buildingId, erpUrl: result.erpUrl, hasToken: !!token })
   return result
 }
 

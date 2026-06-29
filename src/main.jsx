@@ -24,7 +24,11 @@ if (_erpLaunch) {
     )
   } catch { /* non-browser / blocked — best effort */ }
 }
-console.log('[ERP] launch context set:', getErpLaunchContext())
+// SECURITY: sanitized — never log the token.
+const _erpCtxForLog = getErpLaunchContext()
+console.log('[ERP] launch context set', _erpCtxForLog
+  ? { buildingId: _erpCtxForLog.buildingId, erpUrl: _erpCtxForLog.erpUrl, hasToken: !!_erpCtxForLog.token }
+  : null)
 
 // Phase 2.0 — debounced autosave to the current project (via IDB). Registering
 // the store subscription is safe before boot — flush() reads getProjectId()
