@@ -23,6 +23,7 @@ let _active = false
 let _unsub = null
 let _scheduled = false
 let _shadow = {}
+let _coordinated = false
 
 function _snapshot(st) {
   const snap = {}
@@ -30,17 +31,21 @@ function _snapshot(st) {
   return snap
 }
 
-export function startSyncEngine(store) {
+export function startSyncEngine(store, opts = {}) {
   if (_active) return
   _store = store
   _active = true
+  _coordinated = !!opts.coordinated
   _shadow = _snapshot(store.getState()) // seed: existing geometry is NOT re-emitted
-  _unsub = store.subscribe(() => _schedule())
+  // In COORDINATED mode the sync coordinator is the SOLE driver: it calls
+  // flushSyncEngine() only AFTER the canonical pipeline has durably accepted the
+  // mutation (Invariant #5), so the engine must NOT self-subscribe.
+  if (!_coordinated) _unsub = store.subscribe(() => _schedule())
 }
 
 export function stopSyncEngine() {
   if (_unsub) { _unsub(); _unsub = null }
-  _active = false; _store = null; _shadow = {}; _scheduled = false
+  _active = false; _store = null; _shadow = {}; _scheduled = false; _coordinated = false
 }
 
 /** Re-baseline the shadow to current state WITHOUT emitting (used after a
@@ -49,17 +54,25 @@ export function reconcileSyncEngine() {
   if (_active && _store) _shadow = _snapshot(_store.getState())
 }
 
+/**
+ * Coordinated mode — the sync coordinator calls this AFTER the canonical pipeline
+ * has durably accepted the mutation (Invariant #5). `stateOverride` pins the diff
+ * to the exact accepted state, so a mutation landing mid-accept cannot leak into
+ * this projection emit.
+ */
+export function flushSyncEngine(stateOverride) { _flush(stateOverride) }
+
 function _schedule() {
   if (!_active || _scheduled) return
   _scheduled = true
   queueMicrotask(_flush)
 }
 
-function _flush() {
+function _flush(stateOverride) {
   _scheduled = false
   if (!_active || !_store) return
-  const st = _store.getState()
-  if (st._inBatch) { _schedule(); return } // wait until the atomic batch closes
+  const st = stateOverride ?? _store.getState()
+  if (st._inBatch) { if (!_coordinated) _schedule(); return } // wait until the atomic batch closes
 
   const cur = _snapshot(st)
   const prev = _shadow

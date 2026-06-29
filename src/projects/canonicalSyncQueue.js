@@ -148,6 +148,26 @@ export function retryCanonicalUpload() {
   _pump()
 }
 
+/**
+ * Phase 2.5A (#5) — mark the IDB-held snapshot as ACCEPTED (durably persisted +
+ * enqueued for upload) WITHOUT kicking the upload pump. The sync coordinator
+ * schedules the debounced upload itself, decoupling canonical acceptance from R2
+ * completion. Same durable dirty/persist semantics as markSnapshotDirty, minus
+ * the immediate _pump().
+ */
+export function noteCanonicalDirty() {
+  if (!_active) return
+  _dirty = true
+  _dirtySeq++
+  _failed = false
+  _attempts = 0
+  _persist()
+  _notify()
+}
+
+/** Kick the upload worker — the coordinator's debounced upload + unload flush. */
+export function pumpCanonicalUpload() { _pump() }
+
 // ── Worker ───────────────────────────────────────────────────────────────────
 
 function _isPermanentStatus(status) {

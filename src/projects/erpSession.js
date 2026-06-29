@@ -21,8 +21,9 @@ import { getErpLaunchContext } from './erpLaunchContext.js'
 import { initLiveSync, hydrateFromErp, getLiveMode } from './liveSync.js'
 import { initLiveSyncQueue, setResyncBuilder } from './liveSyncQueue.js'
 import { startSyncEngine } from './syncEngine.js'
+import { startSyncCoordinator } from './syncCoordinator.js'
 import { buildFullSyncOps } from './syncEmitters.js'
-import { initCanonicalSyncQueue, installCanonicalAutosave } from './canonicalSyncQueue.js'
+import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
@@ -158,23 +159,21 @@ export async function initErpSession() {
     return true
   }
 
-  // The ONE wiring point: subscribe to the store and emit ordered ops on every
-  // committed geometry change. Started AFTER reopen so its shadow is seeded with
-  // the loaded geometry — the reopen itself emits NOTHING.
-  startSyncEngine(useStore)
-
-  // Continue WRITING the canonical Building Document (R2-backed): the durable
-  // upload outbox + the ERP-mode autosave that persists the model to IDB and
-  // enqueues an upload on every committed change. The reopen above already
-  // fetched the canonical version, so pass it as knownBaseVersion (no extra GET).
-  // Failures are swallowed so a canonical sync hiccup never blocks the editor.
-  // This path NEVER touches liveSyncQueue or the PG projection.
+  // The ONE ORDERED write pipeline (Invariants #5/#7). Init the canonical upload
+  // outbox first (baseVersion seed; failures swallowed so a sync hiccup never
+  // blocks the editor), then start the sync engine in COORDINATED mode (it no
+  // longer self-subscribes) and the coordinator. On every committed change the
+  // coordinator ACCEPTS the canonical snapshot locally (IDB write + enqueue
+  // upload) BEFORE the projection diff is emitted into liveSyncQueue; the R2
+  // upload stays async + debounced. Only the ordering changed — the diff, queue,
+  // projection, checksum, snapshot format, and upload logic are unchanged.
   try {
     await initCanonicalSyncQueue(conn, ctx.buildingId, { knownBaseVersion: reopenVersion })
-    installCanonicalAutosave(useStore, ctx.buildingId)
   } catch (err) {
     console.warn('[erpSession] canonical document sync init failed', err)
   }
+  startSyncEngine(useStore, { coordinated: true })
+  startSyncCoordinator(useStore, ctx.buildingId)
 
   // Editor name reflects the ERP project + building (not a local IDB name).
   // Done AFTER loadProject so it isn't overwritten; projectSettings isn't a
