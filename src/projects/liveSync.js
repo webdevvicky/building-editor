@@ -15,6 +15,12 @@ export function getLiveConn() { return _conn }
 
 export function initLiveSync(conn) {
   console.log('[LIVE] initLiveSync called with:', conn)
+  // Defensive: ALWAYS start a live-sync session from a clean slate. _idMap is
+  // module-scoped and otherwise survives across project/building/tab/launch
+  // switches, leaking another building's floor/room ids into this session
+  // (cross-building write → backend 403). Never rely on teardownLiveSync()
+  // having run between launches.
+  _idMap.clear()
   _conn = conn
   _liveMode = true
   console.log('[LIVE] _liveMode set to true')
@@ -77,6 +83,34 @@ function _registerId(ifcId, erpId, conn) {
 
 function _extractErpId(res) {
   return res?.data?.id ?? res?.id ?? null
+}
+
+// Floor ids are BUILDING-SCOPED. A room MUST resolve its floor only from THIS
+// connection's per-building floorIds map (seeded at launch by _buildFloorIdsMap
+// / ADD_FLOOR). It must NEVER fall back to the global _idMap — that map can hold
+// another building's floor id and a cross-building write is rejected by the
+// backend EditorSessionGuard (403). If the current building has no mapped floor
+// for this key, create it under the CURRENT building (idempotent by
+// sourceEditorId server-side) and cache it; fail loudly if that is impossible.
+async function _ensureFloorErpId(floorKey, c) {
+  const key = floorKey ?? 'F1'
+  const existing = c?.floorIds?.[key]
+  if (existing) return existing
+  if (!c?.buildingId) {
+    throw new Error(`[liveSync] ADD_ROOM: no building bound on the connection; cannot resolve floor "${key}". Refusing to guess a floor id across buildings.`)
+  }
+  console.warn(`[liveSync] ADD_ROOM: floor "${key}" not in this building's floorIds map — creating it under building ${c.buildingId} and retrying.`)
+  const res = await _request(
+    'POST', `/geometry/buildings/${c.buildingId}/floors`,
+    { floorNumber: 1, sourceEditorId: key, floorHeight: 10 }, c,
+  )
+  const erpId = _extractErpId(res)
+  if (!erpId) {
+    throw new Error(`[liveSync] ADD_ROOM: failed to create floor "${key}" for building ${c.buildingId}; got no id back.`)
+  }
+  c.floorIds = c.floorIds ?? {}
+  c.floorIds[key] = erpId
+  return erpId
 }
 
 // Map editor room ifcGlobalIds → ERP room UUIDs (slab/element roomIds are
@@ -262,7 +296,9 @@ export async function fireLiveOp(opType, payload, conn) {
 
     // ── Rooms ─────────────────────────────────────────────────────────────────
     case 'ADD_ROOM': {
-      const floorErpId = payload.floorErpId ?? c?.floorIds?.[payload.floorId ?? 'F1'] ?? _resolveId(payload.floorId ?? 'F1', c)
+      // Building-scoped only — never resolve a floor through the global _idMap
+      // (cross-building reuse). Missing → create under THIS building and retry.
+      const floorErpId = payload.floorErpId ?? await _ensureFloorErpId(payload.floorId ?? 'F1', c)
       const body = {
         sourceEditorId: payload.ifcGlobalId,
         ...(payload.roomTypeCode ? { roomTypeCode: payload.roomTypeCode } : {}),
@@ -301,6 +337,16 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'SAVE_ROOM_VERTICES': {
       const roomErpId = payload.roomErpId ?? _resolveId(payload.roomIfcId, c)
+      // Defensive (mirrors DELETE_ROOM): an unresolved room id means the room's
+      // ADD_ROOM never succeeded. Do NOT POST to /geometry/rooms/null/vertices —
+      // that hits the backend with an invalid UUID and cascades into a 500. No-op,
+      // but log loudly so the REAL upstream failure (the failed ADD_ROOM) stays
+      // visible rather than being masked.
+      if (!roomErpId) {
+        console.error(`[liveSync] SAVE_ROOM_VERTICES: unresolved room id for "${payload.roomIfcId}" — skipping (its ADD_ROOM did not succeed).`)
+        res = { ok: true, noop: true }
+        break
+      }
       const body = {
         vertices: (payload.vertices ?? []).map((v, i) => ({
           xMm: inToMm(v.x ?? 0),

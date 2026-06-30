@@ -235,6 +235,15 @@ Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + t
 ### Locked rules
 - The **editor owns topology** (geometry); the **ERP owns business state** (room name *after* creation,
   status, finishes, costs). Geometry mutations are **editor-session-bound** (`/geometry/*`, single writer).
+- **The default floor uses a CONSTANT `sourceEditorId` = `'F1'` (`DEFAULT_FLOOR_ID`)** — reused for the
+  first floor of *every* building (`erpSession._buildFloorIdsMap`, `syncEmitters.floorAddOp`). Because
+  `'F1'` is not unique across buildings, **floor identity is building-scoped on the ERP**
+  (`BuildingFloor @@unique([buildingId, sourceEditorId])` + a `buildingId`-scoped idempotency lookup).
+  Client safeguards that keep this correct (do not remove): `initLiveSync()` clears `_idMap` on every
+  launch; `ADD_ROOM` resolves its floor **only** from this connection's `floorIds` (never a global id-map
+  fallback) and creates the floor under the current building if missing; `SAVE_ROOM_VERTICES` no-ops on
+  an unresolved room id (never POSTs `/rooms/null/*`). All other geometry entities emit globally-unique
+  `ifcGlobalId`s, so only the floor needs the building-scoped treatment.
 - **Reconstruction is removed** — canonical is never derived from the projection (#6). The old
   blob-import + connect-handoff + autosave-never-push model is gone (the coordinator now writes the
   canonical document continuously); `editor-project`/`buildPackage`-import are deleted.
