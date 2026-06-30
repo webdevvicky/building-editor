@@ -209,39 +209,37 @@ On failure, git hook blocks the commit. Fix the code, re-run.
 
 ---
 
-## ERP Sync — Package Export & Cloud Safety (2026-06-23)
+## ERP Sync — Canonical Building Document + live projection (migration COMPLETE, 2026-06-30)
 
-This editor is the **source of truth** for a connected JRM ERP. `buildPackage(state)`
-(`src/boq/buildPackage.js`) produces the `BuildingModelPackage` the ERP imports;
-`src/projects/` carries the cloud sync.
+This editor is the **single source of truth** for a connected JRM ERP. The canonical model
+is `buildSnapshot(state)` (`src/projects/_snapshot.js`, schemaVersion **7**) — persisted as a
+**versioned JSON document in R2** (the *Canonical Building Document*) and **reopened verbatim**,
+never reconstructed. PostgreSQL in the ERP is a **disposable, deterministic projection** of it.
+Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + the completion report).
 
-### `buildPackage` — `schemaVersion` (currently **3**)
-- **1** — spatial shell: floors → rooms (`vertices[]`/`posXMm`), per-room walls
-  (dims + `faceType` + openings), columns/beams/slabs arrays, MEP `elements[]`.
-- **2** — each COLUMN/BEAM/SLAB element carries a typed **`structural`** sub-object
-  (resolved section/height/span/`concreteM3` + steel grade) + a **`bbs`** sub-object
-  (per-element IS-2502 rows from `computeRebarGroups`). The ERP stores these verbatim
-  and **never recalculates BBS**.
-- **3** — each floor carries the authoritative **wall node graph**: `nodes[]`
-  (`{ifcGlobalId, xMm, yMm, zMm:null, kind: CORNER|TJUNCTION, onWallIfcId}`) + `walls[]`
-  (`{ifcGlobalId, n1IfcId, n2IfcId}`), and `openings[]` gain `positionMm`. The graph
-  is the editor's own `state.nodes`/`wall.n1|n2` exported verbatim (shared-node model →
-  BIM/IFC-grade). `zMm` is null today; future 3-D elevation needs no schema change.
-- Units at the boundary: coords → **mm integer**, lengths/heights → **feet**,
-  thickness → **inches**. IDs: `ifcGlobalId` only (internal UUIDs stripped). Bump the
-  version + extend `scripts/verify-build-package.mjs` when adding geometry.
+### The write pipeline (`src/projects/`)
+- **`syncCoordinator`** owns the ONE ordered flow per committed change: **(1) ACCEPT** — durably
+  persist the canonical snapshot to local IDB + enqueue the R2 upload; **(2) EMIT** — only then does
+  the projection diff (`syncEngine`) enter `liveSyncQueue`, which POSTs `/geometry/*` ops to the ERP
+  `GeometryLiveService`. The R2 upload is async + debounced. (Invariant #5: accept-before-project.)
+- **`syncEngine`** diffs the tracked collections (nodes / walls / rooms, floors via a special-case,
+  the `ELEMENT_REGISTRY` element kinds incl. MEP + risers; openings via their wall) and emits ordered
+  ADD/UPDATE/DELETE ops (parents-first on ADD, children-first on DELETE). Stable identity =
+  `sourceEditorId` (the editor `ifcGlobalId`); **every create is idempotent** (DB-enforced `@@unique`).
+- **`liveSync`** maps ops → `/geometry/*` HTTP and `seedIdMapFromErp` (GET `/geometry/buildings/:id/state`)
+  re-seeds the editor-id → ERP-id map on reopen. **`canonicalReopen`** loads R2 → IDB → empty.
+- Structural/MEP elements carry a typed `structural` sub-object + per-element IS-2502 `bbs` rows in the
+  snapshot; the ERP stores these verbatim and **never recalculates BBS**. Units at the boundary: coords
+  → mm integer, lengths/heights → feet, thickness → inches; IDs are `ifcGlobalId` only.
 
-### Cloud sync — DATA SAFETY (locked)
-- **Autosave writes LOCAL IDB only** (`src/projects/autosave.js`) — it must NEVER push
-  to the cloud. Cloud sync is **explicit**: the user clicks "Sync Now"
-  (`SyncStatusBadge` → `cloudSync.syncToCloud`). An empty-canvas manual sync over a
-  real remote requires a confirm (empty-model guard).
-- **Connect handoff** (`src/projects/connectHandoff.js`) pulls/adopts on connect and
-  **never auto-pushes**; on a no-snapshot it starts blank, on a pull failure it tries
-  DB recovery then surfaces an error — it never overwrites the remote. The ERP's
-  destructive-change guard can return `{quarantined:true}` (held, not synced).
-- Why: an earlier autosave auto-push wiped a connected building's ERP model. These
-  rules exist to make that impossible.
+### Locked rules
+- The **editor owns topology** (geometry); the **ERP owns business state** (room name *after* creation,
+  status, finishes, costs). Geometry mutations are **editor-session-bound** (`/geometry/*`, single writer).
+- **Reconstruction is removed** — canonical is never derived from the projection (#6). The old
+  blob-import + connect-handoff + autosave-never-push model is gone (the coordinator now writes the
+  canonical document continuously); `editor-project`/`buildPackage`-import are deleted.
+- **Quality gate for any geometry change:** `scripts/verify-canonical-sync` · `-canonical-reopen` ·
+  `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` (all must stay green).
 
 ---
 
@@ -319,6 +317,6 @@ A: No. JSDoc + ESLint is the pattern. See `eslint.config.js`.
 
 ---
 
-**Last updated:** 2026-06-18  
+**Last updated:** 2026-06-30  
 **Project owner:** Vignesh  
 **Repo:** `/Users/vignesh/projects/jrm/boq`
