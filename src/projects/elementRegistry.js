@@ -25,10 +25,15 @@ function beamPoint(state, ref) {
   return null
 }
 
-// MEP disciplines all share one positional shape (kind ⇄ discipline).
+// MEP disciplines all share one positional shape (kind ⇄ discipline). The point's
+// room ifcGlobalId rides along (roomIfcId) so the ERP can attribute the placed point
+// to a room for the geometry-first count resolver.
 const mep = (collection, erpKind, discipline) => ({
   collection, erpKind, erpOpType: 'ADD_ELEMENT',
-  toErpPayload: (el) => ({ ifcGlobalId: el.ifcGlobalId, ...xy(el) }),
+  toErpPayload: (el, state) => {
+    const roomIfcId = el.roomId ? state?.rooms?.[el.roomId]?.ifcGlobalId ?? null : null
+    return { ifcGlobalId: el.ifcGlobalId, ...xy(el), ...(roomIfcId ? { roomIfcId } : {}) }
+  },
   toEditorShape: (e) => ({
     ...point(e), discipline, type: e.elementType ?? 'UNKNOWN',
     wallId: null, wallT: null, roomId: null, rotationDeg: 0,

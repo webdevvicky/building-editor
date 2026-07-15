@@ -1784,6 +1784,23 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // The canonical ERP RoomTypeCode (authored once in the ERP taxonomy, consumed
+  // here). Distinct from `type` (the editor preset). Mandatory before sync — an
+  // unauthored room syncs no roomTypeCode and the ERP defaults it to OTHER.
+  setRoomRoomTypeCode(roomId, code) {
+    get()._save()
+    set(s => {
+      const room = s.rooms[roomId]
+      if (!room) return {}
+      return {
+        rooms: {
+          ...s.rooms,
+          [roomId]: { ...room, roomTypeCode: code || null },
+        },
+      }
+    })
+  },
+
   setRoomFinishes(roomId, partialFinishes) {
     get()._save()
     set(s => {

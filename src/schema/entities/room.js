@@ -17,7 +17,13 @@ export const roomSchema = Object.freeze({
     name:        Object.freeze({ type: 'string',  required: true }),
     wallIds:     Object.freeze({ type: 'array',   required: true,  default: () => [],
                                  itemType: 'string', refTarget: 'wall' }),
+    // `type` is the editor PRESET (UI/geometry shortcut) — not the domain
+    // classification. The canonical business classification is `roomTypeCode`, a
+    // RoomTypeCode authored ONCE in the ERP taxonomy and consumed here (fetched on
+    // connect, cached offline). One preset → many RoomTypes; the user picks the
+    // specific code. Null until authored; mandatory before sync.
     type:        Object.freeze({ type: 'string',  required: true,  oneOf: ROOM_TYPES }),
+    roomTypeCode: Object.freeze({ type: 'string|null', required: true, default: null }),
     customType:  Object.freeze({ type: 'string|null', required: true, default: null }),
     finishes:    Object.freeze({ type: 'object|null', required: true }),
     plasterSystemId: Object.freeze({ type: 'string|null', required: true, default: null }),

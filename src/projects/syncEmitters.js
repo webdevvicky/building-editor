@@ -11,6 +11,7 @@
 
 import * as M from './syncMappers.js'
 import { ELEMENT_ENTRIES, ELEMENT_COLLECTIONS, entryForCollection } from './elementRegistry.js'
+import { getWallSurfaces } from '../topology/surfaces.js'
 
 export { ELEMENT_ENTRIES, ELEMENT_COLLECTIONS }
 
@@ -62,11 +63,13 @@ export function floorSignature(floor) {
   return `${floor.sequence ?? 0},${floor.floorHeightFt ?? 10},${floor.floorLength ?? ''},${floor.floorWidth ?? ''}`
 }
 
-// roomShape is the only whitelisted shape enum we can assert; roomTypeCode is
-// intentionally omitted (editor types ≠ taxonomy codes → would 422). The ERP
-// defaults the room type to OTHER; staff set it there.
+// The editor is the source of truth for room type (a physical classification):
+// `room.roomTypeCode` is a canonical RoomTypeCode the editor fetched from the ERP
+// taxonomy, so it syncs VERBATIM (no mapping). Omitted only if unauthored (the ERP
+// then defaults to OTHER); the editor makes it mandatory before sync. The idempotent
+// ADD/replay updates the ERP room type only when a code is present (never clobbers).
 export function roomAddOp(room) {
-  return { opType: 'ADD_ROOM', payload: { ifcGlobalId: room.ifcGlobalId, floorId: room.floorId ?? 'F1', roomShape: 'POLYGON', ...(room.name ? { name: room.name } : {}) } }
+  return { opType: 'ADD_ROOM', payload: { ifcGlobalId: room.ifcGlobalId, floorId: room.floorId ?? 'F1', roomShape: 'POLYGON', ...(room.roomTypeCode ? { roomTypeCode: room.roomTypeCode } : {}), ...(room.name ? { name: room.name } : {}) } }
 }
 export function roomDeleteOp(ifcGlobalId) {
   return { opType: 'DELETE_ROOM', payload: { ifcGlobalId } }
@@ -89,6 +92,11 @@ export function roomVerticesOp(state, room) {
 export function wallAddOp(state, wall, roomIfcId) {
   const n1 = state.nodes?.[wall.n1]
   const n2 = state.nodes?.[wall.n2]
+  // A wall is a perimeter (exterior) wall when one of its two faces is open to
+  // outside (owned by no room). The ERP uses this to author a WALL_EXTERIOR surface
+  // for the owner room — the source-of-truth for elevation work.
+  const surf = getWallSurfaces(state, wall.id)
+  const isExterior = !!surf && (surf.faceA.roomId === null || surf.faceB.roomId === null)
   return {
     opType: 'ADD_WALL',
     payload: {
@@ -101,6 +109,7 @@ export function wallAddOp(state, wall, roomIfcId) {
       thickness: wall.thickness,
       materialKey: M.wallMaterial(wall.materialKey),
       orientation: M.wallOrientation(n1, n2),
+      isExterior,
     },
   }
 }

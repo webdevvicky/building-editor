@@ -141,6 +141,9 @@ export async function fireLiveOp(opType, payload, conn) {
         thicknessMm: inToMm(payload.thickness ?? 9),
         n1NodeId: payload.n1IfcId ? _resolveId(payload.n1IfcId, c) : null,
         n2NodeId: payload.n2IfcId ? _resolveId(payload.n2IfcId, c) : null,
+        // Perimeter flag → the ERP gives the owner room a WALL_EXTERIOR surface too,
+        // so elevation work anchors correctly and interior-only rooms emit no exterior.
+        isExterior: payload.isExterior ?? false,
       }, c)
       const erpId = _extractErpId(res)
       if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
@@ -549,6 +552,9 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.slabRole !== undefined ? { slabRole: payload.slabRole } : {}),
         ...(payload.slabType !== undefined ? { slabType: payload.slabType } : {}),
         ...(payload.bars !== undefined ? { bars: payload.bars } : {}),
+        // Editor room ifcGlobalId (resolved to BuildingElement.roomId server-side) so
+        // placed MEP points count per room under the geometry-first resolver.
+        ...(payload.roomIfcId ? { roomIfcId: payload.roomIfcId } : {}),
       }
       const elemRoomIds = _resolveRoomIds(payload.roomIds, c)
       if (elemRoomIds.length) body.roomIds = elemRoomIds

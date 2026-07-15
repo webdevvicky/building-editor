@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useSyncExternalStore } from 'react'
 import { useStore } from '../store'
+import { subscribeRoomTypes, getCachedRoomTypes } from '../projects/taxonomy.js'
 import { getBoqLines } from '../boq/lines.js'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { getRoomGeometry, getEffectiveWallLengthFt } from '../topology/index.js'
@@ -105,6 +106,7 @@ export default function RoomDetailPanel() {
   const selectRoom              = useStore(s => s.selectRoom)
   const undo                    = useStore(s => s.undo)
   const setRoomType             = useStore(s => s.setRoomType)
+  const setRoomRoomTypeCode     = useStore(s => s.setRoomRoomTypeCode)
   const setRoomFinishes         = useStore(s => s.setRoomFinishes)
   const setRoomPlasterSystem    = useStore(s => s.setRoomPlasterSystem)
   const setRoomDado             = useStore(s => s.setRoomDado)
@@ -114,6 +116,9 @@ export default function RoomDetailPanel() {
   const setRoomKitchenCounter      = useStore(s => s.setRoomKitchenCounter)
   const setRoomBalconyHandrail     = useStore(s => s.setRoomBalconyHandrail)
   const getOverlappingRoomName  = useStore(s => s.getOverlappingRoomName)
+  // Canonical ERP RoomType taxonomy (fetched on connect, cached offline). The
+  // room-type picker sources this list — the editor never owns the taxonomy.
+  const erpRoomTypes = useSyncExternalStore(subscribeRoomTypes, getCachedRoomTypes)
 
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal]         = useState('')
@@ -259,8 +264,30 @@ export default function RoomDetailPanel() {
         </div>
       )}
 
-      {/* Room type selector */}
+      {/* Canonical Room Type (ERP taxonomy) — MANDATORY, authoritative
+          classification. Sourced from the tenant's fetched RoomType list; the
+          editor never owns this taxonomy. Drives ERP ghosts/defaults/comparison. */}
       <Field label="Room Type">
+        <select
+          value={room.roomTypeCode || ''}
+          onChange={e => setRoomRoomTypeCode(room.id, e.target.value)}
+          style={!room.roomTypeCode ? { borderColor: 'var(--color-error)' } : undefined}
+        >
+          <option value="">{erpRoomTypes.length ? '— Select room type —' : '(connect to load room types)'}</option>
+          {erpRoomTypes.map(rt => (
+            <option key={rt.code} value={rt.code}>{rt.label}</option>
+          ))}
+        </select>
+      </Field>
+      {!room.roomTypeCode && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)', marginTop: 'calc(-1 * var(--space-2))', marginBottom: 'var(--space-3)' }}>
+          Room type is required before this room can sync to the ERP.
+        </div>
+      )}
+
+      {/* Preset — a UI/geometry authoring shortcut only (NOT the domain
+          classification). Seeds default finishes/geometry; never synced as a type. */}
+      <Field label="Preset">
         <select value={room.type || 'OTHER'}
           onChange={e => setRoomType(room.id, e.target.value)}>
           {ROOM_TYPES.map(t => (

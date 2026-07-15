@@ -6,6 +6,7 @@ import { useStore } from './store'
 import { installAutosave } from './projects/autosave'
 import { getCurrentProjectId, bootPersistence } from './projects/manager'
 import { hydrateConnCache } from './projects/cloudConn'
+import { hydrateRoomTypesCache, initRoomTypesSync } from './projects/taxonomy'
 import { parseErpLaunchHash, setErpLaunchContext, getErpLaunchContext } from './projects/erpLaunchContext'
 import { initErpSession } from './projects/erpSession'
 
@@ -51,6 +52,12 @@ async function boot() {
     // Hydrate the in-memory cloud-connection mirror so getCachedConn() (autosave
     // hot path) and the sync badge are correct from first render.
     await hydrateConnCache()
+    // Canonical RoomType taxonomy: load the offline cache first (picker has data
+    // before render), then wire the connect-driven refresh (fetches from the ERP
+    // whenever a connection is present). The editor consumes this taxonomy; it
+    // never owns one.
+    await hydrateRoomTypesCache()
+    initRoomTypesSync()
     // ERP-driven launch: activate live sync (build the floor-id map, initLiveSync,
     // hydrate the id-map) BEFORE the app renders so the canvas + every mutation
     // are bound to the ERP building from first paint. Failures are swallowed so a
