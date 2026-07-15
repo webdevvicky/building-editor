@@ -1801,6 +1801,27 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // Materialize ONE ghost into a real, editable object at the room centroid. Ghosts
+  // are a DERIVED overlay (see ghostCatalog) — Accept is the ONLY operation that
+  // creates a persisted object. Before Accept a ghost exists nowhere: not in the
+  // model, not in the snapshot, not synced, not in the BOQ. Returns the new id.
+  acceptGhost(roomId, key) {
+    const room = get().rooms[roomId]
+    if (!room) return null
+    const poly = (room.nodeOrder ?? []).map(nid => get().nodes[nid]).filter(Boolean)
+    const cx = poly.length ? poly.reduce((s, n) => s + n.x, 0) / poly.length : 0
+    const cy = poly.length ? poly.reduce((s, n) => s + n.y, 0) / poly.length : 0
+    let id = null
+    if (key === 'electrical') {
+      id = get().addElectricalPoint('SWITCH_SOCKET', cx, cy, null, null)
+      if (id) get().updateElectricalPoint(id, { roomId })
+    } else if (key === 'plumbing') {
+      id = get().addPlumbingFixture('FIXTURE', cx, cy, null, null)
+      if (id) get().updatePlumbingFixture(id, { roomId })
+    }
+    return id
+  },
+
   setRoomFinishes(roomId, partialFinishes) {
     get()._save()
     set(s => {

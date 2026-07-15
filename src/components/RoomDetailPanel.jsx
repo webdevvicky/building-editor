@@ -1,6 +1,7 @@
 import { useState, useMemo, useSyncExternalStore } from 'react'
 import { useStore } from '../store'
 import { subscribeRoomTypes, getCachedRoomTypes } from '../projects/taxonomy.js'
+import { computeRoomGhosts } from '../ghosts/ghostCatalog.js'
 import { getBoqLines } from '../boq/lines.js'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
 import { getRoomGeometry, getEffectiveWallLengthFt } from '../topology/index.js'
@@ -107,6 +108,9 @@ export default function RoomDetailPanel() {
   const undo                    = useStore(s => s.undo)
   const setRoomType             = useStore(s => s.setRoomType)
   const setRoomRoomTypeCode     = useStore(s => s.setRoomRoomTypeCode)
+  const acceptGhost             = useStore(s => s.acceptGhost)
+  const electricalPoints        = useStore(s => s.electricalPoints)
+  const plumbingFixtures        = useStore(s => s.plumbingFixtures)
   const setRoomFinishes         = useStore(s => s.setRoomFinishes)
   const setRoomPlasterSystem    = useStore(s => s.setRoomPlasterSystem)
   const setRoomDado             = useStore(s => s.setRoomDado)
@@ -284,6 +288,41 @@ export default function RoomDetailPanel() {
           Room type is required before this room can sync to the ERP.
         </div>
       )}
+
+      {/* Standard vs Placed — the Ghost overlay. Ghosts are a DERIVED view of
+          (room-type standard − placed geometry): reference-data suggestions, never
+          persisted or in the BOQ. Accept materializes ONE real object. */}
+      {room.roomTypeCode && (() => {
+        const ghostState = { rooms, walls, electricalPoints, plumbingFixtures }
+        const rows = computeRoomGhosts(ghostState, room.id, erpRoomTypes)
+        if (rows.every(r => r.standard === 0 && r.placed === 0)) return null
+        return (
+          <div style={{ marginBottom: 'var(--space-3)', padding: 'var(--space-2)', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+            <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-1)' }}>
+              Standard vs Placed
+            </div>
+            {rows.map(r => (
+              <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>{r.label}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span>Std {r.standard} · Placed {r.placed}
+                    {r.ghost > 0 && <span style={{ color: 'var(--color-text-muted)' }}> · {r.ghost} ghost</span>}
+                    {r.additional > 0 && <span style={{ color: 'var(--color-warning, #b45309)' }}> · +{r.additional}</span>}
+                  </span>
+                  {r.acceptable && r.ghost > 0 && (
+                    <Button size="sm" variant="secondary" onClick={() => acceptGhost(room.id, r.key)}>Accept</Button>
+                  )}
+                </span>
+              </div>
+            ))}
+            {rows.some(r => r.acceptable && r.ghost > 0) && (
+              <Button size="sm" onClick={() => rows.forEach(r => { for (let i = 0; i < (r.acceptable ? r.ghost : 0); i++) acceptGhost(room.id, r.key) })}>
+                Accept All
+              </Button>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Preset — a UI/geometry authoring shortcut only (NOT the domain
           classification). Seeds default finishes/geometry; never synced as a type. */}

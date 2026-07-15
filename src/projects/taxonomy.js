@@ -79,6 +79,10 @@ export async function refreshRoomTypes(conn = getCachedConn()) {
     code: rt.code,
     label: rt.label ?? rt.code,
     category: rt.category ?? null,
+    // The room-type STANDARD (defaults) — reference data for Ghost suggestions +
+    // the Standard-vs-Actual comparison. NEVER a BOQ quantity (the ERP severs it).
+    defaultFixtureSpec: rt.defaultFixtureSpec ?? {},
+    defaultElectricalPointCount: rt.defaultElectricalPointCount ?? 0,
   }))
   const storage = await _getStorage()
   await storage.put(DB_STORES.METADATA, ROOM_TYPES_KEY, { value: normalized })
