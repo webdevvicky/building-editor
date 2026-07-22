@@ -23,6 +23,7 @@ import { getAssetStorage } from './storage/getAssetStorage.js'
 import { DB_STORES } from './storage/indexedDb.js'
 import { noteCanonicalDirty, pumpCanonicalUpload } from './canonicalSyncQueue.js'
 import { flushSyncEngine } from './syncEngine.js'
+import { isEditorReadOnly } from './editorWriteGuard.js'
 
 const UPLOAD_DEBOUNCE_MS = 10_000
 
@@ -76,6 +77,9 @@ function _onUnload() {
 async function _tick() {
   _scheduled = false
   if (!_active || !_store) return
+  // Write gate: a failed reopen (integrity failure) blocks ALL writes so a blank/
+  // partial canvas can never overwrite good canonical data. No accept, no emit.
+  if (isEditorReadOnly()) return
   const st = _store.getState()
   if (st._inBatch) { _schedule(); return } // wait until the atomic batch closes
   if (_running) { _rerun = true; return }   // a change arrived mid-accept → re-run after

@@ -120,6 +120,17 @@ async function main() {
   ok("source === 'empty'", res.source === 'empty')
   ok('loadProject NOT called with geometry (blank canvas)', loaded === null)
   ok('id-map seeded even on empty (write-through still resolves UPDATE)', resolveErpId('ifc-tj', conn) === 'erp-tj')
+
+  // ── 5. R2 doc present but BAD checksum, NO IDB rescue → integrity-failed ───
+  //     (the P0 write-gate case: must NOT be treated as 'empty', or a blank canvas
+  //     would overwrite the server's good data).
+  header('R2 bad checksum, no IDB → integrity-failed (write gate)')
+  setAssetStorage(makeMemoryAdapter()); teardownLiveSync(); initLiveSync(conn)
+  docMode = 'badchecksum'; docVersion = 7
+  loaded = null
+  res = await reopenCanvas(conn, 'bld', (d) => { loaded = d })
+  ok("source === 'integrity-failed' (NOT 'empty')", res.source === 'integrity-failed')
+  ok('loadProject NOT called (blank, but writes will be gated)', loaded === null)
   teardownLiveSync()
 
   console.log(`\n${fail === 0 ? '✓ PASS' : '✗ FAIL'} — ${pass} passed, ${fail} failed`)

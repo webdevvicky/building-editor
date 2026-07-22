@@ -25,6 +25,7 @@ import { startSyncCoordinator } from './syncCoordinator.js'
 import { buildFullSyncOps } from './syncEmitters.js'
 import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
+import { engageEditorReadOnly, editorReadOnlyReason } from './editorWriteGuard.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
 
@@ -133,6 +134,20 @@ export async function initErpSession() {
     })
     reopenVersion = res?.snapshotVersion ?? null
     console.log('[erpSession] reopen source', res?.source ?? 'unknown')
+
+    // INTEGRITY FAILURE: the server holds a canonical document we could not verify,
+    // and no local snapshot rescued it. Engage the write gate and DO NOT start the
+    // write pipeline — a blank/partial canvas must never overwrite good server data.
+    // Live sync stays active for reads (the id-map is seeded); the user must reload.
+    if (res?.source === 'integrity-failed') {
+      engageEditorReadOnly(
+        'This building could not be opened safely — its saved data failed an integrity ' +
+        'check. Editing is disabled so your saved work is not overwritten. Please reload ' +
+        'the page; if this keeps happening, contact support.',
+      )
+      console.error('[erpSession] canonical integrity failure —', editorReadOnlyReason())
+      return true
+    }
   }
 
   // The ONE ORDERED write pipeline (Invariants #5/#7). Init the canonical upload

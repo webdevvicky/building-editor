@@ -23,6 +23,7 @@ import {
   getCanonicalDocument,
   statusCodeFromError,
 } from './canonicalDoc.js'
+import { isEditorReadOnly } from './editorWriteGuard.js'
 
 const SCHEMA_VERSION_FALLBACK = 7
 const MAX_ATTEMPTS = 5
@@ -188,7 +189,9 @@ async function _refetchBaseVersion() {
  * Returns one of: 'idle' | 'uploaded' | 'retry' | 'conflict-retry' | 'failed'.
  */
 export async function sync() {
-  if (!_active || _inflight || _failed || !_dirty) return 'idle'
+  // Write gate: refuse to upload after a failed reopen — a blank/partial canvas must
+  // never overwrite good canonical data (the base-version CAS can't catch this).
+  if (!_active || _inflight || _failed || !_dirty || isEditorReadOnly()) return 'idle'
   const seqAtStart = _dirtySeq
   const doc = await getAssetStorage().get(DB_STORES.SNAPSHOTS, _snapKey())
   if (!doc || !doc.payload) { _dirty = false; await _persist(); _notify(); return 'idle' }
