@@ -26,6 +26,7 @@ import { buildFullSyncOps } from './syncEmitters.js'
 import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
 import { engageEditorReadOnly, editorReadOnlyReason } from './editorWriteGuard.js'
+import { initEditorAuth, getEditorToken } from './editorAuth.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
 
@@ -105,13 +106,24 @@ export async function initErpSession() {
     : null)
   if (!ctx) return false
 
+  // Keep the 15-min access token fresh for the whole session (Fix 3). initEditorAuth
+  // seeds the live token + schedules proactive refresh from the 12h refresh token; if
+  // the launch link carried no refresh token, it falls back to the single access token.
+  initEditorAuth({
+    erpUrl: ctx.erpUrl,
+    token: ctx.token,
+    refreshToken: ctx.refreshToken,
+    expiresAt: ctx.expiresAt,
+  })
+
   const { floorIds, isNewBuilding } = await _buildFloorIdsMap(ctx)
 
   const conn = {
     buildingId: ctx.buildingId,
     floorIds,
     erpUrl: ctx.erpUrl,
-    getToken: () => Promise.resolve(ctx.token),
+    // Always resolve the LIVE token so a mid-session refresh is picked up by every write.
+    getToken: () => Promise.resolve(getEditorToken() ?? ctx.token),
   }
   console.log('[ERP] calling initLiveSync with conn:', conn)
   initLiveSync(conn)

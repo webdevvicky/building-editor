@@ -40,9 +40,15 @@ export function parseErpLaunchHash(hash) {
   const token = params.get('token')
   const erpUrl = params.get('erpUrl')
   if (!buildingId || !token || !erpUrl) return null
-  const result = { buildingId, token, erpUrl: erpUrl.replace(/\/$/, '') }
-  // SECURITY: sanitized — never log the token itself.
-  console.log('[ERP] parsed launch context', { buildingId, erpUrl: result.erpUrl, hasToken: !!token })
+  // Optional: the long-lived refresh token + access expiry, used to keep the 15-min
+  // access token fresh across a long editing session (see editorAuth.js).
+  const refreshToken = params.get('refreshToken') || null
+  const expiresAt = params.get('expiresAt') || null
+  const result = { buildingId, token, refreshToken, expiresAt, erpUrl: erpUrl.replace(/\/$/, '') }
+  // SECURITY: sanitized — never log the token(s) themselves.
+  console.log('[ERP] parsed launch context', {
+    buildingId, erpUrl: result.erpUrl, hasToken: !!token, hasRefreshToken: !!refreshToken,
+  })
   return result
 }
 
