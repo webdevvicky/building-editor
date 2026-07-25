@@ -2241,6 +2241,39 @@ reset()
 }
 
 // ─────────────────────────────────────────────────────────────────────
+header('40. Electrical — roomId persisted at placement (ERP per-room count fix)')
+reset()
+{
+  // Two adjacent 10×10 rooms sharing the wall at x=120..
+  const a = buildRoom('Bedroom A', 'BEDROOM', 0, 0)
+  const b = buildRoom('Bedroom B', 'BEDROOM', 10 * FT, 0)
+
+  // A point placed inside room A must persist roomId = A (self-resolved via pointInRoom).
+  const idA = s().addElectricalPoint('LIGHT', a.centerX, a.centerY)
+  ok('point inside room A gets roomId=A at placement',
+    s().electricalPoints[idA].roomId === a.roomId,
+    `got ${s().electricalPoints[idA].roomId}, expected ${a.roomId}`)
+
+  // A point inside room B resolves to B — multi-room disambiguation.
+  const idB = s().addElectricalPoint('SOCKET_5A', b.centerX, b.centerY)
+  ok('point inside room B gets roomId=B at placement',
+    s().electricalPoints[idB].roomId === b.roomId,
+    `got ${s().electricalPoints[idB].roomId}, expected ${b.roomId}`)
+
+  // A point outside every room stays null (no phantom attribution).
+  const idOut = s().addElectricalPoint('LIGHT', -20 * FT, -20 * FT)
+  ok('point outside all rooms gets roomId=null',
+    s().electricalPoints[idOut].roomId === null,
+    `got ${s().electricalPoints[idOut].roomId}`)
+
+  // An explicit roomId arg (the auto-MEP path) is honoured without a redundant query.
+  const idExplicit = s().addElectricalPoint('FAN', -50 * FT, -50 * FT, null, null, a.roomId)
+  ok('explicit roomId arg is persisted (auto-MEP path)',
+    s().electricalPoints[idExplicit].roomId === a.roomId,
+    `got ${s().electricalPoints[idExplicit].roomId}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────
 console.log('\n' + '═'.repeat(70))

@@ -17,6 +17,7 @@
 // coverage — handled in store.js, not here.
 
 import { uidIfc } from './lib/ids.js'
+import { pointInRoom } from './mep/shared/geometry.js'
 
 const DEFAULT_FLOOR_ID = 'F1'
 
@@ -112,10 +113,15 @@ export const createMepSlice = (set, get, uid) => ({
 
   // ── Electrical points ────────────────────────────────────────────────────
 
-  addElectricalPoint(type, x, y, wallId, wallT) {
+  addElectricalPoint(type, x, y, wallId, wallT, roomId = null) {
+    const floorId = get().currentFloorId
     const pt = {
-      ...baseEntity({ uid, discipline: 'ELECTRICAL', type, x, y, wallId, wallT,
-        floorId: get().currentFloorId }),
+      ...baseEntity({ uid, discipline: 'ELECTRICAL', type, x, y, wallId, wallT, floorId }),
+      // Persist the containing room AT placement so the ERP can attribute the point
+      // per-room (geometry-first count resolver). Reuse the existing pointInRoom
+      // hit-test — the same primitive the BOQ network already backfills with; the
+      // auto-MEP caller passes the room it already knows to skip a redundant query.
+      roomId: roomId ?? pointInRoom(get(), x, y, floorId),
       loadW: null,                 // catalog default
       circuitId: null,             // routing engine assigns
       mountHeightFt: null,         // catalog default
@@ -387,7 +393,8 @@ export const createMepSlice = (set, get, uid) => ({
       ids.plumbing.push(get().addPlumbingFixture(sug.type, sug.x, sug.y, sug.wallId, sug.wallT))
     }
     for (const sug of (suggestions.electrical || [])) {
-      ids.electrical.push(get().addElectricalPoint(sug.type, sug.x, sug.y, sug.wallId, sug.wallT))
+      // The room is known here — pass it so addElectricalPoint skips the point-in-room query.
+      ids.electrical.push(get().addElectricalPoint(sug.type, sug.x, sug.y, sug.wallId, sug.wallT, roomId))
     }
     for (const sug of (suggestions.hvac || [])) {
       ids.hvac.push(get().addHvacUnit(sug.type, sug.x, sug.y, sug.wallId, sug.wallT))
