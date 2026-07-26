@@ -25,7 +25,7 @@ import { startSyncCoordinator } from './syncCoordinator.js'
 import { buildFullSyncOps } from './syncEmitters.js'
 import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
-import { engageEditorReadOnly, editorReadOnlyReason } from './editorWriteGuard.js'
+import { engageEditorReadOnly, editorReadOnlyReason, initEditorConnectionWatch } from './editorWriteGuard.js'
 import { initEditorAuth, getEditorToken } from './editorAuth.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
@@ -105,6 +105,11 @@ export async function initErpSession() {
     ? { buildingId: ctx.buildingId, erpUrl: ctx.erpUrl, hasToken: !!ctx.token }
     : null)
   if (!ctx) return false
+
+  // Surface connection loss (doc 48A Phase 0): a disconnected editor must never *look*
+  // saved-to-server. This marks the read-only/offline banner + pauses uploads while
+  // offline; local edits keep persisting to IDB and replay on reconnect (durability).
+  initEditorConnectionWatch()
 
   // Keep the 15-min access token fresh for the whole session (Fix 3). initEditorAuth
   // seeds the live token + schedules proactive refresh from the 12h refresh token; if

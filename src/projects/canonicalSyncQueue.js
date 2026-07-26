@@ -23,7 +23,7 @@ import {
   getCanonicalDocument,
   statusCodeFromError,
 } from './canonicalDoc.js'
-import { isEditorReadOnly } from './editorWriteGuard.js'
+import { isEditorReadOnly, engageEditorReadOnly } from './editorWriteGuard.js'
 
 const SCHEMA_VERSION_FALLBACK = 7
 const MAX_ATTEMPTS = 5
@@ -224,7 +224,17 @@ export async function sync() {
       // clobber a newer one.
       _conflicts++
       await _refetchBaseVersion()
-      if (_conflicts >= MAX_CONFLICTS) { _failed = true; _lastError = 'conflict' }
+      if (_conflicts >= MAX_CONFLICTS) {
+        _failed = true; _lastError = 'conflict'
+        // Persistent stale base = genuine divergence (another writer is ahead). This
+        // is a HARD gate (doc 48A Phase 0): stop diverging so we never clobber the
+        // newer server model — the user must reload to reconcile.
+        engageEditorReadOnly(
+          'This design was changed elsewhere and is now ahead of your copy. Editing is ' +
+          'disabled so your changes do not overwrite the newer version. Please reload to ' +
+          'get the latest design before continuing.',
+        )
+      }
       await _persist()
       _notify()
       return _failed ? 'failed' : 'conflict-retry'
