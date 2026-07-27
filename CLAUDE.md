@@ -247,6 +247,11 @@ Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + t
 - **Reconstruction is removed** — canonical is never derived from the projection (#6). The old
   blob-import + connect-handoff + autosave-never-push model is gone (the coordinator now writes the
   canonical document continuously); `editor-project`/`buildPackage`-import are deleted.
+- **Electrical point types (Stream 2).** A placed electrical point carries a canonical `pointType`
+  (`src/mep/catalogs/electricalPointTypes.js`) chosen at placement (floating palette) and re-synced on
+  change. It rides `ADD_ELEMENT`/`UPDATE_ELEMENT` (in the element `toErpPayload`, so it is part of the
+  change signature) → the ERP persists `BuildingElement.mepPointType` and routes it to a per-type BOQ line
+  (see the ERP `modules/quantity/CLAUDE.md`). Verified by `scripts/verify-electrical-point-type-sync.mjs`.
 - **Quality gate for any geometry change:** `scripts/verify-canonical-sync` · `-canonical-reopen` ·
   `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` (all must stay green).
 
