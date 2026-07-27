@@ -27,6 +27,7 @@ import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
 import { engageEditorReadOnly, editorReadOnlyReason, initEditorConnectionWatch } from './editorWriteGuard.js'
 import { initEditorAuth, getEditorToken } from './editorAuth.js'
+import { setErpConnection } from './erpConnection.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
 
@@ -132,6 +133,16 @@ export async function initErpSession() {
   }
   console.log('[ERP] calling initLiveSync with conn:', conn)
   initLiveSync(conn)
+
+  // Register the authenticated connection in the source-agnostic registry so EVERY
+  // authenticated service (taxonomy today, catalogs/reference data tomorrow) refreshes
+  // automatically — no taxonomy/service-specific wiring in this launch path.
+  setErpConnection({
+    erpUrl: ctx.erpUrl,
+    getToken: conn.getToken,
+    buildingId: ctx.buildingId,
+    source: 'erpLaunch',
+  })
   console.log('[ERP] liveMode after init:', getLiveMode())
 
   // Durable outbox queue (FIFO worker, retry/backoff, IDB persistence). Must be

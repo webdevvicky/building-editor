@@ -11,7 +11,7 @@
 
 import { DB_STORES } from './storage/indexedDb.js'
 import { unwrapErpResponse } from './erpEnvelope.js'
-import { getValidAccessToken, getCachedConn, subscribe as subscribeConn } from './cloudConn.js'
+import { getErpConnection, subscribeErpConnection } from './erpConnection.js'
 
 const ROOM_TYPES_KEY = 'cloud:roomTypes'
 
@@ -22,6 +22,28 @@ function _emit() {
   for (const fn of _listeners) {
     try { fn(_cache ?? []) } catch { /* swallow */ }
   }
+}
+
+// Last taxonomy-load error (null = none). Surfaced so a failed room-types fetch is
+// NEVER invisible (Defect C) — the room-type picker shows it, and it is logged.
+let _error = null
+const _errorListeners = new Set()
+function _emitError() {
+  for (const fn of _errorListeners) {
+    try { fn(_error) } catch { /* swallow */ }
+  }
+}
+
+/** Subscribe to taxonomy-load-error changes (drives useSyncExternalStore). */
+export function subscribeRoomTypesError(fn) {
+  _errorListeners.add(fn)
+  fn(_error)
+  return () => { _errorListeners.delete(fn) }
+}
+
+/** Synchronous read of the last taxonomy-load error message (or null). */
+export function getRoomTypesError() {
+  return _error
 }
 
 /**
@@ -64,13 +86,16 @@ export async function hydrateRoomTypesCache() {
 
 /**
  * Fetch the tenant's active RoomTypes from the ERP and refresh the cache. Called
- * on connect + on demand. On failure the existing cache is left untouched (offline
- * resilience). Returns the current list.
+ * whenever an authenticated ERP connection becomes available — regardless of which
+ * launch path provided it (the connection carries its own `erpUrl` + `getToken`,
+ * so this is launch-mechanism-agnostic). On failure the existing cache is left
+ * untouched (offline resilience) and the error is recorded (never swallowed).
+ * Returns the current list.
  * @param {object|null} conn
  */
-export async function refreshRoomTypes(conn = getCachedConn()) {
+export async function refreshRoomTypes(conn = getErpConnection()) {
   if (!conn) return _cache ?? []
-  const token = await getValidAccessToken(conn)
+  const token = await conn.getToken()
   const url = `${conn.erpUrl.replace(/\/$/, '')}/api/v1/room-types`
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`room-types fetch failed (${res.status})`)
@@ -88,17 +113,31 @@ export async function refreshRoomTypes(conn = getCachedConn()) {
   await storage.put(DB_STORES.METADATA, ROOM_TYPES_KEY, { value: normalized })
   _cache = normalized
   _emit()
+  // A successful refresh clears any prior error surface.
+  if (_error !== null) { _error = null; _emitError() }
   return normalized
 }
 
-// Refresh whenever a connection appears (connect / reconnect). subscribeConn fires
-// immediately with the current connection, so a live connection refreshes at wire
-// time. Idempotent — safe to call once at boot.
+/**
+ * Record a taxonomy-load failure so it is NEVER invisible (Defect C): log it for
+ * developers and expose a message the room-type picker surfaces to the user.
+ */
+function _reportRoomTypesError(err) {
+  const message = err?.message ? String(err.message) : 'Could not load room types from the ERP.'
+  console.error('[taxonomy] room-types refresh failed:', err)
+  _error = message
+  _emitError()
+}
+
+// Refresh whenever an authenticated ERP connection appears — from ANY launch path
+// (legacy connect OR #erpLaunch). subscribeErpConnection fires immediately with the
+// current connection, so a live connection refreshes at wire time. Idempotent —
+// safe to call once at boot. No launch-specific wiring lives here.
 let _wired = false
 export function initRoomTypesSync() {
   if (_wired) return
   _wired = true
-  subscribeConn((conn) => {
-    if (conn) refreshRoomTypes(conn).catch(() => { /* offline / non-fatal */ })
+  subscribeErpConnection((conn) => {
+    if (conn) refreshRoomTypes(conn).catch(_reportRoomTypesError)
   })
 }

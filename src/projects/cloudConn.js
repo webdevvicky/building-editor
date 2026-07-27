@@ -23,6 +23,7 @@
 
 import { DB_STORES } from './storage/indexedDb.js'
 import { unwrapErpResponse } from './erpEnvelope.js'
+import { setErpConnection, clearErpConnection } from './erpConnection.js'
 
 // ── Global storage key ───────────────────────────────────────────────────────
 const GLOBAL_CONN_KEY = 'cloud:connection'
@@ -135,6 +136,15 @@ export async function setCloudConn(conn) {
   await storage.put(DB_STORES.METADATA, GLOBAL_CONN_KEY, { value: record })
   _connCache = record
   _emit()
+  // Bridge the legacy connect path into the source-agnostic ERP connection registry
+  // (DRY — one place covers both #connect handoff + the manual Connect dialog). The
+  // connection carries its own token accessor so authenticated services stay
+  // launch-mechanism-agnostic.
+  setErpConnection({
+    erpUrl: record.erpUrl,
+    getToken: () => getValidAccessToken(record),
+    source: 'cloudConn',
+  })
   return record
 }
 
@@ -162,6 +172,8 @@ export async function clearCloudConn() {
   await storage.delete(DB_STORES.METADATA, GLOBAL_CONN_KEY)
   _connCache = null
   _emit()
+  // Only clears the registry if the active connection came from this (legacy) path.
+  clearErpConnection('cloudConn')
 }
 
 /**

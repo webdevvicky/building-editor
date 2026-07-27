@@ -1,6 +1,6 @@
 import { useState, useMemo, useSyncExternalStore } from 'react'
 import { useStore } from '../store'
-import { subscribeRoomTypes, getCachedRoomTypes } from '../projects/taxonomy.js'
+import { subscribeRoomTypes, getCachedRoomTypes, subscribeRoomTypesError, getRoomTypesError } from '../projects/taxonomy.js'
 import { computeRoomGhosts } from '../ghosts/ghostCatalog.js'
 import { getBoqLines } from '../boq/lines.js'
 import { GRID_IN, DEFAULT_WALL_HEIGHT_IN } from '../geometry'
@@ -123,6 +123,8 @@ export default function RoomDetailPanel() {
   // Canonical ERP RoomType taxonomy (fetched on connect, cached offline). The
   // room-type picker sources this list — the editor never owns the taxonomy.
   const erpRoomTypes = useSyncExternalStore(subscribeRoomTypes, getCachedRoomTypes)
+  // Defect C: a failed taxonomy load must be visible, not silent.
+  const roomTypesError = useSyncExternalStore(subscribeRoomTypesError, getRoomTypesError)
 
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal]         = useState('')
@@ -283,6 +285,11 @@ export default function RoomDetailPanel() {
           ))}
         </select>
       </Field>
+      {roomTypesError && !erpRoomTypes.length && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)', marginTop: 'calc(-1 * var(--space-2))', marginBottom: 'var(--space-3)' }}>
+          ⚠ Couldn't load room types from the ERP: {roomTypesError}. Check your connection and reload.
+        </div>
+      )}
       {!room.roomTypeCode && (
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)', marginTop: 'calc(-1 * var(--space-2))', marginBottom: 'var(--space-3)' }}>
           Room type is required before this room can sync to the ERP.
