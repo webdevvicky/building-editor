@@ -169,6 +169,21 @@ function _flush(stateOverride) {
       }
     }
   }
+  // UPDATES — room properties (roomTypeCode). A room-type change on an ALREADY-synced
+  // room re-emits ADD_ROOM: createRoom is idempotent by sourceEditorId and its replay
+  // branch updates roomTypeId when the payload carries roomTypeCode (geometry-live.service
+  // .ts:158,181) — the SAME path "Resync all" uses, so an incremental type change projects
+  // to the ERP without a full resync. roomTypeCode rides ONLY on ADD_ROOM (PATCH /rooms is
+  // SHAPE-only by design), so re-emitting the create is the sole incremental route. Guard on
+  // a roomTypeCode delta: name is ERP-owned + ignored on replay, and geometry re-emits via
+  // the moved-node vertices path above.
+  for (const id in cur.rooms) {
+    const p = prev.rooms?.[id]
+    if (!p) continue
+    if ((cur.rooms[id].roomTypeCode ?? null) !== (p.roomTypeCode ?? null)) {
+      updateOps.push(E.roomAddOp(cur.rooms[id]))
+    }
+  }
   // UPDATES — walls (geometry) + opening delta
   for (const id in cur.walls) {
     const p = prev.walls?.[id]
