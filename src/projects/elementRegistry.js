@@ -32,7 +32,16 @@ const mep = (collection, erpKind, discipline) => ({
   collection, erpKind, erpOpType: 'ADD_ELEMENT',
   toErpPayload: (el, state) => {
     const roomIfcId = el.roomId ? state?.rooms?.[el.roomId]?.ifcGlobalId ?? null : null
-    return { ifcGlobalId: el.ifcGlobalId, ...xy(el), ...(roomIfcId ? { roomIfcId } : {}) }
+    return {
+      ifcGlobalId: el.ifcGlobalId,
+      ...xy(el),
+      ...(roomIfcId ? { roomIfcId } : {}),
+      // Stream 2: carry the canonical MEP point classification. In toErpPayload so it
+      // rides BOTH the ADD and (SHAPE-only) UPDATE bodies AND the change signature
+      // (syncEmitters.signature stringifies this) — so a point-type change re-syncs.
+      // Only electrical points define pointType today; a benign no-op for other disciplines.
+      ...(el.pointType ? { pointType: el.pointType } : {}),
+    }
   },
   toEditorShape: (e) => ({
     ...point(e), discipline, type: e.elementType ?? 'UNKNOWN',

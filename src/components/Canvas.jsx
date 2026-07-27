@@ -19,6 +19,8 @@ import { getEffectiveWallLengthFt } from '../topology/index.js'
 // Area 2B — rect-room tool atomically creates walls + room + auto-MEP.
 import { suggestPlumbingFixturesForRoom } from '../mep/plumbing/suggestions.js'
 import { suggestElectricalPointsForRoom } from '../mep/electrical/suggestions.js'
+import { catalogTypeFor, DEFAULT_POINT_TYPE } from '../mep/catalogs/electricalPointTypes.js'
+import ElectricalPointPalette from './ElectricalPointPalette.jsx'
 import { suggestHvacUnitsForRoom }        from '../mep/hvac/suggestions.js'
 import { suggestFireDevicesForRoom }      from '../mep/fire/suggestions.js'
 import { suggestElvDevicesForRoom }       from '../mep/elv/suggestions.js'
@@ -38,11 +40,6 @@ import UnderlayLayer from './UnderlayLayer.jsx'
 // lands. Plumbing tool drops one WC per click; user then changes the type
 // via PlumbingFixturePanel. The picker is Phase 1.x polish.
 const DEFAULT_PLUMBING_FIXTURE_TYPE = 'WC'
-
-// Phase 1 electrical — fixed placeholder type until a floating type picker
-// lands. Electrical tool drops one LIGHT per click; user then changes the
-// type via ElectricalPointPanel. The picker is Phase 1.x polish.
-const DEFAULT_ELECTRICAL_POINT_TYPE = 'LIGHT'
 
 // Phase 1 hvac — fixed placeholder type until a floating type picker lands.
 // HVAC tool drops one AC_INDOOR_UNIT per click; user then changes the type
@@ -760,7 +757,10 @@ export default function Canvas() {
         const id = store.addPlumbingFixture(DEFAULT_PLUMBING_FIXTURE_TYPE, x, y, wallId, wallT)
         store.selectPlumbingFixture(id)
       } else if (activeTool === 'electrical') {
-        const id = store.addElectricalPoint(DEFAULT_ELECTRICAL_POINT_TYPE, x, y, wallId, wallT)
+        // Stamp the canonical point type chosen in the floating palette; derive the
+        // IS-732 catalog `type` from it for a coherent glyph/load.
+        const pointType = store.selectedElectricalPointType ?? DEFAULT_POINT_TYPE
+        const id = store.addElectricalPoint(catalogTypeFor(pointType), x, y, wallId, wallT, null, pointType)
         store.selectElectricalPoint(id)
       } else if (activeTool === 'hvac') {
         const id = store.addHvacUnit(DEFAULT_HVAC_UNIT_TYPE, x, y, wallId, wallT)
@@ -1300,6 +1300,10 @@ export default function Canvas() {
         </span>
       </div>
     )}
+
+    {/* Stream 2 — floating electrical point-type palette (self-hides unless the
+        Electrical tool is active). Picks the canonical pointType stamped at placement. */}
+    <ElectricalPointPalette />
 
     {/* Area 2B — rectangle-room hint */}
     {activeTool === 'rect_room' && (

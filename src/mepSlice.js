@@ -18,6 +18,7 @@
 
 import { uidIfc } from './lib/ids.js'
 import { pointInRoom } from './mep/shared/geometry.js'
+import { DEFAULT_POINT_TYPE } from './mep/catalogs/electricalPointTypes.js'
 
 const DEFAULT_FLOOR_ID = 'F1'
 
@@ -67,6 +68,9 @@ export const createMepSlice = (set, get, uid) => ({
 
   selectedPlumbingFixtureId: null,
   selectedElectricalPointId: null,
+  // The canonical point type the Electrical placement tool will stamp on the next
+  // placed point (chosen in the floating palette). Ephemeral UI state, not history.
+  selectedElectricalPointType: DEFAULT_POINT_TYPE,
   selectedHvacUnitId:        null,
   selectedFireDeviceId:      null,
   selectedElvDeviceId:       null,
@@ -113,10 +117,13 @@ export const createMepSlice = (set, get, uid) => ({
 
   // ── Electrical points ────────────────────────────────────────────────────
 
-  addElectricalPoint(type, x, y, wallId, wallT, roomId = null) {
+  addElectricalPoint(type, x, y, wallId, wallT, roomId = null, pointType = DEFAULT_POINT_TYPE) {
     const floorId = get().currentFloorId
     const pt = {
       ...baseEntity({ uid, discipline: 'ELECTRICAL', type, x, y, wallId, wallT, floorId }),
+      // Canonical point-type classification (Stream 2) — the BOQ-facing distinction,
+      // synced to the ERP. `type` above stays the IS-732 catalog id (glyph/load).
+      pointType,
       // Persist the containing room AT placement so the ERP can attribute the point
       // per-room (geometry-first count resolver). Reuse the existing pointInRoom
       // hit-test — the same primitive the BOQ network already backfills with; the
@@ -132,6 +139,8 @@ export const createMepSlice = (set, get, uid) => ({
     set(s => ({ electricalPoints: { ...s.electricalPoints, [pt.id]: pt } }))
     return pt.id
   },
+  /** Set the canonical point type the Electrical tool stamps on the next placement. */
+  setSelectedElectricalPointType(pointType) { set({ selectedElectricalPointType: pointType }) },
   updateElectricalPoint(id, partial) {
     if (!get().electricalPoints[id]) return
     get()._save()

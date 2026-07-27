@@ -15,6 +15,10 @@ export const electricalPointSchema = Object.freeze({
     floorId:            Object.freeze({ type: 'ref',     required: true,  default: 'F1', refTarget: 'floor' }),
     discipline:         Object.freeze({ type: 'string',  required: true,  default: 'ELECTRICAL', oneOf: ['ELECTRICAL'] }),
     type:               Object.freeze({ type: 'string',  required: true }),
+    // Canonical point-type classification (Stream 2) — the BOQ-facing distinction
+    // (6A switch vs 16A AC vs geyser …), synced to the ERP. Distinct from `type` (the
+    // IS-732 catalog id driving glyph/load). See src/mep/catalogs/electricalPointTypes.js.
+    pointType:          Object.freeze({ type: 'string',  required: true,  default: 'LIGHT', oneOf: ['LIGHT', 'FAN', 'EXHAUST', 'SWITCH_6A', 'SOCKET_6A', 'SOCKET_16A', 'AC', 'GEYSER', 'HOB', 'CHIMNEY', 'RO', 'INVERTER', 'EXTERNAL_LIGHT', 'SWITCHBOARD_8_MODULE', 'SWITCHBOARD_6_MODULE', 'SWITCHBOARD_4_MODULE', 'SWITCHBOARD_3_MODULE'] }),
     x:                  Object.freeze({ type: 'number',  required: true,  unit: 'inches' }),
     y:                  Object.freeze({ type: 'number',  required: true,  unit: 'inches' }),
     wallId:             Object.freeze({ type: 'ref|null', required: true, default: null, refTarget: 'wall' }),

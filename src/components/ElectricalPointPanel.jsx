@@ -12,6 +12,12 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useUnits } from '../hooks/useUnits'
 import { listPointTypes, getPointType } from '../mep/catalogs/index.js'
+import {
+  ELECTRICAL_POINT_TYPES,
+  POINT_TYPE_LABELS,
+  DEFAULT_POINT_TYPE,
+  catalogTypeFor,
+} from '../mep/catalogs/electricalPointTypes.js'
 import { resolveWireGauge, humanizeMepSource } from '../mep/resolution.js'
 import { dialog } from './ui/Dialog'
 import { toast } from './ui/Toast'
@@ -118,7 +124,21 @@ export default function ElectricalPointPanel() {
         </Button>
       </div>
 
-      <Field label="Type">
+      {/* Canonical point-type classification (Stream 2) — the BOQ-facing distinction,
+          synced to the ERP. Setting it also derives the IS-732 catalog `type` (glyph/load). */}
+      <Field label="Point Type">
+        <select
+          value={point.pointType ?? DEFAULT_POINT_TYPE}
+          onChange={e => updateElectricalPoint(point.id, { pointType: e.target.value, type: catalogTypeFor(e.target.value) })}
+          onKeyDown={e => e.stopPropagation()}
+        >
+          {ELECTRICAL_POINT_TYPES.map(t => (
+            <option key={t} value={t}>{POINT_TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="Catalog Type">
         <select
           value={point.type}
           onChange={e => updateElectricalPoint(point.id, { type: e.target.value })}

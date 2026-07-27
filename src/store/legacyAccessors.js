@@ -75,6 +75,7 @@ export const LEGACY_ACCESSORS = Object.freeze([
   // MEP selection state — one per discipline. Wired via mepSlice.
   Object.freeze({ path: 'selectedPlumbingFixtureId', slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Selected plumbing fixture' }),
   Object.freeze({ path: 'selectedElectricalPointId', slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Selected electrical point' }),
+  Object.freeze({ path: 'selectedElectricalPointType', slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Canonical point type the Electrical tool stamps at placement (Stream 2)' }),
   Object.freeze({ path: 'selectedHvacUnitId',        slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Selected HVAC unit' }),
   Object.freeze({ path: 'selectedFireDeviceId',      slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Selected fire device' }),
   Object.freeze({ path: 'selectedElvDeviceId',       slice: 'view', kind: 'scalar', killBy: KILL_BY, notes: 'Selected ELV device' }),

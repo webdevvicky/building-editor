@@ -555,6 +555,9 @@ export async function fireLiveOp(opType, payload, conn) {
         // Editor room ifcGlobalId (resolved to BuildingElement.roomId server-side) so
         // placed MEP points count per room under the geometry-first resolver.
         ...(payload.roomIfcId ? { roomIfcId: payload.roomIfcId } : {}),
+        // Stream 2: canonical MEP point classification. Whitelisted on the ERP element
+        // DTO (accepted-and-ignored until the deferred subtype routing lands).
+        ...(payload.pointType ? { pointType: payload.pointType } : {}),
       }
       const elemRoomIds = _resolveRoomIds(payload.roomIds, c)
       if (elemRoomIds.length) body.roomIds = elemRoomIds
