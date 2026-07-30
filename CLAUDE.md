@@ -6,11 +6,11 @@
 
 ## What This Is
 
-A Vite + React 19 + Zustand 5 SPA for architectural + MEP design documentation in Indian residential construction. Greenfield — no backend, no migrations, IDB-first persistence.
+A Vite + React 19 + Zustand 5 SPA for architectural + MEP design documentation in Indian residential construction. IDB-first persistence; no local migrations. (Editor-side only — when connected to the JRM ERP it syncs via the backend/R2 pipeline described in "ERP Sync" below; this app itself has no backend of its own.)
 
 - **Entry:** `src/main.jsx` → `src/App.jsx` → Canvas + Panels
 - **State:** Zustand store in `src/store.js` (2700+ lines, 10+ slices)
-- **Quality:** 38 gate-every-commit verify scripts (not Jest/Vitest)
+- **Quality:** 50 gate-every-commit verify scripts (not Jest/Vitest)
 - **Export:** PDF (jsPDF), Excel (SheetJS), CSV
 - **Deploy:** Cloudflare Workers (`wrangler deploy`)
 
@@ -161,9 +161,9 @@ export function useWallSelection() {
 
 ---
 
-## Verification (38 Scripts)
+## Verification (50 Scripts)
 
-No Jest/Vitest. Instead, **38 Node.js scripts** verify by assertion at commit time.
+No Jest/Vitest. Instead, **50 Node.js scripts** verify by assertion at commit time.
 
 **Run all:**
 ```bash
@@ -212,7 +212,7 @@ On failure, git hook blocks the commit. Fix the code, re-run.
 ## ERP Sync — Canonical Building Document + live projection (migration COMPLETE, 2026-06-30)
 
 This editor is the **single source of truth** for a connected JRM ERP. The canonical model
-is `buildSnapshot(state)` (`src/projects/_snapshot.js`, schemaVersion **7**) — persisted as a
+is `buildSnapshot(state)` (`src/projects/_snapshot.js`, schemaVersion **8**) — persisted as a
 **versioned JSON document in R2** (the *Canonical Building Document*) and **reopened verbatim**,
 never reconstructed. PostgreSQL in the ERP is a **disposable, deterministic projection** of it.
 Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + the completion report).
@@ -331,6 +331,6 @@ A: No. JSDoc + ESLint is the pattern. See `eslint.config.js`.
 
 ---
 
-**Last updated:** 2026-06-30  
+**Last updated:** 2026-07-27  
 **Project owner:** Vignesh  
 **Repo:** `/Users/vignesh/projects/jrm/boq`
