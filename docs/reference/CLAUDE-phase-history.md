@@ -337,8 +337,8 @@ and the three deliverable output levels. Validated against two reference
 workbooks in the repo root (`BBS- Karthick M-City (1).xlsx`, `SELVAKUMAR
 (1).xlsx`). **34 verify scripts now gate every commit** (+1 `verify-bbs-export`;
 `verify-bbs` extended with Sections H–N → 168 assertions). Research +
-citations in `docs/BBS-CATEGORIES-RESEARCH.md`; build report in
-`docs/BBS-FULL-MORNING-REPORT.md`.
+citations in `docs/bbs/BBS-CATEGORIES-RESEARCH.md`; build report in
+`docs/bbs/BBS-FULL-MORNING-REPORT.md`.
 
 ### What landed
 
