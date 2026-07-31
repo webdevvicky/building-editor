@@ -130,7 +130,7 @@ The new path is the source of truth going forward. The legacy aggregator stays u
 - `src/bbs/generators/beamRebar.js` — beam generator
 - `src/components/BBSSchedulePanel.jsx` — UI panel
 - `scripts/verify-bbs.mjs` — 123 assertions
-- `BBS_MORNING_REPORT.md` — this file
+- `docs/bbs/BBS_MORNING_REPORT.md` — this file
 
 **Edited (8):**
 - `src/quantities/bbs.js` — slab √area → real `getRoomGeometry` span/width

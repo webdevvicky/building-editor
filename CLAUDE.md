@@ -29,7 +29,7 @@ A Vite + React 19 + Zustand 5 SPA for architectural + MEP design documentation i
 | **Add export format** | `src/export/*.js` (PDF/Excel/CSV builders) |
 | **Write verification** | `scripts/verify-*.mjs` (Node.js with `assert` module) |
 | **Adjust styling** | `src/design/tokens.css` (design variables) + component `.css` files |
-| **See project history** | `docs/CLAUDE-phase-history.md` (35+ phases, locked rules, gotchas) |
+| **See project history** | `docs/reference/CLAUDE-phase-history.md` (35+ phases, locked rules, gotchas) |
 
 ---
 
@@ -305,9 +305,9 @@ npm run lint
 
 ## For More Detail
 
-- **Phase history & locked rules:** `docs/CLAUDE-phase-history.md` (35+ phases)
-- **Architecture deep dive:** `docs/CLAUDE-boq-reference.md` (modules, patterns, tasks)
-- **Business requirements:** `BBS_MORNING_REPORT.md`
+- **Phase history & locked rules:** `docs/reference/CLAUDE-phase-history.md` (35+ phases)
+- **Architecture deep dive:** `docs/reference/CLAUDE-boq-reference.md` (modules, patterns, tasks)
+- **Business requirements:** `docs/bbs/BBS_MORNING_REPORT.md`
 - **Code map (diagrams, module guide, navigation):** `docs/CODEBASE_MAP.md` (if it exists)
 
 ---

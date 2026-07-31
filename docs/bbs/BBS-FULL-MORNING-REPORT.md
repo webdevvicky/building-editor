@@ -7,7 +7,7 @@ Two commits on `main`:
 - `cceafbb` — 6 categories + sub/super column split + substrate
 - `7ea9a2e` — 3-level output (detail rows + abstract + Excel/PDF export)
 
-Research lives in `docs/BBS-CATEGORIES-RESEARCH.md` (7 categories, cited,
+Research lives in `BBS-CATEGORIES-RESEARCH.md` (7 categories, cited,
 cross-checked against both reference workbooks in the repo root).
 
 ---
@@ -138,7 +138,7 @@ per-category pages), wired into the panel.
 
 New: `src/bbs/generators/{sunshade,loft,staircase,strapFooting}Rebar.js`,
 `src/bbs/concrete.js`, `src/export/bbs.js`, `scripts/verify-bbs-export.mjs`,
-`docs/BBS-CATEGORIES-RESEARCH.md`.
+`BBS-CATEGORIES-RESEARCH.md`.
 Extended: `src/bbs/{types,index}.js`, `src/bbs/generators/{column,beam,footing,slab}Rebar.js`,
 `src/specs/{cuttingLength,resolution,reinforcementSpecs}.js`,
 `src/structuralSlice.js`, `src/schema/entities/{wall,column,staircase,foundation,opening}.js`,

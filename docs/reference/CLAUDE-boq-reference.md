@@ -90,7 +90,7 @@ boq/
 │   └── ... (39 more)
 │
 ├── docs/                    # Documentation
-│   └── CLAUDE-boq-reference.md  # THIS FILE
+│   └── reference/CLAUDE-boq-reference.md  # THIS FILE
 │
 ├── public/                  # Static assets
 ├── dist/                    # Build output (Vite)
@@ -100,7 +100,7 @@ boq/
 ├── eslint.config.js
 ├── CLAUDE.md                # (Old comprehensive doc — consider this one instead)
 ├── README.md
-└── BBS_MORNING_REPORT.md    # Business requirements
+└── docs/bbs/BBS_MORNING_REPORT.md    # Business requirements
 
 ```
 
@@ -679,7 +679,7 @@ wrangler deploy
 ## 14. Reference Links (If Added)
 
 - Project README: `README.md`
-- Business requirements: `BBS_MORNING_REPORT.md`
+- Business requirements: `docs/bbs/BBS_MORNING_REPORT.md`
 - Old comprehensive docs: `CLAUDE.md` (325 KB — use only if needed)
 
 ---
