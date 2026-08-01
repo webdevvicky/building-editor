@@ -42,3 +42,6 @@ test-corrupt.json
 .dev.vars*
 !.dev.vars.example
 !.env.example
+
+# MCP server config — may carry API keys/tokens; never commit
+.mcp.json
