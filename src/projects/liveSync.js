@@ -610,6 +610,17 @@ export async function fireLiveOp(opType, payload, conn) {
 // subsequent edits resolve to UPDATE (never a duplicate ADD). It reads the
 // projection for ID RESOLUTION only and NEVER loads the canvas (the canonical
 // document drives reopen). Returns the raw state for callers that want it.
+/**
+ * Register an editor-id → ERP-id mapping directly. Used by the projection
+ * reconstruction for entities whose ERP rows carry NO sourceEditorId (seed-born
+ * geometry): their canvas ids are synthesized, so without this registration a
+ * later UPDATE/DELETE of the reconstructed entity could never resolve its ERP
+ * row and the projection would silently keep it.
+ */
+export function registerIdMapping(editorId, erpId) {
+  if (editorId && erpId) _idMap.set(editorId, erpId)
+}
+
 /** Raw projection state for a building — used by the projection-mismatch guard. */
 export async function fetchBuildingState(conn) {
   const c = conn ?? _conn

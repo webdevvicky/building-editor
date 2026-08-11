@@ -111,4 +111,28 @@ const seedState = {
   console.log('✓ C. counts helper + degenerate-room skip')
 }
 
+// ── D. null-sourceEditorId rows get id-map registrations ────────────────────
+{
+  const nullSidState = {
+    floors: [{ id: 'f1', sourceEditorId: null, floorNumber: 0 }],
+    nodes: [],
+    walls: [0, 1, 2, 3].map((i) => ({
+      id: `erp-wall-${i}`, sourceEditorId: null, heightMm: 3048, thicknessMm: 115,
+      wallMaterial: 'RED_BRICK_4_5_INCH', n1: null, n2: null, openings: [],
+      wallSurfaces: [{ room: { sourceEditorId: 'rm-sid' } }],
+    })),
+    rooms: [{ id: 'erp-room-1', sourceEditorId: 'rm-sid', name: 'R', floorId: 'f1',
+      roomType: null, posXMm: 0, posYMm: 0, length: '10', width: '10',
+      roomShape: 'RECTANGULAR', vertices: [] }],
+  }
+  const { idMappings, counts } = reconstructFromProjection(nullSidState)
+  assert.strictEqual(counts.walls, 4)
+  // every null-sid wall row must be mapped: synthesized canvas id → ERP row id
+  assert.strictEqual(idMappings.length, 4)
+  const erpIds = idMappings.map(([, erpId]) => erpId).sort()
+  assert.deepStrictEqual(erpIds, ['erp-wall-0', 'erp-wall-1', 'erp-wall-2', 'erp-wall-3'])
+  for (const [editorId] of idMappings) assert.ok(editorId.startsWith('rm-sid-w'))
+  console.log('✓ D. null-sourceEditorId rows registered in the id-map')
+}
+
 console.log('✓ verify-projection-reconstruct passed')

@@ -109,6 +109,10 @@ export function reconstructFromProjection(state) {
   const nodes = {}
   const walls = {}
   const rooms = {}
+  // editor-id → ERP-row-id pairs for entities whose ERP rows lack a
+  // sourceEditorId (seed-born geometry) — registered into the live-sync id-map
+  // so UPDATE/DELETE of reconstructed entities resolves the real ERP row.
+  const idMappings = []
 
   // 1. Real node graph (editor-born buildings).
   for (const n of erpNodes) {
@@ -142,6 +146,7 @@ export function reconstructFromProjection(state) {
     const n2 = w.n2?.sourceEditorId
     if (!n1 || !n2 || !nodes[n1] || !nodes[n2]) continue
     const id = w.sourceEditorId ?? uid('wl')
+    if (!w.sourceEditorId && w.id) idMappings.push([id, w.id])
     graphWallIds.add(w.sourceEditorId ?? id)
     walls[id] = {
       id,
@@ -166,6 +171,7 @@ export function reconstructFromProjection(state) {
   //    pair the room's wall rows to edges in creation order (N,S,E,W).
   for (const r of erpRooms) {
     const roomSid = r.sourceEditorId ?? uid('rm')
+    if (!r.sourceEditorId && r.id) idMappings.push([roomSid, r.id])
     const rows = roomWallRows.get(r.sourceEditorId) ?? []
     const graphRows = rows.filter((w) => w.n1?.sourceEditorId && w.n2?.sourceEditorId)
 
@@ -198,6 +204,7 @@ export function reconstructFromProjection(state) {
       wallIds = cornerIds.map((_, i) => {
         const row = rows[i] // creation-order pairing (N,S,E,W for rectangles)
         const id = row?.sourceEditorId ?? `${roomSid}-w${i}`
+        if (row && !row.sourceEditorId && row.id) idMappings.push([id, row.id])
         walls[id] = {
           id,
           ifcGlobalId: id,
@@ -253,6 +260,7 @@ export function reconstructFromProjection(state) {
     payload,
     counts: { rooms: Object.keys(rooms).length, walls: Object.keys(walls).length },
     skipped,
+    idMappings,
   }
 }
 

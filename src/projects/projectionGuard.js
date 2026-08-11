@@ -9,7 +9,7 @@
 // then re-authored by the editor itself through the normal pipeline on the
 // next committed change — the server never synthesizes canonical content.
 
-import { fetchBuildingState } from './liveSync.js'
+import { fetchBuildingState, registerIdMapping } from './liveSync.js'
 import { reconstructFromProjection, projectionCounts } from './projectionReconstruct.js'
 
 let _state = null // { projRooms, projWalls, canvasRooms, canvasWalls } | null
@@ -57,7 +57,10 @@ export async function checkProjectionMismatch(conn, getCanvasCounts) {
 export async function loadFromErp(loadProject) {
   // Refresh the state so the rebuild reflects the newest projection.
   const state = _conn ? await fetchBuildingState(_conn).catch(() => _projection) : _projection
-  const { payload, counts, skipped } = reconstructFromProjection(state ?? {})
+  const { payload, counts, skipped, idMappings } = reconstructFromProjection(state ?? {})
+  // Seed-born rows carry no sourceEditorId — register their synthesized canvas
+  // ids so later UPDATE/DELETE ops resolve the real ERP rows.
+  for (const [editorId, erpId] of idMappings ?? []) registerIdMapping(editorId, erpId)
   loadProject(payload)
   dismissProjectionMismatch()
   return { counts, skipped }
