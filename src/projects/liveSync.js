@@ -610,6 +610,13 @@ export async function fireLiveOp(opType, payload, conn) {
 // subsequent edits resolve to UPDATE (never a duplicate ADD). It reads the
 // projection for ID RESOLUTION only and NEVER loads the canvas (the canonical
 // document drives reopen). Returns the raw state for callers that want it.
+/** Raw projection state for a building — used by the projection-mismatch guard. */
+export async function fetchBuildingState(conn) {
+  const c = conn ?? _conn
+  const data = await _request('GET', `/geometry/buildings/${c.buildingId}/state`, undefined, c)
+  return data?.data ?? data ?? {}
+}
+
 export async function seedIdMapFromErp(conn) {
   const c = conn ?? _conn
   const data = await _request('GET', `/geometry/buildings/${c.buildingId}/state`, undefined, c)

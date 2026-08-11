@@ -25,6 +25,7 @@ import { startSyncCoordinator } from './syncCoordinator.js'
 import { buildFullSyncOps } from './syncEmitters.js'
 import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
+import { checkProjectionMismatch } from './projectionGuard.js'
 import { engageEditorReadOnly, editorReadOnlyReason, initEditorConnectionWatch } from './editorWriteGuard.js'
 import { initEditorAuth, getEditorToken } from './editorAuth.js'
 import { setErpConnection } from './erpConnection.js'
@@ -176,6 +177,18 @@ export async function initErpSession() {
       console.error('[erpSession] canonical integrity failure —', editorReadOnlyReason())
       return true
     }
+
+    // PROJECTION-MISMATCH GUARD: the canonical document may be missing/stale while
+    // the ERP projection holds geometry (seed-born buildings, a lost R2 object).
+    // Non-blocking warning banner + explicit "Load from ERP" reconstruction —
+    // without it, a blank canvas silently diverges from what the ERP bills.
+    checkProjectionMismatch(conn, () => {
+      const s = useStore.getState()
+      return {
+        rooms: Object.keys(s.rooms ?? {}).length,
+        walls: Object.keys(s.walls ?? {}).length,
+      }
+    }).catch(() => {})
   }
 
   // The ONE ORDERED write pipeline (Invariants #5/#7). Init the canonical upload

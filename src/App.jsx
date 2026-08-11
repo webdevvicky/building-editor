@@ -34,6 +34,7 @@ import RoomBreakdownPanel from './components/RoomBreakdownPanel'
 import ErpConnection from './components/ErpConnection'
 import SyncStatusBadge from './components/SyncStatusBadge'
 import EditorReadOnlyBanner from './components/EditorReadOnlyBanner'
+import ProjectionMismatchBanner from './components/ProjectionMismatchBanner'
 import { DialogHost } from './components/ui/Dialog'
 import { ToastHost } from './components/ui/Toast'
 import { DesktopGate } from './components/DesktopGate'
@@ -149,6 +150,7 @@ export default function App() {
         <ToastHost />
         <SyncStatusBadge />
         <EditorReadOnlyBanner />
+        <ProjectionMismatchBanner />
       </div>
     </DesktopGate>
   )
