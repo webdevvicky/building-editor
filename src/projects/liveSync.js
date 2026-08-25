@@ -8,6 +8,16 @@ let _liveMode = false
 let _conn = null
 const _idMap = new Map()
 
+// A PATCH/DELETE whose target id never resolved must NOT reach the wire as `/null`:
+// one such op 500s, and because the queue blocks on failure, everything behind it
+// silently stops syncing. Skipping is safe — the canonical document is the source of
+// truth and Resync-all reconciles the projection.
+function _skipUnresolved(kind, editorId) {
+  console.warn(`[liveSync] ${kind} with unresolved server id — skipped`, editorId)
+  return { ok: true, noop: true }
+}
+
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function getLiveMode() { return _liveMode }
@@ -154,6 +164,7 @@ export async function fireLiveOp(opType, payload, conn) {
     case 'SET_WALL_MATERIAL':
     case 'SET_WALL_HEIGHT': {
       const wallErpId = payload.wallErpId ?? _resolveId(payload.ifcGlobalId ?? payload.id, c)
+      if (!wallErpId) { res = _skipUnresolved('UPDATE_WALL', payload.ifcGlobalId ?? payload.id); break }
       const body = {}
       if (payload.materialKey !== undefined) body.wallMaterial = payload.materialKey
       if (payload.height !== undefined) body.heightMm = inToMm(payload.height)
@@ -233,6 +244,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_OPENING': {
       const openingErpId = payload.openingErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!openingErpId) { res = _skipUnresolved('UPDATE_OPENING', payload.ifcGlobalId); break }
       const body = {}
       if (payload.width !== undefined) body.widthMm = inToMm(payload.width)
       if (payload.height !== undefined) body.heightMm = inToMm(payload.height)
@@ -322,6 +334,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_ROOM': {
       const roomErpId = payload.roomErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!roomErpId) { res = _skipUnresolved('UPDATE_ROOM', payload.ifcGlobalId); break }
       const body = { ...payload }
       delete body.ifcGlobalId
       delete body.roomErpId
@@ -380,6 +393,32 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_NODE': {
       const nodeErpId = payload.nodeErpId ?? _resolveId(payload.ifcGlobalId, c)
+      // Unresolved id → the projection has no row to PATCH. PATCHing `null` was a real
+      // outage: one such op 500s, and because the queue blocks on a failed op, EVERY
+      // wall and room behind it silently never syncs ("1 failed", 40 retries, zero rows
+      // in the ERP after an hour of tracing). The server creates nodes idempotently by
+      // sourceEditorId, so the healing move is to CREATE with the full state we have —
+      // which also repairs the missing id mapping for every later op on this node.
+      if (!nodeErpId) {
+        if (payload.x === undefined || payload.y === undefined || !payload.ifcGlobalId || !c?.buildingId) {
+          // Not enough state to create (kind-only tweak on an unknown node): skip rather
+          // than poison the queue. Resync-all replays canonical state and reconciles.
+          console.warn('[liveSync] UPDATE_NODE with unresolved id and no coords — skipped', payload.ifcGlobalId)
+          res = { ok: true, noop: true }
+          break
+        }
+        const createBody = {
+          sourceEditorId: payload.ifcGlobalId,
+          xMm: inToMm(payload.x),
+          yMm: inToMm(payload.y),
+          ...(payload.z !== undefined ? { zMm: inToMm(payload.z) } : {}),
+          kind: payload.kind ?? 'CORNER',
+        }
+        res = await _request('POST', `/geometry/buildings/${c.buildingId}/nodes`, createBody, c)
+        const healedId = _extractErpId(res)
+        if (healedId) _registerId(payload.ifcGlobalId, healedId, c)
+        break
+      }
       const body = {}
       if (payload.x !== undefined) body.xMm = inToMm(payload.x)
       if (payload.y !== undefined) body.yMm = inToMm(payload.y)
@@ -421,6 +460,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_COLUMN': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       const body = {}
       if (payload.x !== undefined) body.posXMm = inToMm(payload.x)
       if (payload.y !== undefined) body.posYMm = inToMm(payload.y)
@@ -437,6 +477,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_COLUMN': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       // Unresolved id → no projection row exists to delete: a delete of a
       // non-existent row is a successful no-op (never request /geometry/.../null).
       if (!erpId) { res = { ok: true, noop: true }; break }
@@ -467,6 +508,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_BEAM': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       const body = {}
       if (payload.spanMm !== undefined) body.spanMm = payload.spanMm
       if (payload.heightMm !== undefined) body.heightMm = payload.heightMm
@@ -477,6 +519,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_BEAM': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       // Unresolved id → no projection row exists to delete: a delete of a
       // non-existent row is a successful no-op (never request /geometry/.../null).
       if (!erpId) { res = { ok: true, noop: true }; break }
@@ -505,6 +548,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_SLAB': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       const body = {}
       if (payload.thicknessMm !== undefined) body.thicknessMm = payload.thicknessMm
       if (payload.areaSqft !== undefined) body.areaSqft = payload.areaSqft
@@ -515,6 +559,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_SLAB': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       // Unresolved id → no projection row exists to delete: a delete of a
       // non-existent row is a successful no-op (never request /geometry/.../null).
       if (!erpId) { res = { ok: true, noop: true }; break }
@@ -569,6 +614,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'UPDATE_ELEMENT': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       const body = { ...payload }
       delete body.ifcGlobalId
       delete body.elementErpId
@@ -578,6 +624,7 @@ export async function fireLiveOp(opType, payload, conn) {
 
     case 'DELETE_ELEMENT': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
+      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
       // Unresolved id → no projection row exists to delete: a delete of a
       // non-existent row is a successful no-op (never request /geometry/.../null).
       if (!erpId) { res = { ok: true, noop: true }; break }
