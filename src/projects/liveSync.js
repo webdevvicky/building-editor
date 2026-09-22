@@ -9,12 +9,94 @@ let _conn = null
 const _idMap = new Map()
 
 // A PATCH/DELETE whose target id never resolved must NOT reach the wire as `/null`:
-// one such op 500s, and because the queue blocks on failure, everything behind it
-// silently stops syncing. Skipping is safe — the canonical document is the source of
-// truth and Resync-all reconciles the projection.
+// one such op is rejected by the backend and its failure lands on the status badge.
+// Skipping is safe — the canonical document is the source of truth and Resync-all
+// reconciles the projection.
 function _skipUnresolved(kind, editorId) {
   console.warn(`[liveSync] ${kind} with unresolved server id — skipped`, editorId)
   return { ok: true, noop: true }
+}
+
+// The LAST line of defence before an id reaches a URL. Ordering is the real
+// mechanism (see opDependency + liveSyncQueue's dependency gate); this exists so
+// that a call site added later cannot silently interpolate `null` into a path —
+// `/geometry/walls/null/openings` reached the ERP as the literal string "null"
+// and came back 500. Thrown with the `→ 400:` shape the queue reads as PERMANENT,
+// because no retry can invent an id that was never assigned.
+function _requireId(opType, fieldName, erpId, editorId) {
+  if (erpId) return erpId
+  throw new Error(
+    `[liveSync] ${opType} ${fieldName} → 400: unresolved server id for editor id "${editorId ?? '(none)'}" — refusing to request a /null path.`,
+  )
+}
+
+// ─── Op dependency table (the ONE declaration of parent-before-child) ─────────
+//
+// The queue is FIFO and drains one op at a time, so a child normally follows its
+// parent naturally. That guarantee lapses the moment a parent op stops being
+// dispatchable (it failed, or it belongs to an earlier session whose id map is
+// gone), and the child then resolves its parent to null. This table is what lets
+// the queue SEE that edge instead of discovering it on the wire:
+//
+//   parents  — the editor ids this op must have resolved before it can be sent.
+//              `erpField` is the escape hatch: a payload that already carries the
+//              resolved server id has no dependency at all.
+//   produces — the editor id this op registers a server id for when it succeeds.
+//   destroys — the editor ids this op removes, so a child waiting on one can be
+//              dropped instead of waiting for ever.
+const WALL_PARENT = { idField: 'wallIfcId', erpField: 'wallErpId', kind: 'wall' }
+const ROOM_PARENT = { idField: 'roomIfcId', erpField: 'roomErpId', kind: 'room' }
+
+const OP_DEPENDENCY = {
+  ADD_WALL: { parents: [ROOM_PARENT], produces: 'ifcGlobalId' },
+  SPLIT_WALL: { parents: [{ idField: 'ifcGlobalId', erpField: 'wallErpId', kind: 'wall' }] },
+  ADD_OPENING: { parents: [WALL_PARENT], produces: 'ifcGlobalId' },
+  ADD_WALL_SURFACE: { parents: [WALL_PARENT, ROOM_PARENT] },
+  SAVE_ROOM_VERTICES: { parents: [ROOM_PARENT] },
+
+  ADD_FLOOR: { produces: 'ifcGlobalId' },
+  ADD_ROOM: { produces: 'ifcGlobalId' },
+  ADD_NODE: { produces: 'ifcGlobalId' },
+  ADD_COLUMN: { produces: 'ifcGlobalId' },
+  ADD_BEAM: { produces: 'ifcGlobalId' },
+  ADD_SLAB: { produces: 'ifcGlobalId' },
+  ADD_ELEMENT: { produces: 'ifcGlobalId' },
+
+  DELETE_WALL: { destroys: ['ifcGlobalId', 'id'] },
+  DELETE_ROOM: { destroys: ['ifcGlobalId'] },
+  DELETE_FLOOR: { destroys: ['ifcGlobalId'] },
+  DELETE_NODE: { destroys: ['ifcGlobalId'] },
+  DELETE_OPENING: { destroys: ['ifcGlobalId'] },
+  DELETE_COLUMN: { destroys: ['ifcGlobalId'] },
+  DELETE_BEAM: { destroys: ['ifcGlobalId'] },
+  DELETE_SLAB: { destroys: ['ifcGlobalId'] },
+  DELETE_ELEMENT: { destroys: ['ifcGlobalId'] },
+}
+
+/**
+ * What this op needs before it can be sent, and what it will provide.
+ *
+ * @returns {{ needs: Array<{editorId: string, field: string, kind: string}>,
+ *             produces: string|null, destroys: string[] }}
+ */
+export function opDependency(opType, payload = {}) {
+  const spec = OP_DEPENDENCY[opType]
+  if (!spec) return { needs: [], produces: null, destroys: [] }
+
+  const needs = []
+  for (const p of spec.parents ?? []) {
+    if (payload[p.erpField]) continue          // already resolved — nothing to wait for
+    const editorId = payload[p.idField]
+    if (!editorId) continue                    // nothing to wait ON; _requireId reports it
+    needs.push({ editorId, field: p.idField, kind: p.kind })
+  }
+
+  const destroys = []
+  for (const f of spec.destroys ?? []) {
+    if (payload[f]) destroys.push(payload[f])
+  }
+
+  return { needs, produces: (spec.produces && payload[spec.produces]) || null, destroys }
 }
 
 
@@ -141,7 +223,8 @@ export async function fireLiveOp(opType, payload, conn) {
 
     // ── Walls ────────────────────────────────────────────────────────────────
     case 'ADD_WALL': {
-      const roomErpId = payload.roomErpId ?? _resolveId(payload.roomIfcId, c)
+      const roomErpId = _requireId('ADD_WALL', 'roomId',
+        payload.roomErpId ?? _resolveId(payload.roomIfcId, c), payload.roomIfcId)
       res = await _request('POST', `/geometry/rooms/${roomErpId}/walls`, {
         sourceEditorId: payload.ifcGlobalId,
         wallMaterial: payload.materialKey ?? null,
@@ -187,7 +270,8 @@ export async function fireLiveOp(opType, payload, conn) {
     }
 
     case 'SPLIT_WALL': {
-      const wallErpId = payload.wallErpId ?? _resolveId(payload.ifcGlobalId, c)
+      const wallErpId = _requireId('SPLIT_WALL', 'wallId',
+        payload.wallErpId ?? _resolveId(payload.ifcGlobalId, c), payload.ifcGlobalId)
       const body = {
         atFractions: payload.atFractions,
         ...(payload.atNodeIfcId ? { atNodeId: _resolveId(payload.atNodeIfcId, c) } : {}),
@@ -226,7 +310,8 @@ export async function fireLiveOp(opType, payload, conn) {
 
     // ── Openings ──────────────────────────────────────────────────────────────
     case 'ADD_OPENING': {
-      const wallErpId = payload.wallErpId ?? _resolveId(payload.wallIfcId, c)
+      const wallErpId = _requireId('ADD_OPENING', 'wallId',
+        payload.wallErpId ?? _resolveId(payload.wallIfcId, c), payload.wallIfcId)
       const body = {
         ...(payload.ifcGlobalId ? { sourceEditorId: payload.ifcGlobalId } : {}),
         openingType: payload.type ?? 'WINDOW',
@@ -634,8 +719,10 @@ export async function fireLiveOp(opType, payload, conn) {
 
     // ── Shared wall: second WallSurface for an adjacent room ────────────────────
     case 'ADD_WALL_SURFACE': {
-      const wallErpId = payload.wallErpId ?? _resolveId(payload.wallIfcId, c)
-      const adjacentRoomId = payload.roomErpId ?? _resolveId(payload.roomIfcId, c)
+      const wallErpId = _requireId('ADD_WALL_SURFACE', 'wallId',
+        payload.wallErpId ?? _resolveId(payload.wallIfcId, c), payload.wallIfcId)
+      const adjacentRoomId = _requireId('ADD_WALL_SURFACE', 'adjacentRoomId',
+        payload.roomErpId ?? _resolveId(payload.roomIfcId, c), payload.roomIfcId)
       const body = {
         adjacentRoomId,
         ...(payload.segmentLengthMm !== undefined ? { segmentLengthMm: payload.segmentLengthMm } : {}),

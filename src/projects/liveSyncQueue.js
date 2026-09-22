@@ -2,9 +2,16 @@
 //
 // THE single seam every sync path uses: enqueueGeometryOps([{opType,payload}]).
 // A single worker drains FIFO + sequentially (await per op) so emission order ==
-// execution order — parent-before-child dependency and id-map threading fall out
-// for free. Ops persist to IDB (survives crash/reload/offline). Retries use
-// exponential backoff; 4xx validation errors dead-letter (won't fix on retry).
+// execution order. That gives parent-before-child ordering and id-map threading
+// for as long as the head keeps moving — but NOT once an op stops being
+// dispatchable (it dead-lettered, or the queue was persisted and reloaded into a
+// session whose id map starts empty). A child dispatched past its parent resolves
+// the parent to null, which is how `/geometry/walls/null/openings` was sent.
+// So ordering is stated as well as implied: each op declares what it needs and
+// what it will produce (liveSync's `opDependency`), and the drain gate below
+// dispatches / waits / drops on that. Ops persist to IDB (survives crash /
+// reload / offline). Retries use exponential backoff; 4xx validation errors
+// dead-letter (won't fix on retry).
 //
 // Runs ENTIRELY off the render path. A sync failure never throws into, blocks,
 // or rolls back local editor state — it lands in the queue and surfaces on the
@@ -12,7 +19,7 @@
 
 import { getAssetStorage } from './storage/getAssetStorage.js'
 import { DB_STORES } from './storage/indexedDb.js'
-import { fireLiveOp } from './liveSync.js'
+import { fireLiveOp, opDependency, resolveErpId } from './liveSync.js'
 
 const MAX_ATTEMPTS = 5
 const BACKOFF_MS = [1000, 2000, 4000, 4000] // 1s → 2s → 4s (cap), 4 waits ⇒ 5 attempts
@@ -44,8 +51,10 @@ async function _loadPersisted() {
       // doesn't exist is success), so these are not real failures — drop them.
       _queue = _queue.filter((o) =>
         !((o.status === 'dead' || o.status === 'failed') && String(o.opType).startsWith('DELETE_')))
-      // Anything mid-flight when we last died resumes as pending.
-      for (const o of _queue) if (o.status === 'inflight') o.status = 'pending'
+      // Anything mid-flight when we last died resumes as pending. So does
+      // anything that was blocked: this session has a fresh id map (seeded from
+      // the ERP), so every dependency is re-asked rather than assumed.
+      for (const o of _queue) if (o.status === 'inflight' || o.status === 'blocked') o.status = 'pending'
     }
   } catch (e) { console.warn('[liveSyncQueue] load failed', e) }
 }
@@ -58,20 +67,21 @@ async function _loadPersisted() {
 // ("Maximum update depth exceeded"). We recompute the primitive fields, and
 // only allocate a NEW object when one of them actually changes — otherwise the
 // previous reference is returned so React sees a stable snapshot.
-let _statusCache = { active: false, draining: false, pending: 0, failed: 0, total: 0 }
+let _statusCache = { active: false, draining: false, pending: 0, failed: 0, blocked: 0, total: 0 }
 
 export function getSyncStatus() {
-  let pending = 0, failed = 0
+  let pending = 0, failed = 0, blocked = 0
   for (const o of _queue) {
     if (o.status === 'failed' || o.status === 'dead') failed++
-    else pending++
+    else { pending++; if (o.status === 'blocked') blocked++ }
   }
   const c = _statusCache
   if (c.active === _active && c.draining === _draining
-    && c.pending === pending && c.failed === failed && c.total === _queue.length) {
+    && c.pending === pending && c.failed === failed && c.blocked === blocked
+    && c.total === _queue.length) {
     return c
   }
-  _statusCache = { active: _active, draining: _draining, pending, failed, total: _queue.length }
+  _statusCache = { active: _active, draining: _draining, pending, failed, blocked, total: _queue.length }
   return _statusCache
 }
 export function subscribeSyncStatus(fn) { _listeners.add(fn); return () => _listeners.delete(fn) }
@@ -125,13 +135,84 @@ function _isPermanent(err) {
   return code === 400 || code === 404 || code === 409 || code === 422
 }
 
+// ── Dependency gate ──────────────────────────────────────────────────────────
+//
+// FIFO + one-at-a-time is the ordering concept, and for a healthy queue it is
+// enough: a child is enqueued behind its parent, so the parent's id is already
+// registered by the time the child is dispatched. It stops being enough the
+// moment the head stops moving in step — the old picker took the first *pending*
+// op, which SKIPS a parent sitting in `failed`/`dead` and dispatched the child
+// anyway, with its parent id resolving to null (`/geometry/walls/null/openings`).
+// A persisted queue reloaded into a fresh session (initLiveSync clears the id
+// map) is the same situation.
+//
+// So a child now states its dependency (opDependency) and the queue answers it
+// against the SAME id map the dispatcher will use:
+//   • resolved            → dispatch, exactly as before
+//   • a queued op will produce it → WAIT (blocked, keeps its place in the queue)
+//   • nothing can produce it      → DROP with a reason (never retried for ever)
+const _isTerminal = (o) => o.status === 'failed' || o.status === 'dead'
+
+function _dependencyVerdict(item) {
+  const { needs } = opDependency(item.opType, item.payload)
+  for (const need of needs) {
+    if (resolveErpId(need.editorId)) continue
+
+    // Its parent is being deleted in this same queue — the child can never land.
+    const deleted = _queue.some(
+      (o) => o !== item && opDependency(o.opType, o.payload).destroys.includes(need.editorId),
+    )
+    if (deleted) {
+      return { action: 'drop', reason: `its ${need.kind} "${need.editorId}" is being deleted in this same batch` }
+    }
+
+    // Some other op will register that id when it succeeds — wait for it.
+    const producer = _queue.some(
+      (o) => o !== item && opDependency(o.opType, o.payload).produces === need.editorId,
+    )
+    if (producer) {
+      return { action: 'wait', reason: `waiting for its ${need.kind} "${need.editorId}" to be created` }
+    }
+
+    return {
+      action: 'drop',
+      reason: `its ${need.kind} "${need.editorId}" has no server id and no queued op will create one (deleted, or it never synced)`,
+    }
+  }
+  return { action: 'dispatch' }
+}
+
+// The first op that can actually be sent. Blocked ops keep their queue position
+// and are re-evaluated on every pass, so a parent succeeding unblocks its child
+// without any extra signalling.
+function _pickNext() {
+  for (const item of _queue) {
+    if (item.status !== 'pending' && item.status !== 'blocked') continue
+    const verdict = _dependencyVerdict(item)
+    if (verdict.action === 'dispatch') return { item, verdict }
+    if (verdict.action === 'drop') return { item, verdict }
+    item.status = 'blocked'
+    item.error = verdict.reason
+  }
+  return null
+}
+
 async function _drain() {
   if (_draining || !_active) return
   _draining = true; _notify()
   try {
     while (_active) {
-      const item = _queue.find((o) => o.status === 'pending')
-      if (!item) break
+      const next = _pickNext()
+      if (!next) break
+      const { item, verdict } = next
+
+      if (verdict.action === 'drop') {
+        console.warn(`[liveSyncQueue] ${item.opType} dropped — ${verdict.reason}`)
+        _queue = _queue.filter((o) => o.id !== item.id)
+        await _persist(); _notify()
+        continue
+      }
+
       item.status = 'inflight'
       try {
         await fireLiveOp(item.opType, item.payload) // uses the conn from initLiveSync
@@ -162,8 +243,11 @@ async function _drain() {
 
 export function retryFailed() {
   for (const o of _queue) {
-    if (o.status === 'failed' || o.status === 'dead') { o.status = 'pending'; o.attempts = 0; o.error = null }
+    if (_isTerminal(o)) { o.status = 'pending'; o.attempts = 0; o.error = null }
   }
+  // A blocked op is not a failure and keeps its attempt count, but it must be
+  // re-evaluated: the op it was waiting for may be the one just revived.
+  for (const o of _queue) if (o.status === 'blocked') o.status = 'pending'
   _persist(); _notify(); _drain()
 }
 

@@ -165,9 +165,10 @@ export function useWallSelection() {
 
 No Jest/Vitest. Instead, **50 Node.js scripts** verify by assertion at commit time.
 
-**Run all:**
+**Run all:** ⚠️ there is **no `npm run verify` script** in `package.json` (only `dev`, `build`,
+`lint`, `preview`, `deploy`). Run the scripts directly, or loop over them:
 ```bash
-npm run verify
+for f in scripts/verify-*.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done
 ```
 
 **Run specific:**
@@ -244,6 +245,28 @@ Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + t
   fallback) and creates the floor under the current building if missing; `SAVE_ROOM_VERTICES` no-ops on
   an unresolved room id (never POSTs `/rooms/null/*`). All other geometry entities emit globally-unique
   `ifcGlobalId`s, so only the floor needs the building-scoped treatment.
+- **A child op WAITS for its parent's server id — it is never dispatched with `null`** (2026-09-22).
+  FIFO + one-at-a-time gives parent-before-child ordering only while the head of the queue keeps
+  moving. It lapses the moment an op stops being dispatchable: the picker took the first *pending*
+  op, which **steps over a parent sitting in `failed`/`dead`**, so the child ran with its parent
+  resolving to `null` and `ADD_OPENING` POSTed the literal path `/geometry/walls/null/openings`
+  (ERP 500 → 5 retries → "1 failed" that "Retry failed" re-fired for ever). A persisted queue
+  reloaded into a fresh session (`initLiveSync` clears `_idMap`) lands in the same state.
+  Ordering is therefore **declared, not just implied**: `opDependency(opType, payload)` in
+  `liveSync.js` is the ONE table of what each op `needs` / `produces` / `destroys`, and
+  `liveSyncQueue._drain` answers it against the same id map the dispatcher uses —
+  **dispatch** when resolved · **wait** (`blocked`, keeps its queue position, unblocks when the
+  parent succeeds) when a queued op will produce it · **drop with a logged reason** when nothing
+  can (parent deleted, or it never synced). A dropped op is gone from the badge; it is never
+  retried for ever. *Adding an op that puts a parent id in a URL or a required body field means
+  adding its row to `OP_DEPENDENCY`* — otherwise it is unconstrained.
+  Backstop: `_requireId()` guards **every** id interpolated into a path (`ADD_WALL`,
+  `ADD_OPENING`, `SPLIT_WALL`, `ADD_WALL_SURFACE`), throwing a `→ 400:` (permanent, dead-letters)
+  error rather than building a `/null` URL. On the ERP side the same request is now a clean 400 —
+  see `modules/building-structure/CLAUDE.md`.
+  ⚠️ **Test fixtures must pass EDITOR ids** (`wallIfcId`/`roomIfcId`) and let `liveSync` resolve
+  them, because that is what the emitters emit. `verify-live-sync.mjs` handed `ADD_OPENING` a
+  pre-resolved `wallErpId` — a shape no emitter produces — which is why it never caught this.
 - **Reconstruction is removed** — canonical is never derived from the projection (#6). The old
   blob-import + connect-handoff + autosave-never-push model is gone (the coordinator now writes the
   canonical document continuously); `editor-project`/`buildPackage`-import are deleted.
@@ -253,7 +276,14 @@ Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + t
   change signature) → the ERP persists `BuildingElement.mepPointType` and routes it to a per-type BOQ line
   (see the ERP `modules/quantity/CLAUDE.md`). Verified by `scripts/verify-electrical-point-type-sync.mjs`.
 - **Quality gate for any geometry change:** `scripts/verify-canonical-sync` · `-canonical-reopen` ·
-  `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` (all must stay green).
+  `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` · `-live-sync-ordering`
+  (all must stay green).
+  ⚠️ **`verify-floor-delete` currently cannot run at all** (pre-existing, unrelated to sync): it
+  imports `src/structuralSlice.js`, which imports `'./materials'` **without a file extension**.
+  Vite resolves that; Node ESM does not, so the script dies with `ERR_MODULE_NOT_FOUND` before its
+  first assertion. There are ~358 extensionless relative imports under `src/`, so this is a
+  repo-wide resolution choice, not a one-line typo — fix it deliberately, and until then do not
+  read this gate as green.
 
 ---
 

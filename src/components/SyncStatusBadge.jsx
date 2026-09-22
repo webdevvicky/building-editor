@@ -35,10 +35,13 @@ export default function SyncStatusBadge() {
   const status = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, getSyncStatus)
   if (!status.active) return null
 
-  const { pending, failed, draining } = status
+  const { pending, failed, blocked, draining } = status
   let color = 'var(--color-success, #16a34a)'
   let label = 'ERP synced'
   if (failed > 0) { color = 'var(--color-danger, #dc2626)'; label = `${failed} failed` }
+  // Blocked ops are not in flight: they are holding their place until the parent
+  // they need has a server id. Saying "Syncing" for those reads as a stall.
+  else if (blocked > 0 && blocked === pending) { color = 'var(--color-warning, #d97706)'; label = `Waiting for ${blocked}…` }
   else if (pending > 0 || draining) { color = 'var(--color-warning, #d97706)'; label = `Syncing ${pending}…` }
 
   return (

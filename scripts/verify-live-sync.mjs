@@ -13,6 +13,11 @@ globalThis.fetch = async (url, opts) => {
 }
 
 // ── Pre-seed idMap ────────────────────────────────────────────────────────────
+// Test cases pass EDITOR ids (wallIfcId / roomIfcId) and let liveSync resolve them
+// through this map, because that is what the emitters actually produce. Handing a
+// case a pre-resolved `*ErpId` tests a payload shape no emitter emits: it is how
+// the ADD_OPENING `/geometry/walls/null/openings` defect passed this script for
+// months. Only use an `*ErpId` in a case where the emitter really supplies one.
 registerErpId('WallIfc000000000000001', 'erpWall1')
 registerErpId('RoomIfc000000000000001', 'erpRoom1')
 registerErpId('NodeIfc000000000000001', 'erpNode1')
@@ -43,15 +48,15 @@ const OP_TEST_CASES = [
   ['UPDATE_FLOOR',      { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 11 }],
   ['DELETE_FLOOR',      { ifcGlobalId: 'F1' }], // resolves via mockConn.floorIds.F1 → erpFloor1
   // Walls
-  ['ADD_WALL',          { ifcGlobalId: 'WallIfc000000000000002', materialKey: 'IS_MODULAR_BRICK', height: 120, thickness: 9, roomErpId: 'erpRoom1' }],
+  ['ADD_WALL',          { ifcGlobalId: 'WallIfc000000000000002', materialKey: 'IS_MODULAR_BRICK', height: 120, thickness: 9, roomIfcId: 'RoomIfc000000000000001' }],
   ['UPDATE_WALL',       { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', height: 130 }],
   ['DELETE_WALL',       { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1' }],
   ['SET_WALL_MATERIAL', { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', materialKey: 'AAC_BLOCK' }],
   ['SET_WALL_HEIGHT',   { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', height: 110 }],
-  ['SPLIT_WALL',        { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', atFractions: [0.5], newWalls: [{ ifcGlobalId: 'WallIfc000000000000002', lengthMm: 1200, height: 120, thickness: 9, orientation: 'N' }, { ifcGlobalId: 'WallIfc000000000000003', lengthMm: 1200, height: 120, thickness: 9, orientation: 'N' }] }],
+  ['SPLIT_WALL',        { ifcGlobalId: 'WallIfc000000000000001', atFractions: [0.5], newWalls: [{ ifcGlobalId: 'WallIfc000000000000002', lengthMm: 1200, height: 120, thickness: 9, orientation: 'N' }, { ifcGlobalId: 'WallIfc000000000000003', lengthMm: 1200, height: 120, thickness: 9, orientation: 'N' }] }],
   ['JOIN_WALLS',        { wallIfcIds: ['WallIfc000000000000001', 'Wall2Ifc00000000000001'], mergedIfcGlobalId: 'WallIfc000000000000004', height: 120, thickness: 9 }],
   // Openings
-  ['ADD_OPENING',       { ifcGlobalId: 'OpenIfc000000000000002', wallErpId: 'erpWall1', type: 'window', width: 36, height: 48 }],
+  ['ADD_OPENING',       { ifcGlobalId: 'OpenIfc000000000000002', wallIfcId: 'WallIfc000000000000001', type: 'window', width: 36, height: 48 }],
   ['UPDATE_OPENING',    { ifcGlobalId: 'OpenIfc000000000000001', openingErpId: 'erpOpen1', width: 40, height: 50 }],
   ['DELETE_OPENING',    { ifcGlobalId: 'OpenIfc000000000000001', openingErpId: 'erpOpen1' }],
   // Rooms
