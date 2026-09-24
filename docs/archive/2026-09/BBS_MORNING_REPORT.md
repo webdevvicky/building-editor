@@ -1,5 +1,8 @@
 # BBS Overnight Build — Morning Report
 
+> **ARCHIVED 2026-09-24: historical record, not current authority.** Originally `boq:docs/bbs/BBS_MORNING_REPORT.md`. For current documentation start at `boq:CLAUDE.md` and `boq:docs/DOMAIN-RULES.md`.
+
+
 > **Historical build log (2026-05-28) — not a requirements document. Corrections as of 2026-09-23:**
 > - Verify suite is now 52 `verify-*.mjs` (run with `--experimental-loader ./scripts/resolver-hook.mjs`); `verify-legacy-shim` now **fails** (kill date 2026-08-15 expired) — the PASS below is historical.
 > - BBS Excel/PDF export (BBS-5b) **shipped**: `src/export/bbs.js` + `verify-bbs-export` (the `TODO BBS-5b` at `BBSSchedulePanel.jsx:12` is stale).
