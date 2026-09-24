@@ -8,7 +8,10 @@ Research basis for the six new BBS element categories + sub/super column split.
 > engineer sign-off**. Those choices are listed as unsigned in [`docs/DOMAIN-RULES.md`](../DOMAIN-RULES.md) §11.3
 > and are open questions OQ-027…OQ-055 in `erp-saas:docs/planning/OPEN-DECISIONS.md` §17. Note that the
 > engine's cover defaults (column 25 mm, footing 40 mm) are **below** the cover this research gives (column 40 mm,
-> footing 50–60 mm) and below IS 456 26.4.2 (§11.3 row 8; OQ-028).
+> footing 50–60 mm) and below the IS 456 26.4.2 minimums as read by an agent; engineer confirmation is pending
+> (§11.3 row 8; OQ-028). The "12 m standard bar confirmed" line below is market research on bundle length, not a
+> decision on the engine's default bar length; that default is disputed (6 m vs 12 m, `docs/DOMAIN-RULES.md` §11.4;
+> OQ-029).
 Scope: Fe500D/Fe550D + M20, IS 456 / IS 13920 / IS 2502 / IS 4326 / SP 34.
 Cross-checked against the two reference workbooks in the repo root
 (`BBS- Karthick M-City (1).xlsx`, `SELVAKUMAR (1).xlsx`). Every numeric rule

@@ -20,7 +20,7 @@
 >   - an end-to-end run on a plan traced in the app (**BBS-RealPlan-001**, still open: trace one reference floor
 >     and check the Abstract tab and export against the workbook);
 >   - the engine defaults themselves (lap, cover, confinement, bar length…) — they are unsigned choices, see
->     `docs/DOMAIN-RULES.md` §11.3.
+>     `docs/DOMAIN-RULES.md` §11.3 (the bar-length default is disputed between 6 m and 12 m: §11.4, OQ-029).
 
 > **Status 2026-09-23:** the per-bar table below still reproduces exactly. "All 34 scripts green" is historical — the suite is now 52 `verify-*.mjs`, 51 pass with the resolver hook, `verify-legacy-shim` fails.
 

@@ -110,7 +110,7 @@ carries geometry. The ERP computes its own quantities and is authoritative for e
 | `src/underlay/` | 2 / 202 | PDF render (pdfjs) + calibration math |
 | `src/ghosts/` | 1 / 79 | Room-type "ghost" items (view-only) |
 | `src/design/tokens.css` | 1 | Design tokens |
-| `src/operations/` | 5 / 895 | **DORMANT** op registry/dispatch (§4.10) |
+| `src/operations/` | 5 / 895 | **DORMANT** op registry/dispatch (§3.10, §11) |
 | `src/compute/` | 3 / 343 | **DEAD** computation DAG (no src consumer) |
 | `src/store/legacyAccessors.js` | 130 | **EXPIRED** slice-split shim (kill date 2026-08-15) |
 | `scripts/` | 54 | 52 `verify-*.mjs` + `validate-bbs-karthick.mjs` + `resolver-hook.mjs` |
@@ -152,7 +152,7 @@ No `tests/` dir, no Jest/Vitest, no npm `verify`/`test` script, no git hooks (`.
 | File | Lines | Role | Notes |
 |---|---|---|---|
 | `erpLaunchContext.js` | 62 | parse `#erpLaunch?buildingId&token&erpUrl[&refreshToken&expiresAt]` | `isErpLaunchMode` |
-| `erpSession.js` | 226 | ERP boot orchestration (§5.3) | |
+| `erpSession.js` | 226 | ERP boot orchestration (§4.3) | |
 | `editorAuth.js` | 83 | proactive token refresh (60 s skew) via `POST /auth/editor-session/refresh` | |
 | `erpConnection.js` | 80 | source-agnostic connection registry (used by `taxonomy`) | |
 | `editorWriteGuard.js` | 108 | HARD read-only latch (integrity / 3 stale-base conflicts) + releasable offline flag | UI does not consult it (KD-23) |
@@ -451,7 +451,7 @@ Result with hook: **51/52 pass; `verify-legacy-shim` fails** (expired kill date)
 | G13 | Test fixtures must pass **editor** ids (`wallIfcId`/`roomIfcId`) and let liveSync resolve them | verify-live-sync.mjs |
 | G14 | Both read-only and projection banners are `position:fixed; top:0` and overlap | EditorReadOnlyBanner, ProjectionMismatchBanner |
 | G15 | Element change signature uses an empty state → slab `roomIds` and MEP `roomIfcId` changes never emit UPDATE | syncEmitters.js:190-195 |
-| G16 | `specs/cuttingLength.js` header says bar default "stays 6 m"; code is 12 m | cuttingLength.js:21-24,71 |
+| G16 | `specs/cuttingLength.js` header says bar default "stays 6 m"; code is 12 m. Which default is intended is disputed (D-114 as registered says 6 m): `docs/DOMAIN-RULES.md` §11.4, OQ-029 | cuttingLength.js:20-24,65-67,71 |
 | G17 | `DRAIN_GRADIENTS` (plumbing) lives in `loads/electricalConstants.js` | mep/plumbing/sizing.js:28 |
 | G18 | Revisions live in localStorage, not the IDB `revisions` store | revisions/manager.js:1,44 |
 
@@ -490,6 +490,13 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 > split and XR-09…XR-16 added. Severities were reconciled there the same day: XR-01, XR-05 and XR-15 are P0, matching
 > KD-1, KD-2 and KD-3. XR-16 (split/join and wall material/height ops never emitted) has no KD row; it is the dead
 > `liveSync` cases listed in §11.
+>
+> **Two exceptions to "the XR row sets the severity".** (1) KD-36 stays **P1** although it maps to XR-01, which is
+> **P0**. XR-01's P0 comes from KD-3, the data defect that writes duplicate walls; KD-36 is the test gate that failed
+> to catch it, and a broken gate corrupts no data by itself. The audit register records this as a deliberate
+> exception (`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` §9, "Severity reconciliations"). (2) Rows that leave
+> ERP data stale but need no ERP change have no XR row by that register's ruling: KD-8, KD-12, KD-13, KD-16, KD-24,
+> KD-37.
 
 | ID | Sev | Defect | file:line | Source |
 |---|---|---|---|---|
@@ -500,7 +507,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-5 | P1 | MEP UPDATE_ELEMENT carries `roomIfcId`, PATCH DTO lacks it (`forbidNonWhitelisted`) → 400 → dead-letter | elementRegistry.js:34-38; liveSync.js:700-707 | boq-02 A-5 → XR-03 |
 | KD-6 | P1 | Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 → XR-09 |
 | KD-7 | P1 | Structural sections/heights/levels/concrete/bars never synced — ERP BBS-direct steel gets nothing | elementRegistry.js:61-97 | boq-02 A-4 → XR-02 |
-| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only) | syncEngine.js:195-198 | boq-02 G4 |
+| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; no XR row: editor-side only per audit §9 (2026-09-24), see note above |
 | KD-9 | P2 | Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 → XR-11 |
 | KD-10 | P2 | UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 → XR-12 |
 | KD-11 | P2 | Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 → XR-07 |
@@ -528,12 +535,16 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-33 | P2 | Editor BOQ counts electrical points by coarse catalog type (switches/sockets collapse) | mep/quantities/electrical.js:142-145 | boq-03 gotcha |
 | KD-34 | P2 | `schemaVersion` 7 (payload) vs 8 (`SCHEMA_VERSION`) mismatch | _snapshot.js:8; operations/_schemaVersion.js:12 | boq-02 G10 → XR-14 |
 | KD-35 | P2 | `addBeam*` read `columns[id].floorId` (columns have `baseFloorId`) → falls back to current floor | structuralSlice.js:1070,1105 | boq-01 A8 |
-| KD-36 | P1 | `verify-projection-reconstruct` fixtures use a fictional wall shape → green gate on broken code | scripts/verify-projection-reconstruct.mjs:24-35,76,121 | boq-02 G14 → XR-01 |
+| KD-36 | P1 | `verify-projection-reconstruct` fixtures use a fictional wall shape → green gate on broken code | scripts/verify-projection-reconstruct.mjs:24-35,76,121 | boq-02 G14 → XR-01 (XR-01 is P0 from KD-3; KD-36 stays P1 by the recorded exception, see note above) |
 | KD-37 | P2 | Slab room reassignment / MEP room change never emits UPDATE (signature built on empty state) | syncEmitters.js:190-195 | boq-02 G3 |
 | KD-38 | P2 | RoomDetailPanel per-wall areas use full wall length, paint = plaster, ignores ft-in | RoomDetailPanel.jsx:152-185 | boq-01 A9 |
 | KD-39 | P2 | `acceptGhost` adds an electrical point in two history frames, ignoring `roomId` param | store.js:1815-1817 | boq-01 A8 |
 | KD-40 | P2 | BBS generator fallbacks hard-coded without catalog source (sunshade 1.5 ft/3 in, strap pad Ø10@5 in, covers, loft 4 in) | bbs/generators/*.js; bbs/concrete.js:98-101 | boq-03 F3 |
 | KD-41 | P2 | Beam levels hard-coded as `['plinth','lintel','roof']` instead of read from `BEAM_LEVEL_REGISTRY` (constants/structural.js:67): the wall beam-flag list in OpeningPanel and the beam schema's `level` `oneOf`. A level added to the registry would get no flag toggle and would fail beam schema validation | components/OpeningPanel.jsx:235; schema/entities/beam.js:36 | DOMAIN-RULES §12 C-7 (2026-09-24) |
+| KD-42 | P2 | `setWallBeamSpec` (the per-wall, per-beam-class spec override) has no UI caller, so the WALL_INSTANCE spec tier for wall-derived beams is unreachable from the editor; only `verify-bbs` calls it | structuralSlice.js:1450-1467; specs/resolution.js:130-137; caller only scripts/verify-bbs.mjs:498 | archived `BBS_MORNING_REPORT.md:191`; re-checked 2026-09-24 |
+| KD-43 | P2 | `verifyIntegrity` never checks `wall.wallBeamSpecs` ids against `projectSettings.reinforcementSpecs`; a dangling id silently falls through to the CLASS tier or ESTIMATE. Only column segment spec ids are checked | schema/integrity.js:120-137 (column segments only); specs/resolution.js:134-137 | archived `BBS_MORNING_REPORT.md:167`; re-checked 2026-09-24 |
+| KD-44 | P1 | Priced BOQ steel omits footing dowels. The legacy footing path that prices every BOQ steel line computes X + Y mesh only; the BBS panel path (`computeRebarGroups`) adds a DOWEL group. Separate from the KD-29 lap bug; the archived report measured footing steel +32% with dowels on its fixture | specs/reinforcementSpecs.js:278-294 (no dowels); quantities/bbs.js:170-193; bbs/generators/footingRebar.js:99-100,138-160 (dowels) | archived `BBS_MORNING_REPORT.md:126`; re-checked 2026-09-24 |
+| KD-45 | P2 | The BBS schedule panel's Shape column shows unicode glyphs plus the IS 2502 shape code, not IS 2502 shape sketches; no shape-sketch registry exists (the BBS Excel/PDF export prints the code only) | components/BBSSchedulePanel.jsx:197-209,513-514; export/bbs.js:164,224 | archived `BBS_MORNING_REPORT.md:192`; re-checked 2026-09-24 |
 
 ---
 
@@ -555,7 +566,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | `mep/{electrical,plumbing,hvac,fire,elv}/index.js`, `mep/shared/index.js`, `mep/shared/ifcMapping.js`, `mep/shared/systemGraph.types.js` | 0 importers |
 | Unused MEP exports (boq-03 F4 list: `snapPointToNearestWall`, `simplifyPolyline`, `routeStableHash`, `validateGraph`, solar catalog getters, …) | 0 callers |
 | `specs/catalogManifest.js` (script-only), `reinforcementSpecs` unused constants, `iso/sort.compareFacesBackToFront`, `iso/viewPresets.CARDINAL_PRESETS`, `underlay/pdfRender.renderPdfFirstPageToPng` | script-only / 0 callers |
-| Store actions with no caller: solar CRUD+select, `updateRiser/deleteRiser/selectRiser`, `attachColumn`, `clearColumnSegment`, `setGrills`, `setKitchenCounter`, `setOpeningSunshadeSpec`, `setStaircaseReinforcementSpec`, `setWallLoft`, `setWallLoftSpec`, `setWallTieBeam`, `getRoomPaintArea`, `getTotalPaintArea`, `getTotalBuiltUpAreaSft` | boq-01 A7 |
+| Store actions with no caller: solar CRUD+select, `updateRiser/deleteRiser/selectRiser`, `attachColumn`, `clearColumnSegment`, `setGrills`, `setKitchenCounter`, `setOpeningSunshadeSpec`, `setStaircaseReinforcementSpec`, `setWallBeamSpec` (KD-42), `setWallLoft`, `setWallLoftSpec`, `setWallTieBeam`, `getRoomPaintArea`, `getTotalPaintArea`, `getTotalBuiltUpAreaSft` | boq-01 A7 |
 | Dead state: `col.foundationId` scrub (structuralSlice.js:990), `plasterThicknessMm` (124) | boq-01 A8 |
 | ERP `DesignVersionService` | provider, no controller/caller |
 

@@ -79,9 +79,12 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
    `src/specs/cuttingLength.js`. ⚠️ **NOT currently enforced** — BOQ steel is priced from the legacy
    `computeBBSQuantities` path with a lap-unit bug, D²/162 is re-implemented 3×, and generators carry hard-coded
    fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**. Origin: the build agent's Phase BBS rules
-   (2026-05-28), not an owner or engineer sign-off. The BBS defaults themselves (lap, bar length, cover,
-   confinement…) are **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3 (open questions OQ-027…OQ-055 in
-   `erp-saas:docs/planning/OPEN-DECISIONS.md` §17).
+   (2026-05-28), not an owner or engineer sign-off. The BBS defaults themselves (lap, cover, confinement…) are
+   **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3 (open questions OQ-027…OQ-055 in
+   `erp-saas:docs/planning/OPEN-DECISIONS.md` §17). The **bar-length default is disputed**, not merely unsigned: the
+   per-project 6 / 9 / 12 m choice is owner decision D-114, and the ERP register records "the default stays 6 m" as
+   part of D-114, but the code default is 12 m and the phase log says "flipped 6 → 12" with no owner quote.
+   The sources are compared in `docs/DOMAIN-RULES.md` §11.4; the decision is open question OQ-029.
 4. **Beam endpoints are a 4-type union** `{type: COLUMN|BEAM|WALL|POINT, …}` — always resolve through
    `resolveBeamEndpoint()`.
 5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
@@ -155,6 +158,13 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   defective (wrong wall shape → duplicate walls; drops elements and resets settings) — **KD-3, KD-4, KD-36**.
 - **An old snapshot must never clobber a newer one.** ⚠️ **NOT currently enforced** — on 409 the queue refetches the
   base and re-PUTs the same payload (last-writer-wins); only 3 consecutive conflicts latch read-only. **KD-1, KD-2.**
+- **Who may edit at once is unresolved.** Owner decision D-011 (boq decision #3, 2026-06-22) says one editor per
+  project with a project-level lock. erp-saas 48A Decision 4 (D-037, a proposal, not approved) and doc 48 decision
+  D5 (§1.2) instead describe document/floor checkout for 1–2 concurrent editors. The tension is open question
+  OQ-057 in `erp-saas:docs/planning/OPEN-DECISIONS.md` §18 (`docs/DOMAIN-RULES.md` §12 C-8). Neither lock is built:
+  the editor acquires no lock or lease, and the only guard against a second writer is the canonical-document CAS
+  (409 on a stale `baseVersion`), whose retry is itself last-writer-wins (KD-1). Building either lock depends on the
+  answer to OQ-057.
 - **Legacy connect path** (`#connect` deep link → `connectHandoff.js`, `cloudConn.js`, `ConnectErpDialog`,
   `ErpConnection`) still ships and is wired in `App.jsx`/`main.jsx`, but the ERP routes it calls no longer exist
   (KD-15). `buildPackage` / blob-import are deleted.
