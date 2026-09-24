@@ -133,6 +133,8 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 - **A-7** No auth / users / tenants in the editor itself (cloud sync is single global ERP connection). True multi-tenant SaaS needs an auth + tenant model + per-project ownership/RBAC, and conflict-free multi-editor (CRDT) if concurrent editing is a goal.
 
 ### Domain completeness / correctness (MIX)
+> The labels A-n, D-n and #n in this audit are its own finding numbers. They are not decision IDs (`D-001…` in `erp-saas:docs/architecture/DECISION-REGISTER.md`).
+
 - **D-1 (BUG)** Plumbing `HOT_RECIRC` referenced in emitter but absent from `SYSTEM_IDS` (`mep/quantities/plumbing.js:18`) → recirculation pipe never quantified.
 - **D-2 (BUG)** Sump/OHT concrete+steel always 0 (#20).
 - **D-3 (BUG)** Lighting junction boxes computed but not emitted (#29).
