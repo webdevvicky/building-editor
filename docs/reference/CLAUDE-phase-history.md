@@ -1,5 +1,7 @@
 # Building Editor — Developer Notes
 
+> **Historical log.** Present-tense statements below reflect the date of each phase, not today. Known stale items (2026-09-23): the verify count is now 52 (no commit gate — nothing runs them automatically); `RoomPanel.jsx` is deleted (RoomDetailPanel is the only room panel); `mep:room-created` is dispatched from `Canvas.jsx:1041` (Room tool, auto-MEP off only); the legacy-shim kill date 2026-08-15 has **passed** and `verify-legacy-shim` fails. For current architecture use `docs/CODEBASE_MAP.md`; for rules use the root `CLAUDE.md`.
+
 ## Codebase Overview
 
 Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus **35 verify scripts** that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.

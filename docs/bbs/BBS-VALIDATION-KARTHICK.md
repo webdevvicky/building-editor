@@ -1,5 +1,7 @@
 # BBS Engine — Reference Validation (Karthick M-City + Selvakumar)
 
+> **Status 2026-09-23:** the per-bar table below still reproduces exactly. "All 34 scripts green" is historical — the suite is now 52 `verify-*.mjs`, 51 pass with the resolver hook, `verify-legacy-shim` fails.
+
 **2026-05-29. Read-only.** Runs OUR engine against fixtures reconstructed from
 the two reference workbooks and reports what it produces today. **No engine
 code was modified to make numbers match.** Rerun:

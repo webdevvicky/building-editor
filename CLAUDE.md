@@ -1,366 +1,259 @@
-# BOQ — Bill of Quantities Editor
+# BOQ — Building Editor (`boq`)
 
-**Read this file for essential context. For phase history & deep dives, see `docs/`.**
+**Rules, workflow and orientation.** Deep architecture, data flows, the editor↔ERP contract table and the
+**Known Defects register (KD-n)** live in [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md).
 
 ---
 
-## What This Is
+## Codebase Overview
 
-A Vite + React 19 + Zustand 5 SPA for architectural + MEP design documentation in Indian residential construction. IDB-first persistence; no local migrations. (Editor-side only — when connected to the JRM ERP it syncs via the backend/R2 pipeline described in "ERP Sync" below; this app itself has no backend of its own.)
+A React SPA for drawing Indian residential buildings (walls, rooms, structure, MEP) that produces a live
+editor-side BOQ and an IS-2502 bar-bending schedule. When launched from the JRM ERP it becomes the upstream
+Building Editor: it writes a canonical Building Document and a live geometry projection to `erp-saas`.
 
-- **Entry:** `src/main.jsx` → `src/App.jsx` → Canvas + Panels
-- **State:** Zustand store in `src/store.js` (2700+ lines, 10+ slices)
-- **Quality:** 50 gate-every-commit verify scripts (not Jest/Vitest)
-- **Export:** PDF (jsPDF), Excel (SheetJS), CSV
-- **Deploy:** Cloudflare Workers (`wrangler deploy`)
+- **Stack:** Vite 8 + React 19 + Zustand 5, plain JavaScript (JSDoc, no TypeScript); jsPDF + jspdf-autotable,
+  SheetJS (`xlsx`), pdfjs-dist (underlay import), lucide-react; deployed to Cloudflare Workers
+  (`@cloudflare/vite-plugin` + `wrangler`). IndexedDB-first persistence; no backend of its own.
+- **Structure:** `src/main.jsx` → `src/App.jsx` (every panel mounted flat, self-gating) → `components/Canvas.jsx`.
+  One flat store `src/store.js` (2,526 lines) + two slice factories (`structuralSlice.js`, `mepSlice.js`).
+  Pure domain in `topology/ snap/ quantities/ mep/ bbs/ specs/ boq/ iso/`; ERP sync + local persistence in
+  `projects/`. 52 `scripts/verify-*.mjs` harnesses (no Jest/Vitest).
+- **Map:** [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md) (last mapped 2026-09-23).
 
 ---
 
 ## Quick Navigation
 
-| Task | Look Here |
-|------|-----------|
-| **Understand state shape** | `src/store.js` — all entities live in Zustand |
-| **Add a structural entity** | `src/structuralSlice.js` + component that reads/writes store |
-| **Fix a BOQ calculation** | `src/quantities/*.js` (pure functions) + `scripts/verify-boq.mjs` |
-| **Add MEP system** | `src/mep/[discipline]/` + update `src/mepSlice.js` |
-| **Modify canvas behavior** | `src/components/Canvas.jsx` (click handlers, drawing) |
-| **Change UI layout** | `src/components/Panels.jsx` + individual component files |
-| **Add export format** | `src/export/*.js` (PDF/Excel/CSV builders) |
-| **Write verification** | `scripts/verify-*.mjs` (Node.js with `assert` module) |
-| **Adjust styling** | `src/design/tokens.css` (design variables) + component `.css` files |
-| **See project history** | `docs/reference/CLAUDE-phase-history.md` (35+ phases, locked rules, gotchas) |
+| Task | Look here |
+|---|---|
+| State shape / actions | `src/store.js`, `src/structuralSlice.js`, `src/mepSlice.js` (map §3.1) |
+| Add a tool | `components/toolbarConfig.js` + `hooks/useKeyboardShortcuts.js` + `snap/toolPolicy.js` + `Canvas.jsx` (map §12) |
+| Canvas drawing / placement | `src/components/Canvas.jsx` (entity edits live in the per-entity `*Panel.jsx`) |
+| Keyboard shortcuts | `src/hooks/useKeyboardShortcuts.js` (`KEYBOARD_SHORTCUTS` registry) |
+| UI layout | `src/App.jsx` (flat mount list) — there is no `Panels.jsx` |
+| Fix a BOQ number | `src/boq/lines.js` + its source: `src/quantities/*.js`, store getters (`store.js` 2297-2517, `structuralSlice.js` 1598-2170), or `boq/emitters/*` for MEP |
+| Fix a BBS number | `src/specs/cuttingLength.js` + `src/bbs/generators/*` |
+| Add an MEP discipline / catalog | map §12 (catalog → engine → `mep/quantities` → `boq/scope.js` → `boq/emitters` → `mepSlice` → panel → `elementRegistry`) |
+| Export | `src/export/{pdf,excel,bbs}.js` (+ `_buckets.js`); there is no CSV exporter |
+| ERP sync | `src/projects/` (map §3.3–§5) |
+| Styling | `src/design/tokens.css` + component `.css`; inline style objects are also common |
+| History | `docs/reference/CLAUDE-phase-history.md` (historical log — present-tense claims there may be stale) |
 
 ---
 
-## Architecture (5 Layers)
+## Architecture in one screen
 
 ```
-Geometry (walls, columns, beams, etc. stored in Zustand)
-    ↓
-Topology (wall junctions, rooms, spatial relationships — pure functions)
-    ↓
-Quantities (masonry, steel, plaster, MEP sizing — pure calculators)
-    ↓
-BOQ Presentation (line emission, scoping, formatting)
-    ↓
-UI + Export (React components, PDF/Excel/CSV output)
+Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ presentation  →  UI + Export
+                                                     (pure quantities/ + mep/quantities/
+                                                      AND store getters for masonry/structural/civil)
 ```
 
-**Key insight:** All data flows DOWN; mutations only at the top (store). Topology & quantities are pure — input state, no side effects.
+- **Single write path = store actions.** Components call actions (`addWall(n1, n2)`, `createRoomFromFace`,
+  `updateOpening`, …); actions call `get()._save()` and return `set(s => ({ ...spread }))` (no immer).
+  Multi-step gestures wrap in `_runAtomically(fn)` (one undo frame). `src/operations/` is **dormant** — not a write path.
+- Collections are id-keyed maps at the root: `nodes, walls, rooms, stamps, columns, beams, slabs, staircases,
+  foundations, plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers`.
+  Openings are `wall.openings[]`; floors are `projectSettings.floors[]`.
+- Tool = `activeTool`; selection = per-type `selected*Id` + `selectedOpening` + namespaced `selection{}`.
+- History: 50 frames of the 16 collections. **`projectSettings` (incl. floors) is not in undo history.**
+- Reading in components: `useStore(s => s.walls)` (single-key selectors); in handlers: `useStore.getState()`.
+- Sync is out-of-band: in ERP mode `syncCoordinator` subscribes to the store and diffs committed state.
+  Actions are sync-agnostic — never call sync code from an action.
 
 ---
 
-## State Management (Zustand)
+## Key Design Rules (owner invariants)
 
-```javascript
-const useStore = create((set, get) => ({
-  // Structural
-  columns: [...],
-  beams: [...],
-  slabs: [...],
-  walls: [...],
-  foundations: [...],
-  
-  // MEP
-  mep: {
-    plumbing: {...},
-    electrical: {...},
-    hvac: {...},
-    fire: {...},
-    elv: {...}
-  },
-  
-  // UI
-  selectedTool: 'wall',
-  selectedEntity: null,
-  viewMode: '2d',
-  // ... 50+ more fields
-  
-  // Actions
-  addWall: (endpoints, thickness) => {...},
-  deleteEntity: (id) => {...},
-  // ... 100+ mutations
-}))
-```
-
-**Reading:** `const walls = useStore(state => state.walls);` (in components)
-
-**Writing:** `useStore.setState(draft => { draft.walls.push(...); });` (in actions)
+1. **Canonical storage = centerline geometry.** Draw modes (`projectSettings.drawReference`: `inside_face` default / `centerline` / `outside_face`) convert at the
+   authoring boundary (`src/draw/faceToCenterline.js`); nothing downstream knows the mode.
+2. **Walls are full entities, never auto-split.** T-junctions are `wall.junctions[]`; rooms use sub-spans via the
+   topology graph. Only the explicit user Split tool (`splitWall`) cuts a wall.
+3. **IS 2502 catalog is the single source for BBS.** Every bend deduction, hook, Ld, lap and bar length comes from
+   `src/specs/cuttingLength.js`. ⚠️ **NOT currently enforced** — BOQ steel is priced from the legacy
+   `computeBBSQuantities` path with a lap-unit bug, D²/162 is re-implemented 3×, and generators carry hard-coded
+   fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**.
+4. **Beam endpoints are a 4-type union** `{type: COLUMN|BEAM|WALL|POINT, …}` — always resolve through
+   `resolveBeamEndpoint()`.
+5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
+   the BBS panel + BBS export. The legacy `computeBBSQuantities` is meant to be deprecated but is **still the live
+   source of every BOQ steel line** (`boq/lines.js:37,248`) — KD-29. `verify-bbs` currently pins the legacy numbers.
+6. **IFC readiness.** Every entity has `id` (UUID) **and** `ifcGlobalId` (22-char IFC GUID), minted only in
+   `src/lib/ids.js`. Never remove or repurpose `ifcGlobalId` — it is also the ERP `sourceEditorId`.
+7. **Revisions / design history are permanent** (owner rule). ⚠️ **NOT currently enforced** — editor revisions are
+   capped at 30 with silent pruning, localStorage-only, absent in ERP mode; ERP design versions are never cut.
+   See **KD-16, KD-17**.
+8. **Greenfield.** `loadProject` injects defaults; no migrations, no existing-data compat code.
 
 ---
 
-## Core Files & Responsibilities
+## ERP Sync — Canonical Building Document + live projection
 
-| File | Role | Size |
-|------|------|------|
-| `src/store.js` | Central Zustand store | 2700 lines |
-| `src/structuralSlice.js` | Columns, beams, slabs, foundations state + actions | 87 KB |
-| `src/mepSlice.js` | MEP entities (5 disciplines) state | ? |
-| `src/components/Canvas.jsx` | Drawing surface, keyboard, pointer, drag | Main UI |
-| `src/components/Panels.jsx` | Side/bottom panels (props, BOQ, MEP, etc.) | Main UI |
-| `src/boq/` | BOQ pipeline: emitter → scope → presentation | 10 files |
-| `src/topology/` | Wall topology, room detection, spatial logic (pure) | 5+ files |
-| `src/quantities/` | Material aggregators (masonry, steel, plaster, etc.) | 8+ files |
-| `src/mep/` | MEP systems (plumbing, electrical, HVAC, fire, ELV) | 50+ files |
-| `src/export/` | PDF, Excel, CSV builders | 3 files |
-| `src/schema/` | Entity schemas, integrity validation | 10+ files |
+The editor is the **source of truth for geometry** of a connected building. Two lineages per building:
 
----
+- **Canonical Building Document** — `buildSnapshot(state)` (`src/projects/_snapshot.js`, payload `version: 7`;
+  the unused `operations/_schemaVersion.js` says 8 — KD-34) wrapped by `canonicalDoc.buildSnapshotDoc` and PUT to
+  `/api/v1/building-structure/buildings/:id/document` (R2 blob, checksum, CAS on `baseVersion`).
+  **Reopen is verbatim** (R2 → IDB → empty; checksum failure with no IDB rescue → HARD read-only latch).
+- **Geometry projection** — ERP PostgreSQL rows written live through `/api/v1/geometry/**`, one op at a time.
 
-## Common Patterns
-
-### **Pattern 1: Pure Quantity Aggregator**
-
-```javascript
-// src/quantities/steelQty.js
-export function calculateSteelQty(beams, columns, scope = {}) {
-  const result = { mainRebarWeight: 0, stirrupWeight: 0 };
-  
-  for (const beam of beams) {
-    if (!isInScope(beam, scope)) continue;
-    result.mainRebarWeight += beam.span * beam.grade * REBAR_DENSITY;
-  }
-  
-  return result;  // No mutations
-}
-```
-
-**Usage:** `const steelQty = calculateSteelQty(store.beams, store.columns, {floorId: 'F1'});`
-
-### **Pattern 2: Store Mutation (Zustand Set)**
-
-```javascript
-// In store.js or a slice
-addWall: (endpoints, thickness, material) => set((state) => {
-  const id = generateWallId();
-  return {
-    walls: [
-      ...state.walls,
-      { id, endpoints, thickness, material, createdAt: Date.now() }
-    ]
-  };
-})
-```
-
-### **Pattern 3: React Hook with Store Selector**
-
-```javascript
-// src/hooks/useWallSelection.js
-export function useWallSelection() {
-  const selectedEntity = useStore(state => state.selectedEntity);
-  const setSelectedEntity = useStore(state => state.setSelectedEntity);
-  
-  const selectWall = useCallback((wallId) => {
-    setSelectedEntity({ type: 'wall', id: wallId });
-  }, []);
-  
-  return { selectedEntity, selectWall };
-}
-```
-
----
-
-## Verification (50 Scripts)
-
-No Jest/Vitest. Instead, **50 Node.js scripts** verify by assertion at commit time.
-
-**Run all:** ⚠️ there is **no `npm run verify` script** in `package.json` (only `dev`, `build`,
-`lint`, `preview`, `deploy`). Run the scripts directly, or loop over them:
-```bash
-for f in scripts/verify-*.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done
-```
-
-**Run specific:**
-```bash
-node scripts/verify-boq.mjs
-node scripts/verify-topology.mjs
-node scripts/verify-mep.mjs
-```
-
-**Add a new one:**
-```javascript
-// scripts/verify-my-feature.mjs
-import assert from 'assert';
-
-const testCase = {...};
-const result = myFunction(testCase);
-
-assert.deepStrictEqual(result.foo, expectedValue);
-console.log('✓ verify-my-feature passed');
-```
-
-On failure, git hook blocks the commit. Fix the code, re-run.
-
----
-
-## Key Design Rules
-
-1. **Canonical storage = centerline geometry.** Drawing tools (inside_face/center/outside_face) convert at authoring boundary; nothing downstream knows the mode.
-
-2. **Walls are full entities, never split.** T-junctions are stored as `wall.junctions[]`. Rooms use sub-spans of full walls via the topology graph.
-
-3. **IS 2502 catalog is single source for BBS.** Every bend deduction, hook, Ld, lap, bar length comes from `src/specs/cuttingLength.js`. No magic numbers elsewhere.
-
-4. **Beam endpoints are a 4-type union.** `{type: COLUMN|BEAM|WALL|POINT, ...}`. Always resolve through `resolveBeamEndpoint()` — never direct coordinate access.
-
-5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically. The legacy `computeBBSQuantities` coexists but is deprecated.
-
-6. **IFC readiness.** Every entity has `ifcGlobalId` (22-char base64). Don't remove or repurpose; future work includes IFC export.
-
----
-
-## ERP Sync — Canonical Building Document + live projection (migration COMPLETE, 2026-06-30)
-
-This editor is the **single source of truth** for a connected JRM ERP. The canonical model
-is `buildSnapshot(state)` (`src/projects/_snapshot.js`, schemaVersion **8**) — persisted as a
-**versioned JSON document in R2** (the *Canonical Building Document*) and **reopened verbatim**,
-never reconstructed. PostgreSQL in the ERP is a **disposable, deterministic projection** of it.
-Full architecture + invariants live in `../docs/architecture/` (ADR-001..004 + the completion report).
+The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. BBS never leaves the editor,
+and the projection sends **no** structural sections, heights, concrete or bars (KD-7). Wire units are integer **mm**
+for coordinates, heights, thicknesses and lengths; feet only for floor height and ERP room length/width.
 
 ### The write pipeline (`src/projects/`)
-- **`syncCoordinator`** owns the ONE ordered flow per committed change: **(1) ACCEPT** — durably
-  persist the canonical snapshot to local IDB + enqueue the R2 upload; **(2) EMIT** — only then does
-  the projection diff (`syncEngine`) enter `liveSyncQueue`, which POSTs `/geometry/*` ops to the ERP
-  `GeometryLiveService`. The R2 upload is async + debounced. (Invariant #5: accept-before-project.)
-- **`syncEngine`** diffs the tracked collections (nodes / walls / rooms, floors via a special-case,
-  the `ELEMENT_REGISTRY` element kinds incl. MEP + risers; openings via their wall) and emits ordered
-  ADD/UPDATE/DELETE ops (parents-first on ADD, children-first on DELETE). Stable identity =
-  `sourceEditorId` (the editor `ifcGlobalId`); **every create is idempotent** (DB-enforced `@@unique`).
-- **`liveSync`** maps ops → `/geometry/*` HTTP and `seedIdMapFromErp` (GET `/geometry/buildings/:id/state`)
-  re-seeds the editor-id → ERP-id map on reopen. **`canonicalReopen`** loads R2 → IDB → empty.
-- Structural/MEP elements carry a typed `structural` sub-object + per-element IS-2502 `bbs` rows in the
-  snapshot; the ERP stores these verbatim and **never recalculates BBS**. Units at the boundary: coords
-  → mm integer, lengths/heights → feet, thickness → inches; IDs are `ifcGlobalId` only.
+- **`syncCoordinator`** is the only store subscriber in ERP mode: **(1) ACCEPT** — write the canonical doc to IDB
+  `SNAPSHOTS[buildingId]`, mark dirty, debounce (10 s) the upload via `canonicalSyncQueue`; **(2) EMIT** — only then
+  `flushSyncEngine` diffs vs a shadow and enqueues ops. (Invariant #5, accept-before-emit.)
+- **`syncEngine`** diffs nodes / walls / rooms, floors, and every `ELEMENT_REGISTRY` kind (structural + MEP + risers);
+  openings are diffed by id set only (resizes don't sync — KD-8). Stable identity = `sourceEditorId` =
+  `ifcGlobalId` (floors: their `id`, e.g. `'F1'`). Server creates are idempotent by `sourceEditorId`.
+- **`liveSyncQueue`** = durable IDB FIFO outbox with a dependency gate; **`liveSync.fireLiveOp`** maps ops → HTTP,
+  resolves editor ids → ERP UUIDs, converts in → mm. 400/404/409/422 dead-letter; 401/403/408/429/5xx/network retry
+  ×5 then `failed` (badge offers Retry / Resync all).
+- **`canonicalReopen`** seeds the id map from `GET /geometry/buildings/:id/state` (never loads the canvas from it),
+  then loads R2 → IDB → empty.
 
 ### Locked rules
-- The **editor owns topology** (geometry); the **ERP owns business state** (room name *after* creation,
-  status, finishes, costs). Geometry mutations are **editor-session-bound** (`/geometry/*`, single writer).
-- **The default floor uses a CONSTANT `sourceEditorId` = `'F1'` (`DEFAULT_FLOOR_ID`)** — reused for the
-  first floor of *every* building (`erpSession._buildFloorIdsMap`, `syncEmitters.floorAddOp`). Because
-  `'F1'` is not unique across buildings, **floor identity is building-scoped on the ERP**
-  (`BuildingFloor @@unique([buildingId, sourceEditorId])` + a `buildingId`-scoped idempotency lookup).
-  Client safeguards that keep this correct (do not remove): `initLiveSync()` clears `_idMap` on every
-  launch; `ADD_ROOM` resolves its floor **only** from this connection's `floorIds` (never a global id-map
-  fallback) and creates the floor under the current building if missing; `SAVE_ROOM_VERTICES` no-ops on
-  an unresolved room id (never POSTs `/rooms/null/*`). All other geometry entities emit globally-unique
-  `ifcGlobalId`s, so only the floor needs the building-scoped treatment.
-- **A child op WAITS for its parent's server id — it is never dispatched with `null`** (2026-09-22).
-  FIFO + one-at-a-time gives parent-before-child ordering only while the head of the queue keeps
-  moving. It lapses the moment an op stops being dispatchable: the picker took the first *pending*
-  op, which **steps over a parent sitting in `failed`/`dead`**, so the child ran with its parent
-  resolving to `null` and `ADD_OPENING` POSTed the literal path `/geometry/walls/null/openings`
-  (ERP 500 → 5 retries → "1 failed" that "Retry failed" re-fired for ever). A persisted queue
-  reloaded into a fresh session (`initLiveSync` clears `_idMap`) lands in the same state.
-  Ordering is therefore **declared, not just implied**: `opDependency(opType, payload)` in
-  `liveSync.js` is the ONE table of what each op `needs` / `produces` / `destroys`, and
-  `liveSyncQueue._drain` answers it against the same id map the dispatcher uses —
-  **dispatch** when resolved · **wait** (`blocked`, keeps its queue position, unblocks when the
-  parent succeeds) when a queued op will produce it · **drop with a logged reason** when nothing
-  can (parent deleted, or it never synced). A dropped op is gone from the badge; it is never
-  retried for ever. *Adding an op that puts a parent id in a URL or a required body field means
-  adding its row to `OP_DEPENDENCY`* — otherwise it is unconstrained.
-  Backstop: `_requireId()` guards **every** id interpolated into a path (`ADD_WALL`,
-  `ADD_OPENING`, `SPLIT_WALL`, `ADD_WALL_SURFACE`), throwing a `→ 400:` (permanent, dead-letters)
-  error rather than building a `/null` URL. On the ERP side the same request is now a clean 400 —
-  see `modules/building-structure/CLAUDE.md`.
-  ⚠️ **Test fixtures must pass EDITOR ids** (`wallIfcId`/`roomIfcId`) and let `liveSync` resolve
-  them, because that is what the emitters emit. `verify-live-sync.mjs` handed `ADD_OPENING` a
-  pre-resolved `wallErpId` — a shape no emitter produces — which is why it never caught this.
-- **Reconstruction is removed** — canonical is never derived from the projection (#6). The old
-  blob-import + connect-handoff + autosave-never-push model is gone (the coordinator now writes the
-  canonical document continuously); `editor-project`/`buildPackage`-import are deleted.
+- The **editor owns topology**; the **ERP owns business state** (room name after creation, status, finishes, costs).
+  Geometry mutations are editor-session-bound (`/geometry/*` behind `EditorSessionGuard`).
+- **Default floor uses the CONSTANT `sourceEditorId` `'F1'`** (`DEFAULT_FLOOR_ID`) for every building, so floor
+  identity is building-scoped on the ERP (`BuildingFloor @@unique([buildingId, sourceEditorId])`). Client safeguards
+  (do not remove): `initLiveSync()` clears `_idMap` on every launch; `ADD_ROOM` resolves its floor **only** from this
+  connection's `floorIds` and creates it under the current building if missing; `SAVE_ROOM_VERTICES` no-ops on an
+  unresolved room id.
+- **A child op WAITS for its parent's server id — it is never dispatched with `null`** (2026-09-22). `opDependency()`
+  / `OP_DEPENDENCY` in `liveSync.js` is the ONE table of what each op `needs` / `produces` / `destroys`;
+  `liveSyncQueue._drain` answers it against the dispatcher's id map: **dispatch** when resolved · **wait** (`blocked`,
+  keeps position) when a queued op will produce the parent · **drop with a logged reason** when nothing can.
+  *Adding an op that puts a parent id in a URL or required body field means adding its `OP_DEPENDENCY` row.*
+  Backstops: `_requireId()` guards the parent ids of `ADD_WALL`, `ADD_OPENING`, `SPLIT_WALL`, `ADD_WALL_SURFACE`
+  (throws a permanent `→ 400:`); UPDATE_*/DELETE_* with an unresolved id are skipped as no-op success; `UPDATE_NODE`
+  with an unresolved id heals by POSTing a create. (`ADD_NODE`/`ADD_ELEMENT` interpolate only `buildingId`.)
+  ⚠️ **Test fixtures must pass EDITOR ids** (`wallIfcId`/`roomIfcId`) and let `liveSync` resolve them.
+- **No automatic reconstruction.** Reopen never derives the canvas from the projection. The only reconstruction
+  path is the explicit, user-initiated **"Load from ERP"** (`ProjectionMismatchBanner` → `projectionGuard.loadFromErp`
+  → `projectionReconstruct.js`), shown when the projection has more rooms/walls than the canvas. It is currently
+  defective (wrong wall shape → duplicate walls; drops elements and resets settings) — **KD-3, KD-4, KD-36**.
+- **An old snapshot must never clobber a newer one.** ⚠️ **NOT currently enforced** — on 409 the queue refetches the
+  base and re-PUTs the same payload (last-writer-wins); only 3 consecutive conflicts latch read-only. **KD-1, KD-2.**
+- **Legacy connect path** (`#connect` deep link → `connectHandoff.js`, `cloudConn.js`, `ConnectErpDialog`,
+  `ErpConnection`) still ships and is wired in `App.jsx`/`main.jsx`, but the ERP routes it calls no longer exist
+  (KD-15). `buildPackage` / blob-import are deleted.
 - **Electrical point types (Stream 2).** A placed electrical point carries a canonical `pointType`
-  (`src/mep/catalogs/electricalPointTypes.js`) chosen at placement (floating palette) and re-synced on
-  change. It rides `ADD_ELEMENT`/`UPDATE_ELEMENT` (in the element `toErpPayload`, so it is part of the
-  change signature) → the ERP persists `BuildingElement.mepPointType` and routes it to a per-type BOQ line
-  (see the ERP `modules/quantity/CLAUDE.md`). Verified by `scripts/verify-electrical-point-type-sync.mjs`.
-- **Quality gate for any geometry change:** `scripts/verify-canonical-sync` · `-canonical-reopen` ·
-  `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` · `-live-sync-ordering`
-  (all must stay green).
-  ⚠️ **`verify-floor-delete` currently cannot run at all** (pre-existing, unrelated to sync): it
-  imports `src/structuralSlice.js`, which imports `'./materials'` **without a file extension**.
-  Vite resolves that; Node ESM does not, so the script dies with `ERR_MODULE_NOT_FOUND` before its
-  first assertion. There are ~358 extensionless relative imports under `src/`, so this is a
-  repo-wide resolution choice, not a one-line typo — fix it deliberately, and until then do not
-  read this gate as green.
+  (`src/mep/catalogs/electricalPointTypes.js`) chosen from the floating palette; it rides `ADD_ELEMENT` /
+  `UPDATE_ELEMENT` (in `toErpPayload`, part of the change signature) → ERP `BuildingElement.mepPointType`.
+  ⚠️ Updates to any point that has a `roomId` are rejected 400 and dead-lettered (PATCH DTO lacks `roomIfcId`) —
+  **KD-5**. Verified (mocked fetch only) by `verify-electrical-point-type-sync.mjs`.
+- **Read-only latch** (`editorWriteGuard`): HARD on integrity failure or 3 stale-base conflicts; releasable when
+  offline. ⚠️ The UI does not consult it — editing continues locally (KD-23).
+- **Quality gate for any geometry/sync change** (run with the resolver hook, all must stay green):
+  `verify-canonical-sync` · `-canonical-reopen` · `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` ·
+  `-live-sync-ordering` · `-room-type-sync` · `-electrical-point-type-sync` · `-editor-write-guard` · `-readonly-gate` ·
+  `-projection-reconstruct` (its fixtures use a fictional wall shape — green does not prove Load-from-ERP works, KD-36).
+
+Architecture docs for the integration live in erp-saas: `docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`
+and `48A_PHASE0_DECISION_RECORD_AND_PLAN.md`.
+
+---
+
+## Verification (52 harnesses)
+
+No Jest/Vitest, **no npm `verify`/`test` script, and no git hook** — nothing runs these automatically. Run them
+yourself before committing.
+
+**Always use the resolver hook** — `src/` uses ~358 extension-less relative imports (Vite-only resolution), so
+24 harnesses die with `ERR_MODULE_NOT_FOUND` under plain `node`:
+
+```bash
+# all
+for f in scripts/verify-*.mjs; do node --experimental-loader ./scripts/resolver-hook.mjs "$f" >/dev/null 2>&1 || echo "FAIL $f"; done
+# one
+node --experimental-loader ./scripts/resolver-hook.mjs scripts/verify-boq.mjs
+```
+
+Current state (2026-09-23): **51/52 pass; `verify-legacy-shim` fails** because the `store/legacyAccessors.js`
+kill date (2026-08-15) passed with 50 accessors still registered (KD-31). `validate-bbs-karthick.mjs` is a report,
+not a gate.
+
+Coverage gaps to know: nothing asserts MEP BOQ lines (KD-27 went unnoticed); `verify-bbs` pins the legacy steel bug
+(KD-29); sync harnesses use mocked fetch and never run payloads through the real ERP DTOs (KD-5, KD-6).
+
+**Add a new one:** `scripts/verify-<feature>.mjs` using `node:assert`, importing `src/` modules directly; keep pure
+modules free of React/zustand so they load in Node. Full harness table: CODEBASE_MAP §7.
 
 ---
 
 ## Development
 
-**Install:**
 ```bash
 npm install
+npm run dev       # Vite dev server
+npm run build     # → dist/
+npm run lint      # eslint flat config
+npm run preview   # build + wrangler dev
+npm run deploy    # build + wrangler deploy
 ```
 
-**Dev server:**
-```bash
-npm run dev
-```
-Runs on `http://localhost:5173` (or similar).
-
-**Build:**
-```bash
-npm run build
-```
-Output: `dist/`
-
-**Deploy to Cloudflare Workers:**
-```bash
-wrangler deploy
-```
-
-**Lint:**
-```bash
-npm run lint
-```
+ERP-connected launch: the ERP mints `POST /api/v1/auth/editor-session` and opens the editor with
+`#erpLaunch?buildingId&token&erpUrl&refreshToken&expiresAt` (stripped on boot). In DEV, `window.useStore` is exposed.
 
 ---
 
 ## Dependencies
 
 | Package | Version | Why |
-|---------|---------|-----|
-| `react` | 19.2.5 | UI framework |
-| `zustand` | 5.0.13 | State management |
-| `vite` | 8.0.10 | Build tool |
-| `jspdf` | 4.2.1 | PDF generation |
-| `xlsx` | 0.18.5 | Excel export |
-| `lucide-react` | 1.16.0 | Icons |
+|---|---|---|
+| `react` / `react-dom` | ^19.2.5 | UI |
+| `zustand` | ^5.0.13 | State |
+| `vite` (dev) | ^8.0.10 | Build |
+| `@cloudflare/vite-plugin` (dev) | ^1.40.2 | Workers integration (`vite.config.js`; `wrangler.jsonc` name `building-editor`, SPA assets) |
+| `jspdf` / `jspdf-autotable` | ^4.2.1 / ^5.0.7 | PDF export |
+| `xlsx` | ^0.18.5 | Excel export (BOQ + BBS) |
+| `pdfjs-dist` | ^4.10.38 | PDF underlay import |
+| `lucide-react` | ^1.16.0 | Icons |
 
-**No TypeScript.** JSDoc type hints instead. Check `eslint.config.js` for linting rules.
-
----
-
-## For More Detail
-
-- **Phase history & locked rules:** `docs/reference/CLAUDE-phase-history.md` (35+ phases)
-- **Architecture deep dive:** `docs/reference/CLAUDE-boq-reference.md` (modules, patterns, tasks)
-- **Business requirements:** `docs/bbs/BBS_MORNING_REPORT.md`
-- **Code map (diagrams, module guide, navigation):** `docs/CODEBASE_MAP.md` (if it exists)
+No TypeScript — JSDoc + ESLint (`eslint.config.js`).
 
 ---
 
 ## Common Issues
 
-**Q: Where do I add a new entity type (beam, column, etc.)?**  
-A: Define schema in `src/schema/entities/`, add to store slice, wire into UI component.
+**Q: Where do I add a new entity type?**
+A: Schema in `src/schema/entities/`, collection + actions in the right slice (with `_save()`), add it to the history
+snapshot (`store.js:208-216`), `loadProject` normalisation and `projects/_snapshot.js`, FK rows in
+`schema/integrity.js`, panel + Canvas rendering. For ERP sync also add a `projects/elementRegistry.js` entry and make
+sure every `toErpPayload` field is accepted by **both** the ERP create **and** patch element DTOs. Checklist: map §12.
 
-**Q: How do I modify a BOQ line calculation?**  
-A: Find the aggregator in `src/quantities/*.js`, fix the formula, update the corresponding `scripts/verify-*.mjs` test.
+**Q: How do I modify a BOQ line calculation?**
+A: Trace the line in `src/boq/lines.js` (or `boq/emitters/*` for MEP) back to its source — a `quantities/*.js`
+aggregator, a store getter, or an `mep/quantities/*.js` engine — fix it there, and update the matching verify script.
 
-**Q: The verify script is failing. What do I do?**  
-A: Read the assertion error, fix the code or the test (if the test expectation is wrong), re-run `npm run verify`.
+**Q: A verify script is failing.**
+A: First confirm you ran it with `--experimental-loader ./scripts/resolver-hook.mjs`. Then read the assertion, fix
+the code (or the expectation if it is wrong), and re-run the loop above.
 
-**Q: How do I add a new MEP discipline?**  
-A: Create folder under `src/mep/[discipline]/`, define entity schema, add to `src/mepSlice.js`, wire components.
+**Q: How do I add a new MEP discipline?**
+A: Catalogs (`mep/catalogs/`, registered in `CATALOG_VERSIONS`) → discipline engine folder → `mep/quantities/<x>.js`
+→ `boq/scope.js` getter → `boq/emitters/<x>.js` (read the engine's real output keys) → `mepSlice.js` collection →
+panel + canvas overlay → `projects/elementRegistry.js` entry → `verify-mep` + `verify-catalog-provenance`.
 
-**Q: Can I use TypeScript?**  
-A: No. JSDoc + ESLint is the pattern. See `eslint.config.js`.
+**Q: Can I use TypeScript?**
+A: No. JSDoc + ESLint.
 
 ---
 
-**Last updated:** 2026-07-27  
-**Project owner:** Vignesh  
+## For More Detail
+
+- **Code map, contract table, Known Defects, dead code:** `docs/CODEBASE_MAP.md`
+- **UI defect log:** `docs/UI-ISSUES.md`
+- **Phase history (historical):** `docs/reference/CLAUDE-phase-history.md`
+- **Reference guide:** `docs/reference/CLAUDE-boq-reference.md`
+- **BBS build/validation reports (historical):** `docs/bbs/` — `BBS-VALIDATION-KARTHICK.md` is the workbook
+  comparison; the two `*MORNING-REPORT*.md` files are build logs, not requirements.
+
+---
+
+**Last updated:** 2026-09-23
+**Project owner:** Vignesh
 **Repo:** `/Users/vignesh/projects/jrm/boq`

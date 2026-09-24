@@ -1,5 +1,14 @@
 # BBS Overnight Build — Morning Report
 
+> **Historical build log (2026-05-28) — not a requirements document. Corrections as of 2026-09-23:**
+> - Verify suite is now 52 `verify-*.mjs` (run with `--experimental-loader ./scripts/resolver-hook.mjs`); `verify-legacy-shim` now **fails** (kill date 2026-08-15 expired) — the PASS below is historical.
+> - BBS Excel/PDF export (BBS-5b) **shipped**: `src/export/bbs.js` + `verify-bbs-export` (the `TODO BBS-5b` at `BBSSchedulePanel.jsx:12` is stale).
+> - Standard bar length default is **12 m** (`reinforcementSpecs.js:36`, `cuttingLength.js:71`), not 6 m.
+> - Crank length uses exact `rise / sin θ` (`cuttingLength.js:419`); the 0.42D factor is unread.
+> - `verify-bbs` now has 176 assertions, sections A–O.
+> - The legacy path is **still the source of BOQ steel** (`boq/lines.js:37,248`) and still carries BE-Legacy-001; footings are now lighter than legacy after BE-Footing-Ld-001; `_steel.js` does not exist. See `docs/CODEBASE_MAP.md` KD-29.
+> - The suggested CLAUDE.md "Phase BBS" section was never added.
+
 **Date:** 2026-05-28
 **Branch:** main (uncommitted; ready for review + commit)
 **Run scope:** All 6 phases (BBS-0.5 + BBS-0 + BBS-1 + BBS-2 + BBS-3 + BBS-4 + BBS-5) + verify-bbs + full verify sweep.

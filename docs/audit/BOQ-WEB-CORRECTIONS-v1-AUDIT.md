@@ -1,5 +1,13 @@
 # BOQ WEB Corrections v1 — Honest Audit & Triage
 
+> **Corrections as of 2026-09-23** (see `docs/CODEBASE_MAP.md` for current architecture and Known Defects):
+> - `src/boq/buildPackage.js` / `BuildingModelPackage` are **deleted**; the editor writes the canonical Building Document (`projects/_snapshot.js`, `canonicalDoc.js`) plus the `/geometry/**` projection.
+> - `src/projects/cloudSync.js` does not exist; `autosave.js` is local-IDB only; ERP sync = `syncCoordinator` / `canonicalSyncQueue` / `syncEngine` / `liveSyncQueue` / `liveSync`.
+> - Sump/OHT civil quantities **are implemented** (`getSumpCivilQty` / `getSepticCivilQty`, `store.js:2476,2496`).
+> - Item #29: only electrical **wire** lines emit; **conduit and MCB lines never emit** (emitter reads `byConduit`/`mcbCounts`, engine produces `conduit`/`mcbs` — KD-27). Junction boxes still never emitted.
+> - D-1 (`HOT_RECIRC` absent from plumbing `SYSTEM_IDS`) is still true (KD-28).
+> - There is no `npm run verify`; the suite is 52 scripts run with `node --experimental-loader ./scripts/resolver-hook.mjs`.
+
 ## Context
 
 A junior, non-developer teammate produced a 46-item "corrections" list (`BOQ  WEB corrections v1.pdf`) by clicking around the BOQ editor. She had little knowledge of the project and **no knowledge that the editor is the upstream "Building Editor" that feeds the ERP-SaaS platform** via a stable `ifcGlobalId` contract and live cloud sync. The owner asked for an honest, deep, no-shortcuts audit: triage each finding (real bug / misunderstood-feature / worthy enhancement), and go deeper than she could — architecture, scalability, and integration issues — treating this as **greenfield with unlimited resources, targeting an enterprise-grade, dynamic, data-driven, multi-tenant platform.**

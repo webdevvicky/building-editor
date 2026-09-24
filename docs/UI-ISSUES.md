@@ -1,7 +1,29 @@
 # UI Issues Log
 
 Tracks user-facing UI defects (separate from engine/BOQ correctness). Most
-recent first.
+recent first. Status re-audited against code 2026-09-23 (`main` @ f750c72);
+KD-n ids refer to the Known Defects register in `docs/CODEBASE_MAP.md` §10.
+
+> Verify-script note: there are now **52** `scripts/verify-*.mjs` harnesses.
+> Run them with `node --experimental-loader ./scripts/resolver-hook.mjs`; as of
+> 2026-09-23, 51/52 pass and `verify-legacy-shim` fails (expired kill date,
+> KD-31). References below to "all 34 verify scripts green" are historical.
+
+---
+
+## Open (found by the 2026-09-23 audit, not yet fixed)
+
+| ID | Severity | Symptom | Evidence | Map |
+|---|---|---|---|---|
+| UI-2026-09-A | high | Ctrl+Z / Ctrl+Y undo/redo **twice** per keystroke; Delete key in the canvas deletes wall/column/stamp **without** the confirm dialog (Backspace does confirm) | Canvas.jsx:417-424 keydown listener duplicates useKeyboardShortcuts.js:44-63; `handleDelete` useKeyboardShortcuts.js:266-390 | KD-18 |
+| UI-2026-09-B | high | Ctrl+S (local project) saves **without any MEP data**; Toolbar "Save project" includes it | useKeyboardShortcuts.js:393-416 vs Toolbar.jsx:108-117 | KD-19 |
+| UI-2026-09-C | medium | "Deleted floor … [Undo]" toast reverts an unrelated earlier edit (floors are not in undo history) | FloorsManagerPanel.jsx:127-130; structuralSlice.js:601-628 | KD-20 |
+| UI-2026-09-D | medium | BOQ panel does not refresh after MEP edits until another tracked key changes; room materials breakdown stale after settings edits | BOQPanel.jsx:204-233; RoomDetailPanel.jsx:47-57 | KD-21 |
+| UI-2026-09-E | low | MEP route lines never render on the canvas (overlays read non-existent `get<X>Routes`; only ClashOverlay builds routes) | canvas/ElectricalOverlay.jsx:82 and siblings | KD-22 |
+| UI-2026-09-F | low | Rectangle-room tool with auto-MEP off never opens the MEP defaults modal (Room tool does) | Canvas.jsx:823-825 vs 1041 | KD-25 |
+| UI-2026-09-G | medium | Read-only banner shows but editing is still allowed (edits are kept locally, not synced) | no component consults `isEditorReadOnly()` | KD-23 |
+| UI-2026-09-H | medium | In ERP mode, Import JSON / open project / template / revision restore replace the canvas with no guard | Toolbar.jsx:87-101; ProjectsPanel.jsx:138-190; RevisionsPanel.jsx:133-137 | KD-24 |
+| UI-2026-09-I | low | Read-only banner and projection-mismatch banner overlap (both fixed at top:0) | EditorReadOnlyBanner, ProjectionMismatchBanner | map G14 |
 
 ---
 
@@ -26,7 +48,10 @@ recent first.
   segment nearest the click via `getOrderedWallJunctions` and keys off that
   segment's node pair. Walls stay full entities — Phase W honored, no split.
 - **Verify**: `verify-room-detection.mjs` Section H (sub-span detection, 104
-  assertions); all 34 verify scripts green; `vite build` clean.
+  assertions); all 34 verify scripts green at the time; `vite build` clean.
+- **Re-checked 2026-09-23: still fixed** — no manual Room tool; `room_detect`
+  is "Room"/R (toolbarConfig.js:81); auto-MEP in Canvas.jsx:995-1045;
+  Section H still present.
 - **Validated end-to-end in canvas 2026-05-30 by user**: 10×10 closed-chain →
   room at 100 sqft; T-junction sub-span → room on the sub-region; room
   selection auto-works. Canvas behavior agrees with verify.
@@ -44,6 +69,8 @@ recent first.
   BE-DrawRegression-001 (layering without reflow).
 - **Verify**: `vite build` clean; ESLint unchanged from baseline. Visual check
   by user.
+- **Re-checked 2026-09-23: still fixed** — Length panel `bottom:128`
+  (Canvas.jsx:1229), help bar `bottom:80` (Canvas.jsx:1269).
 
 ## BE-DrawRegression-001 — Toolbar overlap (✅ RESOLVED 2026-05-29)
 
@@ -52,10 +79,11 @@ recent first.
   `top:12, left:12, zIndex:20` — inside the toolbar's band (`top:8/left:8`,
   z `--z-panel`=10), and the Structural & Civil flyout opens at
   z `--z-overlay`=50, so the flyout overlapped the badge.
-- **Fix**: moved the badge to `top:56, left:16` (`Canvas.jsx` ~1227) — below the
+- **Fix**: moved the badge to `top:56, left:16` (now `Canvas.jsx:1278-1302`) — below the
   toolbar, in the same top-left offset selection panels use. The badge only
   shows during draw/rect_room (no selection panel open), so no new collision.
 - **Verify**: `vite build` clean; visual reflow (manual demo check).
+- **Re-checked 2026-09-23: still fixed** (Canvas.jsx:1280).
 
 <details><summary>original report</summary>
 
@@ -77,7 +105,7 @@ recent first.
 ## BE-DrawRegression-002 — Chain-draw stops after first segment in Inside-face mode (✅ RESOLVED 2026-05-29)
 
 - **Status**: RESOLVED · **Severity**: high (blocked in-canvas demo to MD)
-- **Root cause**: `Canvas.jsx:858` used `SNAP_IN` in the face-mode closure
+- **Root cause**: `Canvas.jsx:858` (now line 870) used `SNAP_IN` in the face-mode closure
   check but only `snapIn` (the function) was imported from `../geometry` —
   `SNAP_IN` (`const = 4`) was never imported. On click 2+ in face mode
   (`drawChainBuffer.length >= 2`) the closure block threw a `ReferenceError`,
@@ -85,11 +113,14 @@ recent first.
   committed. Centerline mode was unaffected (legacy path never reaches that
   line) — which is exactly why it "worked in Center but failed in Inside-face."
 - **Fix**: added `SNAP_IN` to the `from '../geometry'` import in `Canvas.jsx`.
-- **Verify**: `verify-draw-reference.mjs` Section O (static guard: every
-  ALL-CAPS geometry identifier used in Canvas.jsx must be imported — proven to
-  fail when the import is removed, pass when restored) + Section P (4-point open
-  inside_face chain converts to 4 points / 3 edges, no false closure). All 34
-  verify scripts green; `vite build` clean.
+- **Verify (at the time)**: `verify-draw-reference.mjs` Section O (static
+  import guard) + Section P (4-point open chain). All 34 verify scripts green;
+  `vite build` clean.
+- **Re-checked 2026-09-23: fix still in place** (`SNAP_IN` imported,
+  Canvas.jsx:5; used at :870). ⚠️ **The regression guard no longer exists**:
+  `verify-draw-reference.mjs` Section O is now "Separate-wall corner join"
+  (line 708) and Section P "Joint reuses EXACT node id" (line 758); no script
+  checks that ALL-CAPS identifiers used in Canvas.jsx are imported.
 
 <details><summary>original report</summary>
 
@@ -111,6 +142,6 @@ recent first.
   second point — chain does not extend.
 </details>
 
-> Both demo blockers resolved 2026-05-29 (this run). Neither touches the BBS
+> (Historical, 2026-05-29.) Both demo blockers resolved 2026-05-29 (this run). Neither touches the BBS
 > engine. Live in-canvas confirmation of the 3-click chain + badge position is
 > the user's final demo check; the build + verify guards cover regression.
