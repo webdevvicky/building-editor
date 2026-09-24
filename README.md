@@ -1,16 +1,20 @@
-# React + Vite
+# BOQ — Building Editor
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser app (Vite + React 19 + Zustand, plain JavaScript) for drawing Indian residential buildings (walls, rooms,
+structure, MEP). It produces a live editor-side BOQ and an IS 2502 bar-bending schedule. Launched from the JRM ERP,
+it is the upstream Building Editor: it writes the canonical Building Document and a live geometry projection to the
+ERP. Deployed to Cloudflare Workers; no backend of its own.
 
-Currently, two official plugins are available:
+Start here:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- [`CLAUDE.md`](CLAUDE.md): rules, workflow, commands and the verification harnesses.
+- [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md): architecture, data flows, the editor↔ERP contract and the Known
+  Defects register (KD-n).
+- [`docs/DOMAIN-RULES.md`](docs/DOMAIN-RULES.md): domain and engineering rules, each with its status and authority.
+- The ERP repo (`erp-saas`): `erp-saas:CLAUDE.md` and `erp-saas:docs/DOCS-INDEX.md`. The integration architecture is
+  `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```

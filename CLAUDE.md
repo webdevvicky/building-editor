@@ -1,7 +1,8 @@
 # BOQ — Building Editor (`boq`)
 
 **Rules, workflow and orientation.** Deep architecture, data flows, the editor↔ERP contract table and the
-**Known Defects register (KD-n)** live in [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md).
+**Known Defects register (KD-n)** live in [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md). Every domain and
+engineering rule, with its status today and its authority, is in [`docs/DOMAIN-RULES.md`](docs/DOMAIN-RULES.md).
 
 ---
 
@@ -37,7 +38,8 @@ Building Editor: it writes a canonical Building Document and a live geometry pro
 | Export | `src/export/{pdf,excel,bbs}.js` (+ `_buckets.js`); there is no CSV exporter |
 | ERP sync | `src/projects/` (map §3.3–§5) |
 | Styling | `src/design/tokens.css` + component `.css`; inline style objects are also common |
-| History | `docs/reference/CLAUDE-phase-history.md` (historical log — present-tense claims there may be stale) |
+| Domain rules (status + authority) | `docs/DOMAIN-RULES.md` |
+| History | `docs/archive/2026-09/CLAUDE-phase-history.md` (historical log — present-tense claims there may be stale) |
 
 ---
 
@@ -63,7 +65,11 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
 
 ---
 
-## Key Design Rules (owner invariants)
+## Key Design Rules (engineering invariants)
+
+These are the load-bearing rules. They are an adopted design basis; no owner decision is recorded for them unless a
+rule says so. The full list (about 29 rule blocks), each with status and authority, is in
+[`docs/DOMAIN-RULES.md`](docs/DOMAIN-RULES.md).
 
 1. **Canonical storage = centerline geometry.** Draw modes (`projectSettings.drawReference`: `inside_face` default / `centerline` / `outside_face`) convert at the
    authoring boundary (`src/draw/faceToCenterline.js`); nothing downstream knows the mode.
@@ -72,7 +78,9 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
 3. **IS 2502 catalog is the single source for BBS.** Every bend deduction, hook, Ld, lap and bar length comes from
    `src/specs/cuttingLength.js`. ⚠️ **NOT currently enforced** — BOQ steel is priced from the legacy
    `computeBBSQuantities` path with a lap-unit bug, D²/162 is re-implemented 3×, and generators carry hard-coded
-   fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**.
+   fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**. Origin: the build agent's Phase BBS rules
+   (2026-05-28), not an owner or engineer sign-off. The BBS defaults themselves (lap, bar length, cover,
+   confinement…) are **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3.
 4. **Beam endpoints are a 4-type union** `{type: COLUMN|BEAM|WALL|POINT, …}` — always resolve through
    `resolveBeamEndpoint()`.
 5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
@@ -80,10 +88,14 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
    source of every BOQ steel line** (`boq/lines.js:37,248`) — KD-29. `verify-bbs` currently pins the legacy numbers.
 6. **IFC readiness.** Every entity has `id` (UUID) **and** `ifcGlobalId` (22-char IFC GUID), minted only in
    `src/lib/ids.js`. Never remove or repurpose `ifcGlobalId` — it is also the ERP `sourceEditorId`.
-7. **Revisions / design history are permanent** (owner rule). ⚠️ **NOT currently enforced** — editor revisions are
+7. **Revisions / design history are permanent.** ⚠️ **NOT currently enforced** — editor revisions are
    capped at 30 with silent pruning, localStorage-only, absent in ERP mode; ERP design versions are never cut.
-   See **KD-16, KD-17**.
-8. **Greenfield.** `loadProject` injects defaults; no migrations, no existing-data compat code.
+   See **KD-16, KD-17**. Provenance: the owner's recorded rule is "keep every BOQ version" on the ERP side
+   (`erp-saas:docs/architecture/DECISION-REGISTER.md`); its extension to editor design history is not
+   owner-confirmed and conflicts with erp-saas 48A Decision 5 (drafts prunable) — `docs/DOMAIN-RULES.md` §12 C-3.
+8. **Greenfield.** `loadProject` injects defaults; no migrations, no existing-data compat code. ⚠️ Known conflict:
+   `store.js:2234-2239` keeps a legacy-save branch (`dimensionMode` stays `'centerline'` for loaded projects) —
+   `docs/DOMAIN-RULES.md` §12 C-1.
 
 ---
 
@@ -97,8 +109,12 @@ The editor is the **source of truth for geometry** of a connected building. Two 
   **Reopen is verbatim** (R2 → IDB → empty; checksum failure with no IDB rescue → HARD read-only latch).
 - **Geometry projection** — ERP PostgreSQL rows written live through `/api/v1/geometry/**`, one op at a time.
 
-The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. BBS never leaves the editor,
-and the projection sends **no** structural sections, heights, concrete or bars (KD-7). Wire units are integer **mm**
+The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. Today BBS never leaves the
+editor: the projection sends **no** structural sections, heights, concrete or bars (KD-7). ⚠️ At the same time the
+ERP has a "BBS-direct" steel path that **expects** bars from the editor (erp-saas `structural-quantity.service.ts:46-50`),
+so ERP steel/concrete is never computed (`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-02). Both facts are
+true; which steel number is authoritative is an open question in `erp-saas:docs/planning/OPEN-DECISIONS.md`
+(BBS engineering choices; `docs/DOMAIN-RULES.md` §12 C-4). Wire units are integer **mm**
 for coordinates, heights, thicknesses and lengths; feet only for floor height and ERP room length/width.
 
 ### The write pipeline (`src/projects/`)
@@ -152,8 +168,9 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   `-live-sync-ordering` · `-room-type-sync` · `-electrical-point-type-sync` · `-editor-write-guard` · `-readonly-gate` ·
   `-projection-reconstruct` (its fixtures use a fictional wall shape — green does not prove Load-from-ERP works, KD-36).
 
-Architecture docs for the integration live in erp-saas: `docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`
-and `48A_PHASE0_DECISION_RECORD_AND_PLAN.md`.
+Architecture docs for the integration live in erp-saas: `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`
+and `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`. Cross-repo defects are canonical in
+`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` (XR-nn); KD rows in the map point to them.
 
 ---
 
@@ -181,6 +198,32 @@ Coverage gaps to know: nothing asserts MEP BOQ lines (KD-27 went unnoticed); `ve
 
 **Add a new one:** `scripts/verify-<feature>.mjs` using `node:assert`, importing `src/` modules directly; keep pure
 modules free of React/zustand so they load in Node. Full harness table: CODEBASE_MAP §7.
+
+---
+
+## Working rules
+
+These rules govern how to work in this repo. They were stated in the phase log (now archived) and would otherwise
+be lost.
+
+- **MCP-first (mandatory).** Query Context7 before writing code that uses React 19 hooks or new APIs, Vite 8
+  configuration, Zustand 5 store patterns, jsPDF / jspdf-autotable or SheetJS (`xlsx`). Training data for these
+  versions is outdated. (Archive §MCP-First Rule.)
+- **Never scope down without approval.** If a step is bigger than expected, surface the trade-off and ask *before*
+  shipping a smaller version. "Scope deviation flagged" in a final report is not consent. (Archive §Phase 5.)
+- **Verify discipline for canvas/UI flows.** The verify section must drive the real user-facing entry point with
+  realistic state (T-junctions, several walls and rooms), not only the internal kernel — this closes the
+  "verify green / canvas broken" gap. (Archive §Phase RoomConverge.)
+- **Single source of truth over layered fallbacks.** When two mechanisms solve the same problem, keep one
+  authoritative path; layered fallbacks accumulate as confusion-debt. (Archive §Phase RoomConverge.)
+- **Greenfield mindset.** No backward-compatibility shims, no `legacy_*` fields, no parallel old/new paths, no
+  temporary patches; design the permanent structure first. (Archive §Greenfield Development.)
+- **No new libraries without asking.** (Archive gotcha list.)
+
+"Archive §…" means `docs/archive/2026-09/CLAUDE-phase-history.md`. Sections cited by code comments as
+"CLAUDE.md §…" are in `docs/archive/2026-09/CLAUDE-phase-history.md`; `docs/DOMAIN-RULES.md` §13 maps each of the
+12 such comments to where it now resolves (five cite a "MEP plan" or "Attribution Policies" section that was never
+in any repo doc).
 
 ---
 
@@ -246,14 +289,20 @@ A: No. JSDoc + ESLint.
 ## For More Detail
 
 - **Code map, contract table, Known Defects, dead code:** `docs/CODEBASE_MAP.md`
+- **Domain rules (status + authority, known conflicts):** `docs/DOMAIN-RULES.md`
 - **UI defect log:** `docs/UI-ISSUES.md`
-- **Phase history (historical):** `docs/reference/CLAUDE-phase-history.md`
-- **Reference guide:** `docs/reference/CLAUDE-boq-reference.md`
-- **BBS build/validation reports (historical):** `docs/bbs/` — `BBS-VALIDATION-KARTHICK.md` is the workbook
-  comparison; the two `*MORNING-REPORT*.md` files are build logs, not requirements.
+- **BBS engineering basis (current reference):** `docs/bbs/BBS-CATEGORIES-RESEARCH.md` — IS-clause research for the
+  BBS categories; items it calls "locked" are unsigned choices (`docs/DOMAIN-RULES.md` §11.3)
+- **BBS validation:** `docs/bbs/BBS-VALIDATION-KARTHICK.md` — an agent-run comparison against a contractor reference
+  workbook; no human sign-off
+- **BOQ-WEB corrections audit (2026-06-22):** `docs/audit/BOQ-WEB-CORRECTIONS-v1-AUDIT.md` — triage of a 46-item
+  feedback list; its owner decisions #2–4 are recorded in `erp-saas:docs/architecture/DECISION-REGISTER.md`
+- **Historical (archived 2026-09-24):** `docs/archive/2026-09/` — `CLAUDE-phase-history.md` (phase log) and the two
+  BBS build logs `BBS_MORNING_REPORT.md` and `BBS-FULL-MORNING-REPORT.md` (build logs, not requirements)
+- **ERP side:** `erp-saas:CLAUDE.md`, `erp-saas:docs/DOCS-INDEX.md`
 
 ---
 
-**Last updated:** 2026-09-23
+**Last updated:** 2026-09-24
 **Project owner:** Vignesh
 **Repo:** `/Users/vignesh/projects/jrm/boq`

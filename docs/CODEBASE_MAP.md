@@ -7,7 +7,7 @@ mapper: "cartographer (Opus orchestration + 3 Opus audit agents + synthesis), fu
 
 # Codebase Map — BOQ / Building Editor (`boq`)
 
-> Last mapped: **2026-09-23T10:52:32Z** against `main` @ `f750c72` (3 commits ahead of `origin/main`, not pushed; working tree clean).
+> Last mapped: **2026-09-23T10:52:32Z** against `main` @ `f750c72` (3 commits ahead of `origin/main`, not pushed). Doc edits after the map (2026-09-23/24) were committed on top of it.
 > Full re-map + audit. Supersedes the 2026-07-02 map. Every claim below was checked against code; defects are in the
 > **Known Defects** register (§10) with `file:line`.
 
@@ -457,7 +457,9 @@ Result with hook: **51/52 pass; `verify-legacy-shim` fails** (expired kill date)
 
 ---
 
-## 9. Owner rules vs. enforcement
+## 9. Design rules vs. enforcement
+
+These are engineering invariants, not recorded owner decisions (authority per rule: [`DOMAIN-RULES.md`](DOMAIN-RULES.md)).
 
 | Rule | Enforced? |
 |---|---|
@@ -478,25 +480,35 @@ Result with hook: **51/52 pass; `verify-legacy-shim` fails** (expired kill date)
 
 Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent wrong result or broken sync path; **P2** = local correctness / hygiene. Sources: boq-01 (UI/store), boq-02 (sync/BOQ/schema), boq-03 (MEP/BBS/topology) audit reports, 2026-09-23. All re-checked against code unless marked *(code-path, not reproduced)*.
 
+> **Raw audit reports.** The `boq-01/02/03` source ids (here and in §3.7) refer to raw audit reports that are **not
+> in this repo**; they are working files under `/Users/vignesh/projects/jrm/.cartographer-reports/`. This register
+> is the maintained record.
+>
+> **Cross-repo rows.** A row marked `→ XR-nn` also affects the ERP. Its canonical row, with the fix owner and the
+> severity used for planning, is `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-nn. Severities disagree on
+> KD-1/2 (P0 here, XR-05 P1) and KD-3 (P0 here, XR-01 P1); the XR row is the one to reconcile. `→ XR (new row)`
+> means a cross-repo row is being added there in the 2026-09-24 consolidation; find it by the KD id in that
+> register's KD column. KD-17 is currently housed on the ERP side as DEAD-01.
+
 | ID | Sev | Defect | file:line | Source |
 |---|---|---|---|---|
-| KD-1 | P0 | Canonical 409 → refetch base → re-PUT same payload = last-writer-wins; CAS defeated (latch only after 3 consecutive 409s) | projects/canonicalSyncQueue.js:221-241 | boq-02 A-1 |
-| KD-2 | P0 | Reopen with persisted `dirty` uploads the old IDB snapshot over a newer server doc *(code-path, not reproduced)* | canonicalSyncQueue.js:96-111,196; canonicalReopen.js:43-47 | boq-02 A-2 |
-| KD-3 | P0 | "Load from ERP" reads `w.n1.sourceEditorId`/`w.wallSurfaces[]`; backend returns flattened `n1NodeSourceEditorId`/`roomSourceEditorId` → synthesized walls → duplicate walls in projection | projectionReconstruct.js:133-146,176,194-223 | boq-02 A-3 |
-| KD-4 | P1 | "Load from ERP" drops columns/beams/slabs/MEP and resets `projectSettings` (floors ≠ F1, specs) | projectionReconstruct.js:237-257; projectionGuard.js:57-67 | boq-02 A-11 |
-| KD-5 | P1 | MEP UPDATE_ELEMENT carries `roomIfcId`, PATCH DTO lacks it (`forbidNonWhitelisted`) → 400 → dead-letter | elementRegistry.js:34-38; liveSync.js:700-707 | boq-02 A-5 |
-| KD-6 | P1 | Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 |
-| KD-7 | P1 | Structural sections/heights/levels/concrete/bars never synced — ERP BBS-direct steel gets nothing | elementRegistry.js:61-97 | boq-02 A-4 |
+| KD-1 | P0 | Canonical 409 → refetch base → re-PUT same payload = last-writer-wins; CAS defeated (latch only after 3 consecutive 409s) | projects/canonicalSyncQueue.js:221-241 | boq-02 A-1 → XR-05 |
+| KD-2 | P0 | Reopen with persisted `dirty` uploads the old IDB snapshot over a newer server doc *(code-path, not reproduced)* | canonicalSyncQueue.js:96-111,196; canonicalReopen.js:43-47 | boq-02 A-2 → XR-05 |
+| KD-3 | P0 | "Load from ERP" reads `w.n1.sourceEditorId`/`w.wallSurfaces[]`; backend returns flattened `n1NodeSourceEditorId`/`roomSourceEditorId` → synthesized walls → duplicate walls in projection | projectionReconstruct.js:133-146,176,194-223 | boq-02 A-3 → XR-01 |
+| KD-4 | P1 | "Load from ERP" drops columns/beams/slabs/MEP and resets `projectSettings` (floors ≠ F1, specs) | projectionReconstruct.js:237-257; projectionGuard.js:57-67 | boq-02 A-11 → XR (new row) |
+| KD-5 | P1 | MEP UPDATE_ELEMENT carries `roomIfcId`, PATCH DTO lacks it (`forbidNonWhitelisted`) → 400 → dead-letter | elementRegistry.js:34-38; liveSync.js:700-707 | boq-02 A-5 → XR-03 (split: ERP part / editor part — this is the ERP part) |
+| KD-6 | P1 | Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 → XR-03 (split: ERP part / editor part — this is the editor part) |
+| KD-7 | P1 | Structural sections/heights/levels/concrete/bars never synced — ERP BBS-direct steel gets nothing | elementRegistry.js:61-97 | boq-02 A-4 → XR-02 |
 | KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only) | syncEngine.js:195-198 | boq-02 G4 |
-| KD-9 | P2 | Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 |
-| KD-10 | P2 | UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 |
-| KD-11 | P2 | Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 |
+| KD-9 | P2 | Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 → XR (new row) |
+| KD-10 | P2 | UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 → XR (new row) |
+| KD-11 | P2 | Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 → XR-07 |
 | KD-12 | P2 | Projection queue not paused offline; ops exhaust 5 attempts → `failed` | liveSyncQueue.js; canonicalSyncQueue.js:194 | boq-02 G9 |
 | KD-13 | P1 | Canonical upload failure invisible (no UI consumer of canonical status; permanent PUT error doesn't latch) | canonicalSyncQueue.js:242-248 | boq-02 A-12 |
-| KD-14 | P1 | ERP canonical-document routes not bound to the editor session's building (permissions only) | erp-saas editor-document.controller.ts:15-38 | boq-02 A-8 |
-| KD-15 | P2 | Legacy connect path calls ERP routes that don't exist | cloudConn.js:199-205; connectHandoff.js:44-50; App.jsx:80-103 | boq-02 A-9 |
+| KD-14 | P1 | ERP canonical-document routes not bound to the editor session's building (permissions only) | erp-saas editor-document.controller.ts:15-38 | boq-02 A-8 → XR-04 (= SEC-20) |
+| KD-15 | P2 | Legacy connect path calls ERP routes that don't exist | cloudConn.js:199-205; connectHandoff.js:44-50; App.jsx:80-103 | boq-02 A-9 → XR-06 |
 | KD-16 | P0 | Revisions not permanently retained: cap 30 prunes oldest manual silently; localStorage only; user-deletable; none in ERP mode | revisions/manager.js:15,78-94; RevisionsPanel.jsx:154-157 | boq-02 E |
-| KD-17 | P1 | Canonical design history unreachable: `DesignVersionService.cutVersion` has no controller/caller; old R2 heads orphaned, "Phase 3" pruning planned | erp-saas editor-document.service.ts:94-96 | boq-02 E3 |
+| KD-17 | P1 | Canonical design history unreachable: `DesignVersionService.cutVersion` has no controller/caller; old R2 heads orphaned, "Phase 3" pruning planned | erp-saas editor-document.service.ts:94-96 | boq-02 E3 → XR (new row); today DEAD-01 |
 | KD-18 | P1 | Undo/redo fire twice per keystroke (Canvas + global hook listeners); Delete in Canvas bypasses the confirm dialog | Canvas.jsx:417-424; useKeyboardShortcuts.js:44-63,266-390 | boq-01 A1 |
 | KD-19 | P0 | Ctrl+S (local-project save) omits all 7 MEP collections; 4 hand-built snapshot shapes exist | useKeyboardShortcuts.js:393-416; Toolbar.jsx:67-84,108-117 | boq-01 A2 |
 | KD-20 | P2 | Deleting a floor offers "Undo" that reverts an unrelated frame (`removeFloor` not in history) | FloorsManagerPanel.jsx:127-130; structuralSlice.js:601-628 | boq-01 A4 |
@@ -513,9 +525,9 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-31 | P2 | Legacy-shim kill date 2026-08-15 passed with 50 accessors → `verify-legacy-shim` fails | store/legacyAccessors.js:41 | boq-01 A13, boq-03 |
 | KD-32 | P2 | MEP room-default catalogs keyed on room types the editor never produces (MASTER_BEDROOM, BATHROOM, STAIRCASE, ENTRY) | mep/catalogs/*Defaults.js; roomPresets.js:19-23 | boq-03 F6 |
 | KD-33 | P2 | Editor BOQ counts electrical points by coarse catalog type (switches/sockets collapse) | mep/quantities/electrical.js:142-145 | boq-03 gotcha |
-| KD-34 | P2 | `schemaVersion` 7 (payload) vs 8 (`SCHEMA_VERSION`) mismatch | _snapshot.js:8; operations/_schemaVersion.js:12 | boq-02 G10 |
+| KD-34 | P2 | `schemaVersion` 7 (payload) vs 8 (`SCHEMA_VERSION`) mismatch | _snapshot.js:8; operations/_schemaVersion.js:12 | boq-02 G10 → XR (new row) |
 | KD-35 | P2 | `addBeam*` read `columns[id].floorId` (columns have `baseFloorId`) → falls back to current floor | structuralSlice.js:1070,1105 | boq-01 A8 |
-| KD-36 | P1 | `verify-projection-reconstruct` fixtures use a fictional wall shape → green gate on broken code | scripts/verify-projection-reconstruct.mjs:24-35,76,121 | boq-02 G14 |
+| KD-36 | P1 | `verify-projection-reconstruct` fixtures use a fictional wall shape → green gate on broken code | scripts/verify-projection-reconstruct.mjs:24-35,76,121 | boq-02 G14 → XR-01 |
 | KD-37 | P2 | Slab room reassignment / MEP room change never emits UPDATE (signature built on empty state) | syncEmitters.js:190-195 | boq-02 G3 |
 | KD-38 | P2 | RoomDetailPanel per-wall areas use full wall length, paint = plaster, ignores ft-in | RoomDetailPanel.jsx:152-185 | boq-01 A9 |
 | KD-39 | P2 | `acceptGhost` adds an electrical point in two history frames, ignoring `roomId` param | store.js:1815-1817 | boq-01 A8 |
@@ -560,4 +572,4 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | Touch ERP sync | ordering `syncCoordinator.js`; canonical `canonicalDoc/Reopen/SyncQueue.js`; projection `syncEngine → syncEmitters → liveSync → liveSyncQueue`; reconstruction only via `projectionGuard.loadFromErp` |
 | Verify | resolver-hook loop (§7); `npm run build`; `npm run lint` |
 
-Related: `CLAUDE.md` (rules/workflow), `docs/UI-ISSUES.md`, `docs/reference/CLAUDE-phase-history.md` (historical), erp-saas `docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md` + `48A_PHASE0_DECISION_RECORD_AND_PLAN.md`.
+Related: `CLAUDE.md` (rules/workflow), `docs/DOMAIN-RULES.md` (rules with status + authority), `docs/UI-ISSUES.md`, `docs/archive/2026-09/CLAUDE-phase-history.md` (historical), `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md` + `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`, `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` (XR-nn).

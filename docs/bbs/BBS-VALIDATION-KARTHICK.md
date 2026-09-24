@@ -1,5 +1,27 @@
 # BBS Engine — Reference Validation (Karthick M-City + Selvakumar)
 
+> **What this document is (added 2026-09-24).**
+> - **"Karthick" is not a reviewer.** It is the name on a contractor's reference BBS workbook in the repo root,
+>   `boq/BBS- Karthick M-City (1).xlsx`. The second workbook is `boq/SELVAKUMAR (1).xlsx`.
+> - **Who validated:** the validation was run by an AI build agent on 2026-05-29, comparing the engine against
+>   fixtures it reconstructed from those workbooks. **No human signed anything**, and no qualified engineer has
+>   reviewed the engine or this comparison. "IS-correct" below means the agent's own hand calculations.
+>   "Ready to show an MD? Yes" is the agent's product-readiness claim, not a sign-off.
+> - **Validated:** five single bars from the Karthick workbook (footing mesh Ø10, column main Ø12, roof-beam top
+>   Ø16, stirrup Ø8, sunshade main Ø8). In SITE_PRACTICE four land within 0 to −2%; in IS_STRICT they land +2 to
+>   +4%, and −9% for the stirrup. The sunshade bar is −29/−30% in both modes (a model difference left unresolved).
+>   `verify-bbs` Section O guards the ±2% SITE_PRACTICE result.
+> - **Not validated:**
+>   - whole-building or per-category totals (PART 2 is "indicative only": a one-wall, one-column-type fixture with
+>     no slab, and the workbook's TOTAL sheet does not reconcile);
+>   - roof slab (engine 0 vs 2532 kg), plinth beam (reference cell `#REF!`), staircase (reference has 0);
+>   - curtailed/extra beam bars and the slab double-mat layout (not modelled);
+>   - **Selvakumar** — its table is "expected engine behaviour"; the engine was never run against it;
+>   - an end-to-end run on a plan traced in the app (**BBS-RealPlan-001**, still open: trace one reference floor
+>     and check the Abstract tab and export against the workbook);
+>   - the engine defaults themselves (lap, cover, confinement, bar length…) — they are unsigned choices, see
+>     `docs/DOMAIN-RULES.md` §11.3.
+
 > **Status 2026-09-23:** the per-bar table below still reproduces exactly. "All 34 scripts green" is historical — the suite is now 52 `verify-*.mjs`, 51 pass with the resolver hook, `verify-legacy-shim` fails.
 
 **2026-05-29. Read-only.** Runs OUR engine against fixtures reconstructed from

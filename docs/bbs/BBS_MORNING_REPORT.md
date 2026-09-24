@@ -7,7 +7,7 @@
 > - Crank length uses exact `rise / sin θ` (`cuttingLength.js:419`); the 0.42D factor is unread.
 > - `verify-bbs` now has 176 assertions, sections A–O.
 > - The legacy path is **still the source of BOQ steel** (`boq/lines.js:37,248`) and still carries BE-Legacy-001; footings are now lighter than legacy after BE-Footing-Ld-001; `_steel.js` does not exist. See `docs/CODEBASE_MAP.md` KD-29.
-> - The suggested CLAUDE.md "Phase BBS" section was never added.
+> - The suggested CLAUDE.md "Phase BBS" section **was** added, in commit `8303d15` (2026-05-29); it survives in the archived phase log (`docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS). Its "Locked rules" are the build agent's choices, not owner sign-offs — see `docs/DOMAIN-RULES.md` §11.
 
 **Date:** 2026-05-28
 **Branch:** main (uncommitted; ready for review + commit)

@@ -1,6 +1,14 @@
 # BBS Categories — Research (Chennai / Tamil Nadu residential, G+0–G+3)
 
 Research basis for the six new BBS element categories + sub/super column split.
+
+> **Status (added 2026-09-24).** This is the current engineering reference for the BBS categories. It was written
+> by the build agent on 2026-05-29 from web sources and the two contractor workbooks; no engineer has reviewed it.
+> Where it describes an engine default or calls something "locked", that is the agent's choice, **not an owner or
+> engineer sign-off**. Those choices are listed as unsigned in [`docs/DOMAIN-RULES.md`](../DOMAIN-RULES.md) §11.3
+> and are open questions in `erp-saas:docs/planning/OPEN-DECISIONS.md` (BBS engineering choices). Note that the
+> engine's cover defaults (column 25 mm, footing 40 mm) are **below** the cover this research gives (column 40 mm,
+> footing 50–60 mm) and below IS 456 26.4.2 (§11.3 row 8).
 Scope: Fe500D/Fe550D + M20, IS 456 / IS 13920 / IS 2502 / IS 4326 / SP 34.
 Cross-checked against the two reference workbooks in the repo root
 (`BBS- Karthick M-City (1).xlsx`, `SELVAKUMAR (1).xlsx`). Every numeric rule
@@ -86,7 +94,8 @@ These per-category kg-by-diameter figures are the Level-2 validation anchors.
 
 - **Geometry**: depth/projection ~3–4.5 ft, thickness ~4" (100mm), cover 20mm.
 - **Steel**: light single/double Ø8 mat — Ø8 main @8" (200mm) + Ø8 distributor;
-  no stirrups. Engine emits TOP+BOTTOM+DIST (Ø8) per the locked decision.
+  no stirrups. Engine emits TOP+BOTTOM+DIST (Ø8) — an unsigned agent choice, not a locked decision
+  (it is assumption 1 in "Key assumptions to confirm with an engineer" below).
 - **Anchorage INTO wall**: ~2" embed (site) → Ld option. Engine:
   `loftEmbedMinMm=230` + `loftEmbedFactor`×Ld. Shape L-bar `11`.
 - **Model**: new `wall.loft = { enabled, widthFt, depthFt, heightFt }` attribute

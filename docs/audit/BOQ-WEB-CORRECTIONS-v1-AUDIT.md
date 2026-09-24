@@ -23,7 +23,7 @@ The editor is NOT standalone. It already:
 - Cloud-syncs to the ERP (`src/projects/cloudSync.js` push/pull, `connectHandoff.js` conflict dialog, `autosave.js` debounced auto-sync).
 - Relies on `ifcGlobalId` being **stable across edits** (wall split/join preserve lineage via a `provenance` block). The ERP's `ImportService` reconciles execution rows (snags, progress, finishes, BOQ links) across splits/joins using that lineage.
 
-**Consequence:** several of the teammate's suggestions, if implemented naively, would corrupt or orphan ERP data. These are flagged 🔗 below. Any change touching walls, openings, ids, materials, room types, or beams MUST be checked against `docs/EDITOR-ERP-INTEGRATION.md` (which does not exist yet — creating it is a recommended deliverable).
+**Consequence:** several of the teammate's suggestions, if implemented naively, would corrupt or orphan ERP data. These are flagged 🔗 below. Any change touching walls, openings, ids, materials, room types, or beams MUST be checked against the integration contract. *(2026-09-24: the proposed `docs/EDITOR-ERP-INTEGRATION.md` was never written; the contract is `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`, with the as-built wire contract in `docs/CODEBASE_MAP.md` §4–5.)*
 
 Naive changes that WOULD break the contract (do NOT do without integration design):
 - Regenerating `ifcGlobalId` on split/merge → orphans all snags/progress on those walls.
@@ -119,7 +119,7 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 ## Deeper findings she could not have seen (audit results)
 
 ### Integration / data-contract (CRITICAL — governance)
-- **I-1** No written integration contract doc. The `ifcGlobalId` stability + provenance rules live only in code. → Create `docs/EDITOR-ERP-INTEGRATION.md` and a pre-export validation gate (warn on missing `ifcGlobalId`, zero-length walls, zero-area rooms).
+- **I-1** No written integration contract doc. The `ifcGlobalId` stability + provenance rules live only in code. → Create an integration contract doc *(2026-09-24: never written as `docs/EDITOR-ERP-INTEGRATION.md`; the contract is now `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`)* and a pre-export validation gate (warn on missing `ifcGlobalId`, zero-length walls, zero-area rooms).
 - **I-2** Catalog/enum drift: editor `materialKey` (7 hardcoded) vs ERP `WallMaterial` (12 enum); editor room types vs ERP `RoomType`. Unknown values silently map to `OTHER` on import (`import.service.ts` `mapWallMaterial`/`mapRoomType`). Adding room types (#36-40) and materials WILL widen this drift unless solved as a shared catalog.
 - **I-3** No editor→BOQ-product/WorkCategory linkage; ERP cannot auto-generate BOQ from structure safely (re-import would duplicate). Any "auto-BOQ on import" must be idempotent + preview-gated.
 
@@ -149,7 +149,7 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 ## Suggested phasing (for discussion — not yet approved)
 
 **Phase 0 — Governance & safety (do before anything touches walls/openings/ids/catalogs)**
-- Write `docs/EDITOR-ERP-INTEGRATION.md`; add pre-export validation gate; add a guardrail verify script.
+- Write the integration contract doc *(2026-09-24: now `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`)*; add pre-export validation gate; add a guardrail verify script.
 
 **Phase 1 — Real bugs, low risk, high trust (quick wins)**
 - #9/#31 room label centroid; #2 paint litres; #30 MEP z-order/hit-test; D-1 HOT_RECIRC; #29 junction-box emission; #45 railing qty; #20 sump/OHT concrete/steel; investigate #14, #32.
@@ -172,7 +172,14 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 ---
 
 ## Decisions (owner, 2026-06-22)
-1. **Engagement now = REPORT ONLY.** No code changes. This file is the deliverable; phases below are for later approval.
+
+> **Where these live now (2026-09-24).** #1 was scoped to this audit engagement only; it is not a standing rule.
+> #2–#4 are owner decisions recorded in `erp-saas:docs/architecture/DECISION-REGISTER.md` (Also known as
+> "boq Decision 2/3/4"). Open tensions are tracked in `erp-saas:docs/planning/OPEN-DECISIONS.md`: #2 vs the later
+> "residential first" rule and D4 "room-type vocabulary complete"; #3 (project-level lock) vs erp-saas 48A
+> Decision 4 (per-floor checkout). #4 is decided but not built: the editor still ships frozen catalog arrays.
+
+1. **Engagement now = REPORT ONLY** *(scoped to this audit engagement only — not a standing rule)*. No code changes. This file is the deliverable; phases below are for later approval.
 2. **Residential + commercial both in scope.** Catalog + room-type model must cover commercial/office spaces (#40). This widens the ERP `RoomType`/catalog alignment surface (see I-2) — commercial room types must be added to the ERP enums/lookups *first* (ERP is source of truth, below), or imports fall back to `OTHER`.
 3. **Single editor per project.** No concurrent multi-editor / CRDT needed → A-7 simplifies to auth + tenant + per-project ownership + a project-level lock; current last-write-wins sync is acceptable with locking. (An operation log/audit trail is still worthwhile but not for collaboration.)
 4. **ERP is the source of truth for catalogs.** The editor fetches catalogs (room types, materials, fixtures, column presets, etc.) from the ERP and caches locally, with bundled defaults as offline fallback. This is the durable fix for editor↔ERP enum drift (I-2) and directly answers #8 (global column dims) and #36-40 (room types). Implication: catalog work starts on the **ERP side** (define/extend enums or move them to tenant-configurable lookup tables), then the editor consumes them — NOT by expanding the editor's frozen arrays.
@@ -183,7 +190,7 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 - **Phases 1, 2, 4 unchanged.** Note the data-driven catalog (3) should land before bulk catalog enhancements (#11, #12, #23-28, #34) so they're added as ERP data, not editor code.
 
 ## Verification approach (per phase, once building)
-- Run `npm run verify` (42 scripts) after each change; extend the relevant `verify-*.mjs`.
+- Run the verify harnesses after each change and extend the relevant `verify-*.mjs`. *(Corrected 2026-09-24: there is no `npm run verify`; run the 52 `scripts/verify-*.mjs` with `node --experimental-loader ./scripts/resolver-hook.mjs`, as in `CLAUDE.md` § Verification.)*
 - For bug fixes, add a failing assertion first, then fix.
 - For anything 🔗, round-trip through `buildPackage()` and confirm `ifcGlobalId` stability + provenance before/after.
 - Manually drive the app (`npm run dev`) for interaction bugs (#30, #14, #32).
