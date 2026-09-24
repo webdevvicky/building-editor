@@ -80,7 +80,8 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
    `computeBBSQuantities` path with a lap-unit bug, D²/162 is re-implemented 3×, and generators carry hard-coded
    fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**. Origin: the build agent's Phase BBS rules
    (2026-05-28), not an owner or engineer sign-off. The BBS defaults themselves (lap, bar length, cover,
-   confinement…) are **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3.
+   confinement…) are **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3 (open questions OQ-027…OQ-055 in
+   `erp-saas:docs/planning/OPEN-DECISIONS.md` §17).
 4. **Beam endpoints are a 4-type union** `{type: COLUMN|BEAM|WALL|POINT, …}` — always resolve through
    `resolveBeamEndpoint()`.
 5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
@@ -91,8 +92,9 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
 7. **Revisions / design history are permanent.** ⚠️ **NOT currently enforced** — editor revisions are
    capped at 30 with silent pruning, localStorage-only, absent in ERP mode; ERP design versions are never cut.
    See **KD-16, KD-17**. Provenance: the owner's recorded rule is "keep every BOQ version" on the ERP side
-   (`erp-saas:docs/architecture/DECISION-REGISTER.md`); its extension to editor design history is not
-   owner-confirmed and conflicts with erp-saas 48A Decision 5 (drafts prunable) — `docs/DOMAIN-RULES.md` §12 C-3.
+   (D-084 in `erp-saas:docs/architecture/DECISION-REGISTER.md`); its extension to editor design history is not
+   owner-confirmed and conflicts with erp-saas 48A Decision 5 (D-037, a proposal: drafts prunable). Open question
+   OQ-077 in `erp-saas:docs/planning/OPEN-DECISIONS.md`; `docs/DOMAIN-RULES.md` §12 C-3.
 8. **Greenfield.** `loadProject` injects defaults; no migrations, no existing-data compat code. ⚠️ Known conflict:
    `store.js:2234-2239` keeps a legacy-save branch (`dimensionMode` stays `'centerline'` for loaded projects) —
    `docs/DOMAIN-RULES.md` §12 C-1.
@@ -113,8 +115,8 @@ The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub
 editor: the projection sends **no** structural sections, heights, concrete or bars (KD-7). ⚠️ At the same time the
 ERP has a "BBS-direct" steel path that **expects** bars from the editor (erp-saas `structural-quantity.service.ts:46-50`),
 so ERP steel/concrete is never computed (`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-02). Both facts are
-true; which steel number is authoritative is an open question in `erp-saas:docs/planning/OPEN-DECISIONS.md`
-(BBS engineering choices; `docs/DOMAIN-RULES.md` §12 C-4). Wire units are integer **mm**
+true; which steel number is authoritative is open question OQ-027 in `erp-saas:docs/planning/OPEN-DECISIONS.md`
+(`docs/DOMAIN-RULES.md` §12 C-4). Wire units are integer **mm**
 for coordinates, heights, thicknesses and lengths; feet only for floor height and ERP room length/width.
 
 ### The write pipeline (`src/projects/`)
@@ -292,11 +294,12 @@ A: No. JSDoc + ESLint.
 - **Domain rules (status + authority, known conflicts):** `docs/DOMAIN-RULES.md`
 - **UI defect log:** `docs/UI-ISSUES.md`
 - **BBS engineering basis (current reference):** `docs/bbs/BBS-CATEGORIES-RESEARCH.md` — IS-clause research for the
-  BBS categories; items it calls "locked" are unsigned choices (`docs/DOMAIN-RULES.md` §11.3)
+  BBS categories; items it calls "locked" are unsigned choices (`docs/DOMAIN-RULES.md` §11.3; OQ-027…OQ-055)
 - **BBS validation:** `docs/bbs/BBS-VALIDATION-KARTHICK.md` — an agent-run comparison against a contractor reference
   workbook; no human sign-off
 - **BOQ-WEB corrections audit (2026-06-22):** `docs/audit/BOQ-WEB-CORRECTIONS-v1-AUDIT.md` — triage of a 46-item
-  feedback list; its owner decisions #2–4 are recorded in `erp-saas:docs/architecture/DECISION-REGISTER.md`
+  feedback list; its owner decisions #2–4 ("boq Decision 2/3/4") are D-010, D-011 and D-012 in
+  `erp-saas:docs/architecture/DECISION-REGISTER.md`
 - **Historical (archived 2026-09-24):** `docs/archive/2026-09/` — `CLAUDE-phase-history.md` (phase log) and the two
   BBS build logs `BBS_MORNING_REPORT.md` and `BBS-FULL-MORNING-REPORT.md` (build logs, not requirements)
 - **ERP side:** `erp-saas:CLAUDE.md`, `erp-saas:docs/DOCS-INDEX.md`

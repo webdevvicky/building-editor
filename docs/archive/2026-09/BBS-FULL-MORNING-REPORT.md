@@ -1,6 +1,6 @@
 # BBS Full Build — Morning Report (2026-05-29)
 
-> **ARCHIVED 2026-09-24: historical record, not current authority.** Originally `boq:docs/bbs/BBS-FULL-MORNING-REPORT.md`. For current documentation start at `boq:CLAUDE.md` and `boq:docs/DOMAIN-RULES.md`.
+> **ARCHIVED 2026-09-24: historical record, not current authority.** Original location (before 2026-09-24): the boq docs folder, subfolder bbs, file BBS-FULL-MORNING-REPORT.md. For current documentation start at [CLAUDE.md](../../../CLAUDE.md) and [DOMAIN-RULES.md](../../DOMAIN-RULES.md).
 
 
 > **Historical build log (2026-05-29). Corrections as of 2026-09-23:** verify suite is now 52 scripts (51 pass with the resolver hook; `verify-legacy-shim` fails); `verify-bbs` is 176/176; BE-Legacy-001 is still unfixed **and is the path that prices BOQ steel** (`docs/CODEBASE_MAP.md` KD-29).

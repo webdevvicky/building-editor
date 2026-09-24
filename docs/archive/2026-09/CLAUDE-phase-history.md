@@ -1,6 +1,6 @@
 # Building Editor — Developer Notes
 
-> **ARCHIVED 2026-09-24: historical record, not current authority.** Originally `boq:docs/reference/CLAUDE-phase-history.md`. For current documentation start at `boq:CLAUDE.md` and `boq:docs/DOMAIN-RULES.md`.
+> **ARCHIVED 2026-09-24: historical record, not current authority.** Original location (before 2026-09-24): the boq docs folder, subfolder reference, file CLAUDE-phase-history.md. For current documentation start at [CLAUDE.md](../../../CLAUDE.md) and [DOMAIN-RULES.md](../../DOMAIN-RULES.md).
 
 
 > **Historical log.** Present-tense statements below reflect the date of each phase, not today. Known stale items (2026-09-23): the verify count is now 52 (no commit gate — nothing runs them automatically); `RoomPanel.jsx` is deleted (RoomDetailPanel is the only room panel); `mep:room-created` is dispatched from `Canvas.jsx:1041` (Room tool, auto-MEP off only); the legacy-shim kill date 2026-08-15 has **passed** and `verify-legacy-shim` fails. For current architecture use `docs/CODEBASE_MAP.md`; for rules use the root `CLAUDE.md`.
@@ -9,7 +9,7 @@
 
 Vite + React 19 + Zustand 5 client-side editor for residential BOQ to Indian standards (IS 732, IS 15778, IS 13592, NBC 2016, IS 2065, ISHRAE, MNRE). Five concentric layers — Geometry/Store → Topology → Quantities + MEP + Validation → BOQ presentation → UI + Persistence + Export. ~319 source files across 40 directories under `src/` plus **35 verify scripts** that gate every commit. Greenfield project: IDB-canonical persistence, no migrations, no backend.
 
-For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
+For the architectural map (diagrams, module guide, data flow, navigation "to do X, touch Y" recipes, and the invariant → enforcing-verify-script reverse index) see [docs/CODEBASE_MAP.md](../../CODEBASE_MAP.md). The rule reference (every locked rule, every Phase's history, every gotcha worth memorizing) is this file — Phase sections below.
 
 ## Phase BOQ-WorkQty — Work quantities + element labels + room/export detail (2026-06-12)
 
@@ -343,7 +343,7 @@ workbooks in the repo root (`BBS- Karthick M-City (1).xlsx`, `SELVAKUMAR
 (1).xlsx`). **34 verify scripts now gate every commit** (+1 `verify-bbs-export`;
 `verify-bbs` extended with Sections H–N → 168 assertions). Research +
 citations in `docs/bbs/BBS-CATEGORIES-RESEARCH.md`; build report in
-`docs/bbs/BBS-FULL-MORNING-REPORT.md`.
+`docs/archive/2026-09/BBS-FULL-MORNING-REPORT.md`.
 
 ### What landed
 

@@ -1,6 +1,6 @@
 # BBS Overnight Build — Morning Report
 
-> **ARCHIVED 2026-09-24: historical record, not current authority.** Originally `boq:docs/bbs/BBS_MORNING_REPORT.md`. For current documentation start at `boq:CLAUDE.md` and `boq:docs/DOMAIN-RULES.md`.
+> **ARCHIVED 2026-09-24: historical record, not current authority.** Original location (before 2026-09-24): the boq docs folder, subfolder bbs, file BBS_MORNING_REPORT.md. For current documentation start at [CLAUDE.md](../../../CLAUDE.md) and [DOMAIN-RULES.md](../../DOMAIN-RULES.md).
 
 
 > **Historical build log (2026-05-28) — not a requirements document. Corrections as of 2026-09-23:**
@@ -142,7 +142,7 @@ The new path is the source of truth going forward. The legacy aggregator stays u
 - `src/bbs/generators/beamRebar.js` — beam generator
 - `src/components/BBSSchedulePanel.jsx` — UI panel
 - `scripts/verify-bbs.mjs` — 123 assertions
-- `docs/bbs/BBS_MORNING_REPORT.md` — this file
+- `docs/archive/2026-09/BBS_MORNING_REPORT.md` — this file
 
 **Edited (8):**
 - `src/quantities/bbs.js` — slab √area → real `getRoomGeometry` span/width

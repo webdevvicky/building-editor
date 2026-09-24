@@ -198,7 +198,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md`, the unheaded gotcha 
 | Rule | Status | Evidence |
 |---|---|---|
 | `getAllBeams()` is the single consumer for beam rendering and BOQ; never `getDerivedWallBeams()` or `state.beams` directly for quantities | TRUE (not re-checked) | — |
-| `BEAM_LEVEL_REGISTRY` is the single source for beam levels; never hard-code `['plinth','lintel','roof']` | **VIOLATED** | `components/OpeningPanel.jsx:235`; `schema/entities/beam.js:36` (`oneOf`) |
+| `BEAM_LEVEL_REGISTRY` is the single source for beam levels; never hard-code `['plinth','lintel','roof']` | **VIOLATED** (KD-41) | `components/OpeningPanel.jsx:235`; `schema/entities/beam.js:36` (`oneOf`) |
 | Tie beam is never in `BEAM_LEVEL_REGISTRY` | TRUE (the choice is unsigned, §11.3) | `constants/structural.js:67-95` |
 | Column shape logic lives only in `lib/columnShapes.js` | TRUE (not re-checked) | — |
 | Fix 1: `column.foundationId` does not exist; use `getFoundationForColumn` / `attachColumnToFoundation` | TRUE (not re-checked); dead scrub remains | map §11 (`structuralSlice.js:990`) |
@@ -310,7 +310,7 @@ gotcha list (:5060-5073).
 | Deterministic routing (explicit comparators, `<` not `<=`, sorted Set iteration) | TRUE (not re-checked) | — |
 | BOQ emitters use the scope wrapper, then fall back to `computeXQuantities(state)` | TRUE (not re-checked) | Emitters read wrong engine keys — KD-27 |
 | MEP entities are IFC-ready (`discipline`, `type`, `ifcType`, `classificationCode`, `systemId`, `systemType`) | TRUE (not re-checked) | — |
-| MEP catalogs are the "ERP swap path": replace catalog files with ERP-backed providers exposing the same API | NOT BUILT | Owner decision "ERP is catalog source of truth" is recorded in `erp-saas:docs/architecture/DECISION-REGISTER.md` (boq Decision 4); editor catalogs are still frozen arrays |
+| MEP catalogs are the "ERP swap path": replace catalog files with ERP-backed providers exposing the same API | NOT BUILT | Owner decision "ERP is catalog source of truth" is recorded as D-012 (boq Decision 4) in `erp-saas:docs/architecture/DECISION-REGISTER.md`; editor catalogs are still frozen arrays |
 
 ---
 
@@ -405,8 +405,8 @@ These are the only two BBS/editor rules with a recorded owner sign-off.
 
 | Rule | Owner record | Status |
 |---|---|---|
-| **Bar length is an explicit per-project user choice** (Procurement dropdown 12 / 9 / 6 m in the BBS Specs panel) | Owner quoted as "Make it an explicit user choice in ProjectSettingsPanel" (`boq:docs/archive/2026-09/BBS_MORNING_REPORT.md`, "6 m → 12 m bar-length diff") | **TRUE** — `components/BBSSpecPanel.jsx:430-440`. The **default value** is not owner-signed: see §11.3 row 1 |
-| **BBS-UI-Enablement**: because new BBS categories are default-inert, the input UI must make category enablement explicit (per-category toggles, "not enabled" hints in the BBS schedule panel) | "Owner sign-off recorded" — `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS-Categories › Next-phase requirement (signed off 2026-05-29) (:429) | **NOT BUILT.** No component sets `wall.hasTieBeam` or `subSuperColumnSplitEnabled`; `setWallTieBeam`, `setWallLoft`, `setWallLoftSpec` have no caller (map §11); `BBSSchedulePanel.jsx` has no enablement hints |
+| **Bar length is an explicit per-project user choice** (Procurement dropdown 12 / 9 / 6 m in the BBS Specs panel) | D-114. Owner quoted as "Make it an explicit user choice in ProjectSettingsPanel" (`boq:docs/archive/2026-09/BBS_MORNING_REPORT.md`, "6 m → 12 m bar-length diff") | **TRUE** — `components/BBSSpecPanel.jsx:430-440`. The **default value** is not owner-signed: see §11.3 row 1 |
+| **BBS-UI-Enablement**: because new BBS categories are default-inert, the input UI must make category enablement explicit (per-category toggles, "not enabled" hints in the BBS schedule panel) | D-115. "Owner sign-off recorded" — `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS-Categories › Next-phase requirement (signed off 2026-05-29) (:429) | **NOT BUILT.** No component sets `wall.hasTieBeam` or `subSuperColumnSplitEnabled`; `setWallTieBeam`, `setWallLoft`, `setWallLoftSpec` have no caller (map §11); `BBSSchedulePanel.jsx` has no enablement hints |
 
 ### 11.2 Engineering implementation rules (decider not recorded)
 Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS › Locked rules (:253), §Phase BBS-Categories
@@ -437,35 +437,36 @@ These are software-structure rules. They say how the engine is built, not what t
 > **These are choices the build agent made while building BBS (2026-05-28/29).** The phase log called several of them
 > "Locked rules", and the morning reports asked the owner to sign them off. **No sign-off exists.** No qualified
 > engineer has reviewed them. They are **not** locked and **not** owner invariants. Each is an open question in
-> `erp-saas:docs/planning/OPEN-DECISIONS.md` (BBS engineering choices). The full classification, with IS 456
+> `erp-saas:docs/planning/OPEN-DECISIONS.md` §17; the OQ column gives its ID. OQ-034, OQ-037, OQ-041, OQ-044, OQ-045
+> and OQ-052 are further BBS choices listed only there. The full classification, with IS 456
 > clauses, is in the consolidation evidence (A21 §2.3, working file outside the repo). Do not change a default below
 > without an owner or engineer decision, and do not cite it as settled.
 
-| # | Choice | Where | Concern |
-|---|---|---|---|
-| 1 | Standard bar length default **12 m** | `cuttingLength.js:71`; `reinforcementSpecs.js:36`; `BBSSpecPanel.jsx:440` | **Conflicting records.** The 2026-05-28 morning report says "default stays 6 m per your choice"; the phase log says "flipped 6 → 12" with no owner quote; `cuttingLength.js:20-24,60-62` comments still say 6 m |
-| 2 | Default lap **56.6d** (IS 456 tension lap) rather than 50d site practice | `cuttingLength.js:111,125` | Which convention the company quotes is a product decision; legacy presets still carry `lapLengthMultiplier: 50` |
-| 3 | Column bar lap uses the tension lap | `columnRebar.js:119` | IS 456 allows the shorter compression lap; heavier than required |
-| 4 | `bbsAllowanceMode` default IS_STRICT; SITE_PRACTICE values taken from one contractor workbook | `structuralSlice.js:254`; `cuttingLength.js:208-225` | One workbook becomes "site practice" for every tenant |
-| 5 | Hook = 9d, labelled site shorthand, used in IS_STRICT mode | `cuttingLength.js:52-56` | The "IS_STRICT" label is misleading |
-| 6 | Seismic lap 1.3×Ld cited to IS 13920 | `cuttingLength.js:104-108` | Citation unverified |
-| 7 | **IS 13920 confinement zones default OFF** | `cuttingLength.js:136,151` | Code compliance vs site practice; inconsistent with the 135° seismic hook default |
-| 8 | **Cover defaults below IS 456**: column 25 mm, beam 25, footing 40, slab 20 | `reinforcementSpecs.js:68,79,99`; `footingRebar.js:175` | IS 456 26.4.2 requires column ≥ 40 mm and footing ≥ 50 mm; the repo's own research says column 40, footing 50–60 (`bbs/BBS-CATEGORIES-RESEARCH.md`) |
-| 9 | Explicit beams default INTERIOR (Ld/2, no hook), described as "conservative" | `beamRebar.js:53-56` | It under-estimates steel |
-| 10 | Two-way slab: main both ways, no distribution, no corner torsion steel | `slabRebar.js` | IS 456 Annex D-1.8 torsion steel omitted |
-| 11 | Slab main bars get full Ld at both ends | `slabRebar.js:110` | Heavier than IS minimums |
-| 12 | Bar-count rule differs: stirrups `ceil(L/s)`, mats `floor(L/s)+1` | `columnRebar.js:224`; `beamRebar.js:299`; `slabRebar.js:56` | Needs one rule |
-| 13 | Pieces by weight, no cutting-stock optimisation, **no wastage** | `bbs/index.js:280` | The workbook uses 2.5% wastage on loft |
-| 14 | Default grade Fe500D + M20 | `cuttingLength.js:130-131` | Tenant/project default |
-| 15 | New categories are **default-inert** (opt-in) | §Phase BBS-Categories (:361) | Only the UI consequence was signed (§11.1), and that UI is not built |
-| 16 | **Tie beam is BBS-only** (not in `BEAM_LEVEL_REGISTRY`), so its concrete and masonry deduction are absent from the BOQ | same | Chosen to keep `verify-boq` byte-identical — a test-stability reason, not a domain one |
-| 17 | Loft TOP + BOTTOM mats "per the locked decision" | `bbs/BBS-CATEGORIES-RESEARCH.md` §4 | The same doc lists it as an assumption to confirm with an engineer; no decider exists |
-| 18 | Loft thickness 4 in hard-coded; sunshade 1.5 ft / 3 in fallbacks; loft embed ≥ 230 mm | `bbs/concrete.js:101`; `sunshadeRebar.js:42-43` | KD-40 |
-| 19 | Strap pad bottom-only mesh; strap not ductile; sub-column = full plinth height | `strapFootingRebar.js` | Research doc: "to confirm with an engineer" |
-| 20 | Column/beam concrete split into categories ∝ steel kg | `bbs/concrete.js` | The proportional split is arbitrary |
-| 21 | RAFT / STRIP / PILE footings return `[]` (zero steel, no warning) | `bbs/generators/footingRebar.js:43` | Scope; silent zero |
-| 22 | Beam curtailed/extra bars, sunshade bar axis, slab double-mat layout not modelled | `bbs/BBS-VALIDATION-KARTHICK.md` punch list 3–5 | Scope |
-| 23 | **Which steel number is authoritative**: editor BOQ (legacy path, KD-29), BBS panel (`computeRebarGroups`), or the ERP "BBS-direct" path (receives nothing — KD-7) | — | Top open item; see conflict C-4 |
+| # | OQ | Choice | Where | Concern |
+|---|---|---|---|---|
+| 1 | OQ-029 | Standard bar length default **12 m** | `cuttingLength.js:71`; `reinforcementSpecs.js:36`; `BBSSpecPanel.jsx:440` | **Conflicting records.** The 2026-05-28 morning report says "default stays 6 m per your choice"; the phase log says "flipped 6 → 12" with no owner quote; `cuttingLength.js:20-24,60-62` comments still say 6 m |
+| 2 | OQ-030 | Default lap **56.6d** (IS 456 tension lap) rather than 50d site practice | `cuttingLength.js:111,125` | Which convention the company quotes is a product decision; legacy presets still carry `lapLengthMultiplier: 50` |
+| 3 | OQ-031 | Column bar lap uses the tension lap | `columnRebar.js:119` | IS 456 allows the shorter compression lap; heavier than required |
+| 4 | OQ-032 | `bbsAllowanceMode` default IS_STRICT; SITE_PRACTICE values taken from one contractor workbook | `structuralSlice.js:254`; `cuttingLength.js:208-225` | One workbook becomes "site practice" for every tenant |
+| 5 | OQ-033 | Hook = 9d, labelled site shorthand, used in IS_STRICT mode | `cuttingLength.js:52-56` | The "IS_STRICT" label is misleading |
+| 6 | OQ-035 | Seismic lap 1.3×Ld cited to IS 13920 | `cuttingLength.js:104-108` | Citation unverified |
+| 7 | OQ-036 | **IS 13920 confinement zones default OFF** | `cuttingLength.js:136,151` | Code compliance vs site practice; inconsistent with the 135° seismic hook default |
+| 8 | OQ-028 | **Cover defaults below IS 456**: column 25 mm, beam 25, footing 40, slab 20 | `reinforcementSpecs.js:68,79,99`; `footingRebar.js:175` | IS 456 26.4.2 requires column ≥ 40 mm and footing ≥ 50 mm; the repo's own research says column 40, footing 50–60 (`bbs/BBS-CATEGORIES-RESEARCH.md`) |
+| 9 | OQ-038 | Explicit beams default INTERIOR (Ld/2, no hook), described as "conservative" | `beamRebar.js:53-56` | It under-estimates steel |
+| 10 | OQ-039 | Two-way slab: main both ways, no distribution, no corner torsion steel | `slabRebar.js` | IS 456 Annex D-1.8 torsion steel omitted |
+| 11 | OQ-040 | Slab main bars get full Ld at both ends | `slabRebar.js:110` | Heavier than IS minimums |
+| 12 | OQ-042 | Bar-count rule differs: stirrups `ceil(L/s)`, mats `floor(L/s)+1` | `columnRebar.js:224`; `beamRebar.js:299`; `slabRebar.js:56` | Needs one rule |
+| 13 | OQ-043 | Pieces by weight, no cutting-stock optimisation, **no wastage** | `bbs/index.js:280` | The workbook uses 2.5% wastage on loft |
+| 14 | OQ-046 | Default grade Fe500D + M20 | `cuttingLength.js:130-131` | Tenant/project default |
+| 15 | OQ-047 | New categories are **default-inert** (opt-in) | §Phase BBS-Categories (:361) | Only the UI consequence was signed (§11.1), and that UI is not built |
+| 16 | OQ-048 | **Tie beam is BBS-only** (not in `BEAM_LEVEL_REGISTRY`), so its concrete and masonry deduction are absent from the BOQ | same | Chosen to keep `verify-boq` byte-identical — a test-stability reason, not a domain one |
+| 17 | OQ-049 | Loft TOP + BOTTOM mats "per the locked decision" | `bbs/BBS-CATEGORIES-RESEARCH.md` §4 | The same doc lists it as an assumption to confirm with an engineer; no decider exists |
+| 18 | OQ-050 | Loft thickness 4 in hard-coded; sunshade 1.5 ft / 3 in fallbacks; loft embed ≥ 230 mm | `bbs/concrete.js:101`; `sunshadeRebar.js:42-43` | KD-40 |
+| 19 | OQ-051 | Strap pad bottom-only mesh; strap not ductile; sub-column = full plinth height | `strapFootingRebar.js` | Research doc: "to confirm with an engineer" |
+| 20 | OQ-053 | Column/beam concrete split into categories ∝ steel kg | `bbs/concrete.js` | The proportional split is arbitrary |
+| 21 | OQ-054 | RAFT / STRIP / PILE footings return `[]` (zero steel, no warning) | `bbs/generators/footingRebar.js:43` | Scope; silent zero |
+| 22 | OQ-055 | Beam curtailed/extra bars, sunshade bar axis, slab double-mat layout not modelled | `bbs/BBS-VALIDATION-KARTHICK.md` punch list 3–5 | Scope |
+| 23 | OQ-027 | **Which steel number is authoritative**: editor BOQ (legacy path, KD-29), BBS panel (`computeRebarGroups`), or the ERP "BBS-direct" path (receives nothing — KD-7) | — | Top open item; see conflict C-4 |
 
 The ±15% column tolerance proposed in the 2026-05-28 morning report was reversed by the "no legacy tolerance" rule;
 it is not a live choice.
@@ -478,11 +479,11 @@ it is not a live choice.
 |---|---|---|---|
 | C-1 | **Greenfield vs legacy-save code.** `CLAUDE.md` rule 8 and the greenfield rule (`boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Greenfield Development (MANDATORY MINDSET) :3219: "never preserves legacy branches") vs a live legacy-save branch: loaded projects without `dimensionMode` stay `'centerline'`, new projects get `'clear_internal'` (`src/store.js:2234-2239`). BOQ-extension rule 7 (:2629) also treats `?? defaultX` fallbacks for legacy saves as "greenfield honoured". Phase W says pre-schema projects "fail to load by design" | code + phase log | Owner/architecture question. Not in the KD register today. No code change made |
 | C-2 | "Every schema change lands as a `MIGRATIONS` entry" (§Phase 1 + Phase 2 :2159) vs greenfield "no migrations" (`CLAUDE.md` rule 8) | `projects/schemaVersion.js` `runMigrations` has no importer | Greenfield wins in practice; the migration rule governs dormant code |
-| C-3 | "Revisions / design history are permanent" (`CLAUDE.md` rule 7) vs erp-saas 48A Decision 5 (drafts prunable, 90-day draft retention) | `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`; KD-16, KD-17 | The recorded owner rule is about ERP BOQ versions; extending it to editor design history is not owner-confirmed. Open question in `erp-saas:docs/planning/OPEN-DECISIONS.md` |
-| C-4 | **"BBS never leaves the editor"** (`CLAUDE.md` § ERP Sync) vs the ERP BBS-direct steel path, which expects editor bars (`erp-saas` `structural-quantity.service.ts:46-50`). The projection sends no sections, concrete or bars | KD-7 = `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-02 | Contradictory design, not just a bug. Open question (§11.3 row 23) |
-| C-5 | Bar-length default 12 m vs the owner's recorded "default stays 6 m" | §11.3 row 1 | Owner question |
+| C-3 | "Revisions / design history are permanent" (`CLAUDE.md` rule 7) vs erp-saas 48A Decision 5 (D-037, a proposal: drafts prunable, 90-day draft retention) | `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`; KD-16, KD-17 | The recorded owner rule (D-084) is about ERP BOQ versions; extending it to editor design history is not owner-confirmed. Open question OQ-077 in `erp-saas:docs/planning/OPEN-DECISIONS.md` |
+| C-4 | **"BBS never leaves the editor"** (`CLAUDE.md` § ERP Sync) vs the ERP BBS-direct steel path, which expects editor bars (`erp-saas` `structural-quantity.service.ts:46-50`). The projection sends no sections, concrete or bars | KD-7 = `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-02 | Contradictory design, not just a bug. Open question OQ-027 (§11.3 row 23) |
+| C-5 | Bar-length default 12 m vs the owner's recorded "default stays 6 m" (D-114) | §11.3 row 1 | Open question OQ-029 |
 | C-6 | "IS 2502 catalog single source" and "legacy untouched, both coexist" vs the legacy path pricing all BOQ steel | KD-29 | Defect; rule kept unweakened |
-| C-7 | `BEAM_LEVEL_REGISTRY` single source vs hard-coded level lists | `OpeningPanel.jsx:235`; `schema/entities/beam.js:36` | Defect (not yet in the KD register) |
+| C-7 | `BEAM_LEVEL_REGISTRY` single source vs hard-coded level lists | `OpeningPanel.jsx:235`; `schema/entities/beam.js:36` | Defect: KD-41 (`docs/CODEBASE_MAP.md` §10) |
 
 ---
 
