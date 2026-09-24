@@ -495,8 +495,8 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 > **P0**. XR-01's P0 comes from KD-3, the data defect that writes duplicate walls; KD-36 is the test gate that failed
 > to catch it, and a broken gate corrupts no data by itself. The audit register records this as a deliberate
 > exception (`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` §9, "Severity reconciliations"). (2) Rows that leave
-> ERP data stale but need no ERP change have no XR row by that register's ruling: KD-8, KD-12, KD-13, KD-16, KD-24,
-> KD-37.
+> ERP data stale but need no ERP change have no XR row by that register's ruling: KD-12, KD-13, KD-16, KD-24,
+> KD-37. KD-8 was in this list until 2026-09-24, when the register gave it a row (XR-17).
 
 | ID | Sev | Defect | file:line | Source |
 |---|---|---|---|---|
@@ -507,7 +507,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-5 | P1 | MEP UPDATE_ELEMENT carries `roomIfcId`, PATCH DTO lacks it (`forbidNonWhitelisted`) → 400 → dead-letter | elementRegistry.js:34-38; liveSync.js:700-707 | boq-02 A-5 → XR-03 |
 | KD-6 | P1 | Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 → XR-09 |
 | KD-7 | P1 | Structural sections/heights/levels/concrete/bars never synced — ERP BBS-direct steel gets nothing | elementRegistry.js:61-97 | boq-02 A-4 → XR-02 |
-| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; no XR row: editor-side only per audit §9 (2026-09-24), see note above |
+| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; → `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-17 above |
 | KD-9 | P2 | Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 → XR-11 |
 | KD-10 | P2 | UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 → XR-12 |
 | KD-11 | P2 | Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 → XR-07 |
