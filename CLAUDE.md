@@ -39,7 +39,7 @@ Building Editor: it writes a canonical Building Document and a live geometry pro
 | ERP sync | `src/projects/` (map §3.3–§5) |
 | Styling | `src/design/tokens.css` + component `.css`; inline style objects are also common |
 | Domain rules (status + authority) | `docs/DOMAIN-RULES.md` |
-| History | `docs/archive/2026-09/CLAUDE-phase-history.md` (historical log — present-tense claims there may be stale) |
+| History | `docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` (historical log — present-tense claims there may be stale) |
 
 ---
 
@@ -81,7 +81,7 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
    fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**. Origin: the build agent's Phase BBS rules
    (2026-05-28), not an owner or engineer sign-off. The BBS defaults themselves (lap, cover, confinement…) are
    **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3 (open questions OQ-027…OQ-055 in
-   `erp-saas:docs/planning/OPEN-DECISIONS.md` §17). The **bar-length default is disputed**, not merely unsigned: the
+   `erp-saas:docs/open-questions.md` §17). The **bar-length default is disputed**, not merely unsigned: the
    per-project 6 / 9 / 12 m choice is owner decision D-114, and the ERP register records "the default stays 6 m" as
    part of D-114, but the code default is 12 m and the phase log says "flipped 6 → 12" with no owner quote.
    The sources are compared in `docs/DOMAIN-RULES.md` §11.4; the decision is open question OQ-029.
@@ -95,9 +95,9 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
 7. **Revisions / design history are permanent.** ⚠️ **NOT currently enforced** — editor revisions are
    capped at 30 with silent pruning, localStorage-only, absent in ERP mode; ERP design versions are never cut.
    See **KD-16, KD-17**. Provenance: the owner's recorded rule is "keep every BOQ version" on the ERP side
-   (D-084 in `erp-saas:docs/architecture/DECISION-REGISTER.md`); its extension to editor design history is not
+   (D-084 in `erp-saas:docs/decisions.md`); its extension to editor design history is not
    owner-confirmed and conflicts with erp-saas 48A Decision 5 (D-037, a proposal: drafts prunable). Open question
-   OQ-077 in `erp-saas:docs/planning/OPEN-DECISIONS.md`; `docs/DOMAIN-RULES.md` §12 C-3.
+   OQ-077 in `erp-saas:docs/open-questions.md`; `docs/DOMAIN-RULES.md` §12 C-3.
 8. **Greenfield.** `loadProject` injects defaults; no migrations, no existing-data compat code. ⚠️ Known conflict:
    `store.js:2234-2239` keeps a legacy-save branch (`dimensionMode` stays `'centerline'` for loaded projects) —
    `docs/DOMAIN-RULES.md` §12 C-1.
@@ -117,8 +117,8 @@ The editor is the **source of truth for geometry** of a connected building. Two 
 The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. Today BBS never leaves the
 editor: the projection sends **no** structural sections, heights, concrete or bars (KD-7). ⚠️ At the same time the
 ERP has a "BBS-direct" steel path that **expects** bars from the editor (erp-saas `structural-quantity.service.ts:46-50`),
-so ERP steel/concrete is never computed (`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-02). Both facts are
-true; which steel number is authoritative is open question OQ-027 in `erp-saas:docs/planning/OPEN-DECISIONS.md`
+so ERP steel/concrete is never computed (`erp-saas:docs/bugs.md` XR-02). Both facts are
+true; which steel number is authoritative is open question OQ-027 in `erp-saas:docs/open-questions.md`
 (`docs/DOMAIN-RULES.md` §12 C-4). Wire units are integer **mm**
 for coordinates, heights, thicknesses and lengths; feet only for floor height and ERP room length/width.
 
@@ -161,7 +161,7 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
 - **Who may edit at once is unresolved.** Owner decision D-011 (boq decision #3, 2026-06-22) says one editor per
   project with a project-level lock. erp-saas 48A Decision 4 (D-037, a proposal, not approved) and doc 48 decision
   D5 (§1.2) instead describe document/floor checkout for 1–2 concurrent editors. The tension is open question
-  OQ-057 in `erp-saas:docs/planning/OPEN-DECISIONS.md` §18 (`docs/DOMAIN-RULES.md` §12 C-8). Neither lock is built:
+  OQ-057 in `erp-saas:docs/open-questions.md` §18 (`docs/DOMAIN-RULES.md` §12 C-8). Neither lock is built:
   the editor acquires no lock or lease, and the only guard against a second writer is the canonical-document CAS
   (409 on a stale `baseVersion`), whose retry is itself last-writer-wins (KD-1). Building either lock depends on the
   answer to OQ-057.
@@ -180,9 +180,9 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   `-live-sync-ordering` · `-room-type-sync` · `-electrical-point-type-sync` · `-editor-write-guard` · `-readonly-gate` ·
   `-projection-reconstruct` (its fixtures use a fictional wall shape — green does not prove Load-from-ERP works, KD-36).
 
-Architecture docs for the integration live in erp-saas: `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`
-and `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`. Cross-repo defects are canonical in
-`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` (XR-nn); KD rows in the map point to them.
+Architecture docs for the integration live in erp-saas: `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`
+and `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-phase0-decisions.md`. Cross-repo defects are canonical in
+`erp-saas:docs/bugs.md` (XR-nn); KD rows in the map point to them.
 
 ---
 
@@ -232,8 +232,8 @@ be lost.
   temporary patches; design the permanent structure first. (Archive §Greenfield Development.)
 - **No new libraries without asking.** (Archive gotcha list.)
 
-"Archive §…" means `docs/archive/2026-09/CLAUDE-phase-history.md`. Sections cited by code comments as
-"CLAUDE.md §…" are in `docs/archive/2026-09/CLAUDE-phase-history.md`; `docs/DOMAIN-RULES.md` §13 maps each of the
+"Archive §…" means `docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md`. Sections cited by code comments as
+"CLAUDE.md §…" are in `docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md`; `docs/DOMAIN-RULES.md` §13 maps each of the
 12 such comments to where it now resolves (five cite a "MEP plan" or "Attribution Policies" section that was never
 in any repo doc).
 
@@ -309,10 +309,12 @@ A: No. JSDoc + ESLint.
   workbook; no human sign-off
 - **BOQ-WEB corrections audit (2026-06-22):** `docs/audit/BOQ-WEB-CORRECTIONS-v1-AUDIT.md` — triage of a 46-item
   feedback list; its owner decisions #2–4 ("boq Decision 2/3/4") are D-010, D-011 and D-012 in
-  `erp-saas:docs/architecture/DECISION-REGISTER.md`
-- **Historical (archived 2026-09-24):** `docs/archive/2026-09/` — `CLAUDE-phase-history.md` (phase log) and the two
-  BBS build logs `BBS_MORNING_REPORT.md` and `BBS-FULL-MORNING-REPORT.md` (build logs, not requirements)
-- **ERP side:** `erp-saas:CLAUDE.md`, `erp-saas:docs/DOCS-INDEX.md`
+  `erp-saas:docs/decisions.md`
+- **Historical (archived 2026-09-24, removed from the tree):** git tag `docs-archive-2026-09`, path
+  `docs/archive/2026-09/` — `CLAUDE-phase-history.md` (phase log) and the two BBS build logs `BBS_MORNING_REPORT.md`
+  and `BBS-FULL-MORNING-REPORT.md` (build logs, not requirements). Read one with
+  `git show docs-archive-2026-09:docs/archive/2026-09/<name>`.
+- **ERP side:** `erp-saas:CLAUDE.md`, `erp-saas:docs/README.md`
 
 ---
 

@@ -6,7 +6,7 @@ Research basis for the six new BBS element categories + sub/super column split.
 > by the build agent on 2026-05-29 from web sources and the two contractor workbooks; no engineer has reviewed it.
 > Where it describes an engine default or calls something "locked", that is the agent's choice, **not an owner or
 > engineer sign-off**. Those choices are listed as unsigned in [`docs/DOMAIN-RULES.md`](../DOMAIN-RULES.md) §11.3
-> and are open questions OQ-027…OQ-055 in `erp-saas:docs/planning/OPEN-DECISIONS.md` §17. Note that the
+> and are open questions OQ-027…OQ-055 in `erp-saas:docs/open-questions.md` §17. Note that the
 > engine's cover defaults (column 25 mm, footing 40 mm) are **below** the cover this research gives (column 40 mm,
 > footing 50–60 mm) and below the IS 456 26.4.2 minimums as read by an agent; engineer confirmation is pending
 > (§11.3 row 8; OQ-028). The "12 m standard bar confirmed" line below is market research on bundle length, not a

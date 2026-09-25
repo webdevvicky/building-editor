@@ -2,14 +2,14 @@
 
 > **What this is.** The editor's domain and engineering rules, each with its **status today** and its **authority**.
 > Until 2026-09-24 these rules lived as about 29 "Locked rules" and equivalent blocks scattered through the phase log,
-> now archived at `boq:docs/archive/2026-09/CLAUDE-phase-history.md`. This file replaces that log as the place to
+> now archived at `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md`. This file replaces that log as the place to
 > read rules. The log stays as history.
 >
 > **Related.** Workflow rules (how to work in this repo) are in [`CLAUDE.md`](../CLAUDE.md). Architecture and the
 > Known Defects register (KD-n) are in [`docs/CODEBASE_MAP.md`](CODEBASE_MAP.md). The BBS engineering basis is in
 > [`docs/bbs/BBS-CATEGORIES-RESEARCH.md`](bbs/BBS-CATEGORIES-RESEARCH.md). Cross-repo defects are canonical in
-> `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` (XR-nn). Owner decisions are in
-> `erp-saas:docs/architecture/DECISION-REGISTER.md`; open questions are in `erp-saas:docs/planning/OPEN-DECISIONS.md`.
+> `erp-saas:docs/bugs.md` (XR-nn). Owner decisions are in
+> `erp-saas:docs/decisions.md`; open questions are in `erp-saas:docs/open-questions.md`.
 
 ## How to read this file
 
@@ -30,7 +30,7 @@ carry a recorded owner sign-off (§11.1). BBS choices made by the build agent ar
 | **DORMANT** | The rule governs code that does not run in production (`src/operations/`, `src/compute/`) |
 | **NOT BUILT** | A requirement with no implementation yet |
 
-**Citations.** "§X :N" means section X of `boq:docs/archive/2026-09/CLAUDE-phase-history.md`, at about line N.
+**Citations.** "§X :N" means section X of `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md`, at about line N.
 Line numbers are those of the archived file (`fcccfc4`), including its 3-line archive banner; they were re-checked
 on 2026-09-24. Code cites (`file.js:N`) are against the working tree on the same date.
 
@@ -39,7 +39,7 @@ on 2026-09-24. Code cites (`file.js:N`) are against the working tree on the same
 ## 1. Walls and wall topology
 
 ### 1.1 Phase W — wall topology integrity
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase W › Locked rules (:771) and › Invariants (:832).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase W › Locked rules (:771) and › Invariants (:832).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -57,7 +57,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase W › Locked 
 | **INV-W1…INV-W10** (wall n1/n2 not in own junctions; TJUNCTION two-way ref; TJUNCTION on centerline within `SNAP_IN`; opening offsets in range; MEP `wallT ∈ [0,1]` on an existing wall; foundation `wallIds` exist; `room.wallIds` deduped; `nodeOrder` empty or a valid closed polygon; `splitOrigin ∈ {NONE, USER_SPLIT}`; junctions ≥ `SNAP_IN` apart) | **NOT ENFORCED at runtime** | Implemented in `schema/integrity.js:280-315` and asserted by verify scripts only; production `loadProject` never calls `verifyIntegrity` (map §3.5) |
 
 ### 1.2 Phase W follow-up — Manual Join
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase W follow-up › Locked rules (:914).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase W follow-up › Locked rules (:914).
 
 | Rule | Status |
 |---|---|
@@ -68,7 +68,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase W follow-up �
 | New tools are entries in `toolbarConfig.js` `TOOL_CLUSTERS`, never inline in `Toolbar.jsx` | TRUE (not re-checked) |
 
 ### 1.3 Phase RoomConverge — Phase W contract restated
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase RoomConverge › Locked rules (:203).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase RoomConverge › Locked rules (:203).
 
 One wall is one full-length entity. T-junctions are first-class. No auto-split and no manual per-room split. A room
 boundary that needs part of a wall uses a sub-span between T-junctions via the expanded graph. **TRUE** (`CLAUDE.md`
@@ -76,7 +76,7 @@ rule 2). The two workflow rules in the same block ("Canvas/UI verify discipline"
 layered fallbacks") moved to `CLAUDE.md` § Working rules.
 
 ### 1.4 Phase D — face-aware draw reference
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase D › Locked rules (:469).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase D › Locked rules (:469).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -91,7 +91,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase D › Locked 
 | Default `drawReference` is `'inside_face'` (Indian/RERA tracing) for new and old projects | TRUE | `structuralSlice.js:120` |
 
 ### 1.5 Phase 6 — dimension convention: 10 corrections and locked rules
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase 6 › 10 architectural corrections (:1227) and
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase 6 › 10 architectural corrections (:1227) and
 › Locked rules added by Phase 6 (:1281).
 
 | Rule | Status | Evidence |
@@ -111,7 +111,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase 6 › 10 arch
 | Quantity engines never consume rendered geometry | TRUE | §6.4 |
 
 ### 1.6 Rev 2 — joinery, tiles, grills, room-wise BOQ
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Rev 2 › Architectural rules locked by Rev 2 (:2979) and
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Rev 2 › Architectural rules locked by Rev 2 (:2979) and
 › Grep guards (:3057).
 
 | Rule | Status | Evidence |
@@ -127,7 +127,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Rev 2 › Architect
 ## 2. Rooms and building area
 
 ### 2.1 Phase R1 — room detection
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase R1 › Locked rules (:967).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase R1 › Locked rules (:967).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -140,7 +140,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase R1 › Locked
 | Room overlap is checked **same-floor only** | TRUE (not re-checked) | §Gotchas (:5026) |
 
 ### 2.2 Phase BA — carpet and built-up area
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BA › Locked rules (:598).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BA › Locked rules (:598).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -155,7 +155,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BA › Locked
 ## 3. Snap
 
 ### 3.1 Phase A — snap architecture
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase A › Locked rules (:1070).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase A › Locked rules (:1070).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -168,7 +168,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase A › Locked 
 | Bypass key `projectSettings.snap.bypassKey` (default Alt); F9 toggles snap via `'snap:toggle'` | TRUE | `structuralSlice.js:313`; `Canvas.jsx:444` |
 
 ### 3.2 Phase B — UNDERLAY_FEATURE snap contract
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase A › Phase B compatibility audit — contract notes
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase A › Phase B compatibility audit — contract notes
 locked (:1127). **Governs unbuilt code**: UNDERLAY_FEATURE is a contract for a future target; `verify-snap` §F
 exercises it with a stub.
 
@@ -182,7 +182,7 @@ deep-merged by `loadProject`; cache keyed `${floorId}:${storageKey}`; distance i
 ## 4. Structure: beams, columns, foundations, slabs
 
 ### 4.1 Phase BeamConnect
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BeamConnect › Locked rules (:123), and §Topology
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BeamConnect › Locked rules (:123), and §Topology
 Layer › Topology invariants (:4542).
 
 | Rule | Status | Evidence |
@@ -193,7 +193,7 @@ Layer › Topology invariants (:4542).
 | BBS per-endpoint anchorage: BEAM = interior (Ld/2, no hook), WALL = bearing, COLUMN/POINT = exterior heuristic | TRUE | `beamRebar.js:19,55` — the default itself is an unsigned choice, §11.3 |
 
 ### 4.2 Structural gotchas
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md`, the unheaded gotcha list after §Plaster Quantities
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md`, the unheaded gotcha list after §Plaster Quantities
 (:4993-5076).
 
 | Rule | Status | Evidence |
@@ -214,7 +214,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md`, the unheaded gotcha 
 ---
 
 ## 5. Topology layer
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Topology Layer › Topology invariants — mandatory (:4542)
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Topology Layer › Topology invariants — mandatory (:4542)
 and › What NOT to extract (:4608).
 
 | Rule | Status | Evidence |
@@ -231,7 +231,7 @@ and › What NOT to extract (:4608).
 ## 6. Quantities and the editor BOQ
 
 ### 6.1 Phase BOQ-WorkQty
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BOQ-WorkQty › Locked rules (:36).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BOQ-WorkQty › Locked rules (:36).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -242,7 +242,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BOQ-WorkQty �
 | Exporters consume the presentation model only | TRUE | §6.2 |
 
 ### 6.2 BOQ extension — presentation model and "Rules locked" 1–7
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §BOQ extension › Canonical presentation model
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §BOQ extension › Canonical presentation model
 (LOAD-BEARING) (:2336), › GAP 2 Contingency (:2381), › Rules locked (:2607); and cross-cutting rule 11 (:1682).
 
 | Rule | Status | Evidence |
@@ -256,7 +256,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §BOQ extension › C
 | Rule 7 "greenfield honoured: consumer-side `?? defaultX` fallbacks let legacy saves load" | **See conflict C-1** | This is itself a legacy-save allowance |
 
 ### 6.3 Plaster v2
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Plaster Quantities (v2) (:4853) › Mandatory invariant
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Plaster Quantities (v2) (:4853) › Mandatory invariant
 (:4967); gotcha (:5050).
 
 | Rule | Status | Evidence |
@@ -284,7 +284,7 @@ Source: gotcha list (:4993-5076).
 | Steel BOQ: one line per resolved spec group plus at most one estimate line per category, no double count; partial coverage via `excludeIds` | TRUE (not re-checked); but the steel itself comes from the legacy path — KD-29 |
 
 ### 6.6 Feet-inches display
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Feet-Inches Display Mode › Locked rules (:2897).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Feet-Inches Display Mode › Locked rules (:2897).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -298,7 +298,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Feet-Inches Display
 ---
 
 ## 7. MEP
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §MEP System › MEP invariants (non-negotiable) (:4711);
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §MEP System › MEP invariants (non-negotiable) (:4711);
 gotcha list (:5063-5076).
 
 | Rule | Status | Evidence |
@@ -311,14 +311,14 @@ gotcha list (:5063-5076).
 | Deterministic routing (explicit comparators, `<` not `<=`, sorted Set iteration) | TRUE (not re-checked) | — |
 | BOQ emitters use the scope wrapper, then fall back to `computeXQuantities(state)` | TRUE (not re-checked) | Emitters read wrong engine keys — KD-27 |
 | MEP entities are IFC-ready (`discipline`, `type`, `ifcType`, `classificationCode`, `systemId`, `systemType`) | TRUE (not re-checked) | — |
-| MEP catalogs are the "ERP swap path": replace catalog files with ERP-backed providers exposing the same API | NOT BUILT | Owner decision "ERP is catalog source of truth" is recorded as D-012 (boq Decision 4) in `erp-saas:docs/architecture/DECISION-REGISTER.md`; editor catalogs are still frozen arrays |
+| MEP catalogs are the "ERP swap path": replace catalog files with ERP-backed providers exposing the same API | NOT BUILT | Owner decision "ERP is catalog source of truth" is recorded as D-012 (boq Decision 4) in `erp-saas:docs/decisions.md`; editor catalogs are still frozen arrays |
 
 ---
 
 ## 8. Identity, persistence and state architecture
 
 ### 8.1 Phase 5 — 9 architectural additions and locked rules
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase 5 › 9 architectural additions (:1479) and › Locked
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase 5 › 9 architectural additions (:1479) and › Locked
 rules added by Phase 5 (:1506).
 
 | Rule | Status | Evidence |
@@ -340,7 +340,7 @@ rules added by Phase 5 (:1506).
 The block's "Never scope down without approval" rule is a workflow rule and moved to `CLAUDE.md`.
 
 ### 8.2 Cross-cutting C1–C8 and rules 9–13
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Enterprise architecture upgrade › Locked rules
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Enterprise architecture upgrade › Locked rules
 (cross-cutting — load-bearing) (:1682); inline "Locked rule" bullets in §Phase 3 (:1903-1956) and §Phase 1 + Phase 2
 (:2043-2239).
 
@@ -377,7 +377,7 @@ Other inline rules from the same phases:
 ---
 
 ## 9. 3D iso viewer
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §3D Iso Viewer — rotation › Locked rules (:2658).
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §3D Iso Viewer — rotation › Locked rules (:2658).
 
 | Rule | Status | Evidence |
 |---|---|---|
@@ -392,7 +392,7 @@ Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §3D Iso Viewer — r
 ## 10. UI conventions (not domain rules)
 
 The UI design-system rules are not repeated here. Read them in
-`boq:docs/archive/2026-09/CLAUDE-phase-history.md` §UI Design System (Imperative-API rule :3997, Panel patterns
+`boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §UI Design System (Imperative-API rule :3997, Panel patterns
 :4005, What NOT to do :4194) and the gotcha list (:5043-5063). One spot-check: no `window.alert/confirm/prompt`
 outside `components/ui/Dialog.jsx` — **TRUE** (grep 2026-09-24).
 
@@ -406,11 +406,11 @@ These are the only two BBS/editor rules with a recorded owner sign-off.
 
 | Rule | Owner record | Status |
 |---|---|---|
-| **Bar length is an explicit per-project user choice** (Procurement dropdown 12 / 9 / 6 m in the BBS Specs panel) | D-114. Owner quoted as "Make it an explicit user choice in ProjectSettingsPanel" (`boq:docs/archive/2026-09/BBS_MORNING_REPORT.md:113`, §"6 m → 12 m bar-length diff") | **TRUE** — `components/BBSSpecPanel.jsx:433-449`. Whether D-114 also fixes the **default value** (6 m or 12 m) is disputed: the sources disagree, see §11.4. Open question OQ-029 |
-| **BBS-UI-Enablement**: because new BBS categories are default-inert, the input UI must make category enablement explicit (per-category toggles, "not enabled" hints in the BBS schedule panel) | D-115. "Owner sign-off recorded" — `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS-Categories › Next-phase requirement (signed off 2026-05-29) (:432) | **NOT BUILT.** No component sets `wall.hasTieBeam` or `subSuperColumnSplitEnabled`; `setWallTieBeam`, `setWallLoft`, `setWallLoftSpec` have no caller (map §11); `BBSSchedulePanel.jsx` has no enablement hints |
+| **Bar length is an explicit per-project user choice** (Procurement dropdown 12 / 9 / 6 m in the BBS Specs panel) | D-114. Owner quoted as "Make it an explicit user choice in ProjectSettingsPanel" (`boq docs-archive-2026-09:docs/archive/2026-09/BBS_MORNING_REPORT.md:113`, §"6 m → 12 m bar-length diff") | **TRUE** — `components/BBSSpecPanel.jsx:433-449`. Whether D-114 also fixes the **default value** (6 m or 12 m) is disputed: the sources disagree, see §11.4. Open question OQ-029 |
+| **BBS-UI-Enablement**: because new BBS categories are default-inert, the input UI must make category enablement explicit (per-category toggles, "not enabled" hints in the BBS schedule panel) | D-115. "Owner sign-off recorded" — `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS-Categories › Next-phase requirement (signed off 2026-05-29) (:432) | **NOT BUILT.** No component sets `wall.hasTieBeam` or `subSuperColumnSplitEnabled`; `setWallTieBeam`, `setWallLoft`, `setWallLoftSpec` have no caller (map §11); `BBSSchedulePanel.jsx` has no enablement hints |
 
 ### 11.2 Engineering implementation rules (decider not recorded)
-Source: `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS › Locked rules (:256), §Phase BBS-Categories
+Source: `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS › Locked rules (:256), §Phase BBS-Categories
 › Locked rules (:364) and › P0 follow-up (:409).
 
 These are software-structure rules. They say how the engine is built, not what the steel quantity should be.
@@ -438,7 +438,7 @@ These are software-structure rules. They say how the engine is built, not what t
 > **These are choices the build agent made while building BBS (2026-05-28/29).** The phase log called several of them
 > "Locked rules", and the morning reports asked the owner to sign them off. **No sign-off exists.** No qualified
 > engineer has reviewed them. They are **not** locked and **not** owner invariants. Each is an open question in
-> `erp-saas:docs/planning/OPEN-DECISIONS.md` §17; the OQ column gives its ID. OQ-034, OQ-037, OQ-041, OQ-044, OQ-045
+> `erp-saas:docs/open-questions.md` §17; the OQ column gives its ID. OQ-034, OQ-037, OQ-041, OQ-044, OQ-045
 > and OQ-052 are further BBS choices listed only there. The full classification, with IS 456
 > clauses, is in the consolidation evidence (A21 §2.3, working file outside the repo). Do not change a default below
 > without an owner or engineer decision, and do not cite it as settled.
@@ -476,15 +476,15 @@ it is not a live choice.
 
 The per-project choice (6 / 9 / 12 m) is owner-signed (D-114, §11.1). **The default value is not settled.** The
 sources below say different things, and this file does not pick one. The decision is open question **OQ-029** in
-`erp-saas:docs/planning/OPEN-DECISIONS.md` §17 (options: honour 6 m, or a new owner decision superseding D-114 with
+`erp-saas:docs/open-questions.md` §17 (options: honour 6 m, or a new owner decision superseding D-114 with
 12 m).
 
 | Source | What it says |
 |---|---|
-| `boq:docs/archive/2026-09/BBS_MORNING_REPORT.md:113-115` (overnight build log, 2026-05-28) | "Per your choice ('Make it an explicit user choice in ProjectSettingsPanel'), no migration was applied. **Default stays 6 m.**" Two lines later (:115) the same report says new BBS calls on a fresh project "use the catalog default 12 m". Its own 2026-09-23 correction banner (:9) says the default is 12 m, not 6 m. The quoted owner words are about the choice; the sentence "Default stays 6 m" is in the report's own voice, with no owner quote on the default |
-| `boq:docs/archive/2026-09/BBS-FULL-MORNING-REPORT.md` (BBS-Categories build log, 2026-05-29) | Nothing. It does not mention bar length or its default |
-| `boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS, file table row 14 (:252) and › Locked rules (:292-296) | "**Standard bar length default 12 m.** Reflects Indian TMT-market reality. Flipped 6 → 12 on 2026-05-28." No owner quote or decider is given |
-| `erp-saas:docs/architecture/DECISION-REGISTER.md` D-114 | Records "the default stays 6 m" as part of the owner decision, grade A, sourced to the morning report's "per your choice". Status "in force, not enforced", with the 12 m code default noted and OQ-029 named |
+| `boq docs-archive-2026-09:docs/archive/2026-09/BBS_MORNING_REPORT.md:113-115` (overnight build log, 2026-05-28) | "Per your choice ('Make it an explicit user choice in ProjectSettingsPanel'), no migration was applied. **Default stays 6 m.**" Two lines later (:115) the same report says new BBS calls on a fresh project "use the catalog default 12 m". Its own 2026-09-23 correction banner (:9) says the default is 12 m, not 6 m. The quoted owner words are about the choice; the sentence "Default stays 6 m" is in the report's own voice, with no owner quote on the default |
+| `boq docs-archive-2026-09:docs/archive/2026-09/BBS-FULL-MORNING-REPORT.md` (BBS-Categories build log, 2026-05-29) | Nothing. It does not mention bar length or its default |
+| `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Phase BBS, file table row 14 (:252) and › Locked rules (:292-296) | "**Standard bar length default 12 m.** Reflects Indian TMT-market reality. Flipped 6 → 12 on 2026-05-28." No owner quote or decider is given |
+| `erp-saas:docs/decisions.md` D-114 | Records "the default stays 6 m" as part of the owner decision, grade A, sourced to the morning report's "per your choice". Status "in force, not enforced", with the 12 m code default noted and OQ-029 named |
 | Code (working tree, 2026-09-24) | **12 m.** `STANDARD_BAR_LENGTH_M = 12` (`src/specs/reinforcementSpecs.js:36`) is the `DEFAULT_PROJECT_SETTINGS.bbsDefaults` value (`src/structuralSlice.js:108,247`); the IS 2502 catalog also says 12 (`src/specs/cuttingLength.js:71`); the panel shows 12 when unset (`src/components/BBSSpecPanel.jsx:440`, option label "12 m (Indian market standard, default)"); the BBS export falls back to 12 (`src/export/bbs.js:103,112`). The constant changed from 6 to 12 in commit `28df40b` (2026-05-29), the same commit that added the morning report's "Default stays 6 m" text |
 | Stale 6 m text in code | Comments at `src/specs/cuttingLength.js:20-24,65-67`, `src/structuralSlice.js:245-246` and `src/quantities/bbs.js:15` still say the default is 6 m; `src/components/BBSSchedulePanel.jsx:285` uses `?? 6` as a display fallback. Code is not changed by this documentation pass |
 
@@ -497,20 +497,20 @@ either way.
 
 | # | Conflict | Evidence | Resolution path |
 |---|---|---|---|
-| C-1 | **Greenfield vs legacy-save code.** `CLAUDE.md` rule 8 and the greenfield rule (`boq:docs/archive/2026-09/CLAUDE-phase-history.md` §Greenfield Development (MANDATORY MINDSET) :3222: "never preserves legacy branches") vs a live legacy-save branch: loaded projects without `dimensionMode` stay `'centerline'`, new projects get `'clear_internal'` (`src/store.js:2234-2239`). BOQ-extension rule 7 (:2632) also treats `?? defaultX` fallbacks for legacy saves as "greenfield honoured". Phase W says pre-schema projects "fail to load by design" | code + phase log | Open: `erp-saas:docs/planning/OPEN-DECISIONS.md` OQ-096. Not in the KD register today. No code change made |
+| C-1 | **Greenfield vs legacy-save code.** `CLAUDE.md` rule 8 and the greenfield rule (`boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` §Greenfield Development (MANDATORY MINDSET) :3222: "never preserves legacy branches") vs a live legacy-save branch: loaded projects without `dimensionMode` stay `'centerline'`, new projects get `'clear_internal'` (`src/store.js:2234-2239`). BOQ-extension rule 7 (:2632) also treats `?? defaultX` fallbacks for legacy saves as "greenfield honoured". Phase W says pre-schema projects "fail to load by design" | code + phase log | Open: `erp-saas:docs/open-questions.md` OQ-096. Not in the KD register today. No code change made |
 | C-2 | "Every schema change lands as a `MIGRATIONS` entry" (§Phase 1 + Phase 2 :2162) vs greenfield "no migrations" (`CLAUDE.md` rule 8) | `projects/schemaVersion.js` `runMigrations` has no importer | Greenfield wins in practice; the migration rule governs dormant code |
-| C-3 | "Revisions / design history are permanent" (`CLAUDE.md` rule 7) vs erp-saas 48A Decision 5 (D-037, a proposal: drafts prunable, 90-day draft retention) | `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`; KD-16, KD-17 | The recorded owner rule (D-084) is about ERP BOQ versions; extending it to editor design history is not owner-confirmed. Open question OQ-077 in `erp-saas:docs/planning/OPEN-DECISIONS.md` |
-| C-4 | **"BBS never leaves the editor"** (`CLAUDE.md` § ERP Sync) vs the ERP BBS-direct steel path, which expects editor bars (`erp-saas` `structural-quantity.service.ts:46-50`). The projection sends no sections, concrete or bars | KD-7 = `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-02 | Contradictory design, not just a bug. Open question OQ-027 (§11.3 row 23) |
+| C-3 | "Revisions / design history are permanent" (`CLAUDE.md` rule 7) vs erp-saas 48A Decision 5 (D-037, a proposal: drafts prunable, 90-day draft retention) | `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-phase0-decisions.md`; KD-16, KD-17 | The recorded owner rule (D-084) is about ERP BOQ versions; extending it to editor design history is not owner-confirmed. Open question OQ-077 in `erp-saas:docs/open-questions.md` |
+| C-4 | **"BBS never leaves the editor"** (`CLAUDE.md` § ERP Sync) vs the ERP BBS-direct steel path, which expects editor bars (`erp-saas` `structural-quantity.service.ts:46-50`). The projection sends no sections, concrete or bars | KD-7 = `erp-saas:docs/bugs.md` XR-02 | Contradictory design, not just a bug. Open question OQ-027 (§11.3 row 23) |
 | C-5 | Bar-length default: 12 m in code and in the phase log vs "default stays 6 m", which the ERP register records as part of owner decision D-114. The owner's quoted words cover the user choice, not the default | §11.4 (sources compared) | Open question OQ-029. Neither value is settled |
 | C-6 | "IS 2502 catalog single source" and "legacy untouched, both coexist" vs the legacy path pricing all BOQ steel | KD-29 | Defect; rule kept unweakened |
 | C-7 | `BEAM_LEVEL_REGISTRY` single source vs hard-coded level lists | `OpeningPanel.jsx:235`; `schema/entities/beam.js:36` | Defect: KD-41 (`docs/CODEBASE_MAP.md` §10) |
-| C-8 | **Edit-lock grain.** Owner decision D-011 (2026-06-22, boq BOQ-WEB decision #3): one editor per project, project-level lock, no concurrent editing vs erp-saas 48A Decision 4 and doc 48 decision D5 (D-037, a proposal): document/floor checkout for 1–2 concurrent editors | `boq:docs/audit/BOQ-WEB-CORRECTIONS-v1-AUDIT.md:185` (decision #3); `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`. As built, neither lock exists: only the canonical-document CAS (409 on a stale `baseVersion`, `erp-saas` `building-structure/editor-document.service.ts:21-24`), and the editor's 409 retry is last-writer-wins (KD-1) | Open question OQ-057 in `erp-saas:docs/planning/OPEN-DECISIONS.md` §18 |
+| C-8 | **Edit-lock grain.** Owner decision D-011 (2026-06-22, boq BOQ-WEB decision #3): one editor per project, project-level lock, no concurrent editing vs erp-saas 48A Decision 4 and doc 48 decision D5 (D-037, a proposal): document/floor checkout for 1–2 concurrent editors | `boq:docs/audit/BOQ-WEB-CORRECTIONS-v1-AUDIT.md:185` (decision #3); `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-phase0-decisions.md`. As built, neither lock exists: only the canonical-document CAS (409 on a stale `baseVersion`, `erp-saas` `building-structure/editor-document.service.ts:21-24`), and the editor's 409 retry is last-writer-wins (KD-1) | Open question OQ-057 in `erp-saas:docs/open-questions.md` §18 |
 
 ---
 
 ## 13. Code comments that cite "CLAUDE.md §…"
 
-Sections cited by code comments as "CLAUDE.md §…" are in `boq:docs/archive/2026-09/CLAUDE-phase-history.md`, or
+Sections cited by code comments as "CLAUDE.md §…" are in `boq docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md`, or
 here. Code comments are not edited (documentation-only change).
 
 | Comment | Cites | Resolves to |

@@ -485,7 +485,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 > is the maintained record.
 >
 > **Cross-repo rows.** A row marked `→ XR-nn` also affects the ERP. Its canonical row, with the fix owner and the
-> severity used for planning, is `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` §9 XR-nn (its KD column points
+> severity used for planning, is `erp-saas:docs/bugs.md` §9 XR-nn (its KD column points
 > back here). The mapping below was reconciled with that register on 2026-09-24, after XR-03, XR-05 and XR-07 were
 > split and XR-09…XR-16 added. Severities were reconciled there the same day: XR-01, XR-05 and XR-15 are P0, matching
 > KD-1, KD-2 and KD-3. XR-16 (split/join and wall material/height ops never emitted) has no KD row; it is the dead
@@ -494,7 +494,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 > **Two exceptions to "the XR row sets the severity".** (1) KD-36 stays **P1** although it maps to XR-01, which is
 > **P0**. XR-01's P0 comes from KD-3, the data defect that writes duplicate walls; KD-36 is the test gate that failed
 > to catch it, and a broken gate corrupts no data by itself. The audit register records this as a deliberate
-> exception (`erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` §9, "Severity reconciliations"). (2) Rows that leave
+> exception (`erp-saas:docs/bugs.md` §9, "Severity reconciliations"). (2) Rows that leave
 > ERP data stale but need no ERP change have no XR row by that register's ruling: KD-12, KD-13, KD-16, KD-24,
 > KD-37. KD-8 was in this list until 2026-09-24, when the register gave it a row (XR-17).
 
@@ -507,7 +507,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-5 | P1 | MEP UPDATE_ELEMENT carries `roomIfcId`, PATCH DTO lacks it (`forbidNonWhitelisted`) → 400 → dead-letter | elementRegistry.js:34-38; liveSync.js:700-707 | boq-02 A-5 → XR-03 |
 | KD-6 | P1 | Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 → XR-09 |
 | KD-7 | P1 | Structural sections/heights/levels/concrete/bars never synced — ERP BBS-direct steel gets nothing | elementRegistry.js:61-97 | boq-02 A-4 → XR-02 |
-| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; → `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` XR-17 above |
+| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; → `erp-saas:docs/bugs.md` XR-17 above |
 | KD-9 | P2 | Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 → XR-11 |
 | KD-10 | P2 | UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 → XR-12 |
 | KD-11 | P2 | Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 → XR-07 |
@@ -585,4 +585,4 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | Touch ERP sync | ordering `syncCoordinator.js`; canonical `canonicalDoc/Reopen/SyncQueue.js`; projection `syncEngine → syncEmitters → liveSync → liveSyncQueue`; reconstruction only via `projectionGuard.loadFromErp` |
 | Verify | resolver-hook loop (§7); `npm run build`; `npm run lint` |
 
-Related: `CLAUDE.md` (rules/workflow), `docs/DOMAIN-RULES.md` (rules with status + authority), `docs/UI-ISSUES.md`, `docs/archive/2026-09/CLAUDE-phase-history.md` (historical), `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md` + `erp-saas:docs/architecture/48A_PHASE0_DECISION_RECORD_AND_PLAN.md`, `erp-saas:docs/audit/2026-09-23-CODEBASE-AUDIT.md` (XR-nn).
+Related: `CLAUDE.md` (rules/workflow), `docs/DOMAIN-RULES.md` (rules with status + authority), `docs/UI-ISSUES.md`, `docs-archive-2026-09:docs/archive/2026-09/CLAUDE-phase-history.md` (historical), `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md` + `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-phase0-decisions.md`, `erp-saas:docs/bugs.md` (XR-nn).

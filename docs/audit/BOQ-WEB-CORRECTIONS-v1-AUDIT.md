@@ -23,7 +23,7 @@ The editor is NOT standalone. It already:
 - Cloud-syncs to the ERP (`src/projects/cloudSync.js` push/pull, `connectHandoff.js` conflict dialog, `autosave.js` debounced auto-sync).
 - Relies on `ifcGlobalId` being **stable across edits** (wall split/join preserve lineage via a `provenance` block). The ERP's `ImportService` reconciles execution rows (snags, progress, finishes, BOQ links) across splits/joins using that lineage.
 
-**Consequence:** several of the teammate's suggestions, if implemented naively, would corrupt or orphan ERP data. These are flagged 🔗 below. Any change touching walls, openings, ids, materials, room types, or beams MUST be checked against the integration contract. *(2026-09-24: the proposed EDITOR-ERP-INTEGRATION doc in this repo was never written; the contract is `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`, with the as-built wire contract in `docs/CODEBASE_MAP.md` §4–5.)*
+**Consequence:** several of the teammate's suggestions, if implemented naively, would corrupt or orphan ERP data. These are flagged 🔗 below. Any change touching walls, openings, ids, materials, room types, or beams MUST be checked against the integration contract. *(2026-09-24: the proposed EDITOR-ERP-INTEGRATION doc in this repo was never written; the contract is `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`, with the as-built wire contract in `docs/CODEBASE_MAP.md` §4–5.)*
 
 Naive changes that WOULD break the contract (do NOT do without integration design):
 - Regenerating `ifcGlobalId` on split/merge → orphans all snags/progress on those walls.
@@ -119,7 +119,7 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 ## Deeper findings she could not have seen (audit results)
 
 ### Integration / data-contract (CRITICAL — governance)
-- **I-1** No written integration contract doc. The `ifcGlobalId` stability + provenance rules live only in code. → Create an integration contract doc *(2026-09-24: never written as an EDITOR-ERP-INTEGRATION doc in this repo; the contract is now `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`)* and a pre-export validation gate (warn on missing `ifcGlobalId`, zero-length walls, zero-area rooms).
+- **I-1** No written integration contract doc. The `ifcGlobalId` stability + provenance rules live only in code. → Create an integration contract doc *(2026-09-24: never written as an EDITOR-ERP-INTEGRATION doc in this repo; the contract is now `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`)* and a pre-export validation gate (warn on missing `ifcGlobalId`, zero-length walls, zero-area rooms).
 - **I-2** Catalog/enum drift: editor `materialKey` (7 hardcoded) vs ERP `WallMaterial` (12 enum); editor room types vs ERP `RoomType`. Unknown values silently map to `OTHER` on import (`import.service.ts` `mapWallMaterial`/`mapRoomType`). Adding room types (#36-40) and materials WILL widen this drift unless solved as a shared catalog.
 - **I-3** No editor→BOQ-product/WorkCategory linkage; ERP cannot auto-generate BOQ from structure safely (re-import would duplicate). Any "auto-BOQ on import" must be idempotent + preview-gated.
 
@@ -133,7 +133,7 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 - **A-7** No auth / users / tenants in the editor itself (cloud sync is single global ERP connection). True multi-tenant SaaS needs an auth + tenant model + per-project ownership/RBAC, and conflict-free multi-editor (CRDT) if concurrent editing is a goal.
 
 ### Domain completeness / correctness (MIX)
-> The labels A-n, D-n and #n in this audit are its own finding numbers. They are not decision IDs (`D-001…` in `erp-saas:docs/architecture/DECISION-REGISTER.md`).
+> The labels A-n, D-n and #n in this audit are its own finding numbers. They are not decision IDs (`D-001…` in `erp-saas:docs/decisions.md`).
 
 - **D-1 (BUG)** Plumbing `HOT_RECIRC` referenced in emitter but absent from `SYSTEM_IDS` (`mep/quantities/plumbing.js:18`) → recirculation pipe never quantified.
 - **D-2 (BUG)** Sump/OHT concrete+steel always 0 (#20).
@@ -151,7 +151,7 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 ## Suggested phasing (for discussion — not yet approved)
 
 **Phase 0 — Governance & safety (do before anything touches walls/openings/ids/catalogs)**
-- Write the integration contract doc *(2026-09-24: now `erp-saas:docs/architecture/48_EDITOR_ERP_INTEGRATION_ARCHITECTURE.md`)*; add pre-export validation gate; add a guardrail verify script.
+- Write the integration contract doc *(2026-09-24: now `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`)*; add pre-export validation gate; add a guardrail verify script.
 
 **Phase 1 — Real bugs, low risk, high trust (quick wins)**
 - #9/#31 room label centroid; #2 paint litres; #30 MEP z-order/hit-test; D-1 HOT_RECIRC; #29 junction-box emission; #45 railing qty; #20 sump/OHT concrete/steel; investigate #14, #32.
@@ -176,8 +176,8 @@ The updated file keeps items 1–46 unchanged (only #36 gained "Motor room, Suit
 ## Decisions (owner, 2026-06-22)
 
 > **Where these live now (2026-09-24).** #1 was scoped to this audit engagement only; it is not a standing rule.
-> #2–#4 are owner decisions recorded in `erp-saas:docs/architecture/DECISION-REGISTER.md` as D-010, D-011 and D-012
-> (Also known as "boq Decision 2/3/4"). Open tensions are tracked in `erp-saas:docs/planning/OPEN-DECISIONS.md`: #2 vs
+> #2–#4 are owner decisions recorded in `erp-saas:docs/decisions.md` as D-010, D-011 and D-012
+> (Also known as "boq Decision 2/3/4"). Open tensions are tracked in `erp-saas:docs/open-questions.md`: #2 vs
 > the later "residential first" rule (D-025; OQ-058) and D-053 (D4) "room-type vocabulary complete" (OQ-056); #3
 > (project-level lock) vs erp-saas 48A Decision 4 (D-037, per-floor checkout; OQ-057). #4 is decided but not built:
 > the editor still ships frozen catalog arrays.
