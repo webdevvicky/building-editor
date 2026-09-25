@@ -314,7 +314,7 @@ A: No. JSDoc + ESLint.
   `docs/archive/2026-09/` — `CLAUDE-phase-history.md` (phase log) and the two BBS build logs `BBS_MORNING_REPORT.md`
   and `BBS-FULL-MORNING-REPORT.md` (build logs, not requirements). Read one with
   `git show docs-archive-2026-09:docs/archive/2026-09/<name>`.
-- **ERP side:** `erp-saas:CLAUDE.md`, `erp-saas:docs/README.md`
+- **ERP side:** `erp-saas:docs/OVERVIEW.md` (start here; editor sync §6.6, topic → owner table §7.2), `erp-saas:CLAUDE.md`
 
 ---
 
