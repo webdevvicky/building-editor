@@ -108,10 +108,13 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
 
 The editor is the **source of truth for geometry** of a connected building. Two lineages per building:
 
-- **Canonical Building Document** — `buildSnapshot(state)` (`src/projects/_snapshot.js`, payload `version: 7`;
-  the unused `operations/_schemaVersion.js` says 8 — KD-34) wrapped by `canonicalDoc.buildSnapshotDoc` and PUT to
-  `/api/v1/building-structure/buildings/:id/document` (R2 blob, checksum, CAS on `baseVersion`).
-  **Reopen is verbatim** (R2 → IDB → empty; checksum failure with no IDB rescue → HARD read-only latch).
+- **Canonical Building Document** — `buildSnapshot(state)` (`src/projects/_snapshot.js`, payload `version` =
+  `SCHEMA_VERSION` from `operations/_schemaVersion.js`, 8; XR-14 fixed 2026-10-13) wrapped by
+  `canonicalDoc.buildSnapshotDoc` and PUT to `/api/v1/building-structure/buildings/:id/document` (R2 blob, checksum,
+  CAS on `baseVersion`). **Reopen is verbatim** and lineage-aware (`canonicalReopen.js`): unsent local edits made on
+  the server's current version load; unsent edits made on an older version are a clash (server copy loads, local
+  kept aside under `SNAPSHOTS[<id>:clash:v<base>:<ts>]`, user told); else R2 → IDB → empty; checksum failure with no
+  IDB rescue → HARD read-only latch.
 - **Geometry projection** — ERP PostgreSQL rows written live through `/api/v1/geometry/**`, one op at a time.
 
 The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. Today BBS never leaves the
@@ -132,8 +135,8 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
 - **`liveSyncQueue`** = durable IDB FIFO outbox with a dependency gate; **`liveSync.fireLiveOp`** maps ops → HTTP,
   resolves editor ids → ERP UUIDs, converts in → mm. 400/404/409/422 dead-letter; 401/403/408/429/5xx/network retry
   ×5 then `failed` (badge offers Retry / Resync all).
-- **`canonicalReopen`** seeds the id map from `GET /geometry/buildings/:id/state` (never loads the canvas from it),
-  then loads R2 → IDB → empty.
+- **`canonicalReopen`** seeds the id map and row versions from `GET /geometry/buildings/:id/state` (never loads the
+  canvas from it), then loads the copy the save rule picks (see Canonical Building Document above).
 
 ### Locked rules
 - The **editor owns topology**; the **ERP owns business state** (room name after creation, status, finishes, costs).
@@ -154,17 +157,26 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   ⚠️ **Test fixtures must pass EDITOR ids** (`wallIfcId`/`roomIfcId`) and let `liveSync` resolve them.
 - **No automatic reconstruction.** Reopen never derives the canvas from the projection. The only reconstruction
   path is the explicit, user-initiated **"Load from ERP"** (`ProjectionMismatchBanner` → `projectionGuard.loadFromErp`
-  → `projectionReconstruct.js`), shown when the projection has more rooms/walls than the canvas. It is currently
-  defective (wrong wall shape → duplicate walls; drops elements and resets settings) — **KD-3, KD-4, KD-36**.
-- **An old snapshot must never clobber a newer one.** ⚠️ **NOT currently enforced** — on 409 the queue refetches the
-  base and re-PUTs the same payload (last-writer-wins); only 3 consecutive conflicts latch read-only. **KD-1, KD-2.**
+  → `projectionReconstruct.js`), shown when the projection has more rooms/walls than the canvas. It rebuilds from
+  exactly what `GET /geometry/buildings/:id/state` returns (the ERP's projection contract: walls name their nodes and
+  every room they bound by editor id), every `ELEMENT_REGISTRY` kind through its `toEditorShape` (typed columns + the
+  element `spec` the editor sends), and keeps editor-only settings, stamps and rates (XR-01, XR-10 fixed 2026-10-13,
+  G17). Pinned by `verify-projection-reconstruct` and `verify-erp-roundtrip`.
+- **An old snapshot must never clobber a newer one** (XR-05, XR-15 fixed 2026-10-13, G17). The upload queue's
+  `baseVersion` is the server version the canvas descends from — set by reopen or by its own accepted PUT, never
+  re-seeded from a server fetch. A 409 is never re-sent on the newer number: the server holding our own document
+  (same checksum — a lost response) is adopted; any other clash keeps the copy aside and latches read-only.
+- **One identity rule** (BLD-G01, G17): an editor id deleted and added back (undo) revives its ERP row — the ERP's
+  `GeometryLiveService.findEditorRow`; never mint a new id to "work around" a refused re-add.
+- **Room/wall shape PATCHes carry the row version** this session last saw (`liveSync` `_versionMap`, seeded from
+  `/state`, refreshed from every response); a 409 latches read-only (CONC-27).
 - **Who may edit at once is unresolved.** Owner decision D-011 (boq decision #3, 2026-06-22) says one editor per
   project with a project-level lock. erp-saas 48A Decision 4 (D-037, a proposal, not approved) and doc 48 decision
   D5 (§1.2) instead describe document/floor checkout for 1–2 concurrent editors. The tension is open question
   OQ-057 in `erp-saas:docs/open-questions.md` §18 (`docs/DOMAIN-RULES.md` §12 C-8). Neither lock is built:
   the editor acquires no lock or lease, and the only guard against a second writer is the canonical-document CAS
-  (409 on a stale `baseVersion`), whose retry is itself last-writer-wins (KD-1). Building either lock depends on the
-  answer to OQ-057.
+  (409 on a stale `baseVersion`; since G17 a clash is never re-sent). Building either lock depends on the answer to
+  OQ-057.
 - **Legacy connect path** (`#connect` deep link → `connectHandoff.js`, `cloudConn.js`, `ConnectErpDialog`,
   `ErpConnection`) still ships and is wired in `App.jsx`/`main.jsx`, but the ERP routes it calls no longer exist
   (KD-15). `buildPackage` / blob-import are deleted.
@@ -173,12 +185,13 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   `UPDATE_ELEMENT` (in `toErpPayload`, part of the change signature) → ERP `BuildingElement.mepPointType`.
   ⚠️ Updates to any point that has a `roomId` are rejected 400 and dead-lettered (PATCH DTO lacks `roomIfcId`) —
   **KD-5**. Verified (mocked fetch only) by `verify-electrical-point-type-sync.mjs`.
-- **Read-only latch** (`editorWriteGuard`): HARD on integrity failure or 3 stale-base conflicts; releasable when
+- **Read-only latch** (`editorWriteGuard`): HARD on integrity failure, a canonical-document clash or a row-version
+  clash on a shape PATCH; releasable when
   offline. ⚠️ The UI does not consult it — editing continues locally (KD-23).
 - **Quality gate for any geometry/sync change** (run with the resolver hook, all must stay green):
   `verify-canonical-sync` · `-canonical-reopen` · `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` ·
   `-live-sync-ordering` · `-room-type-sync` · `-electrical-point-type-sync` · `-editor-write-guard` · `-readonly-gate` ·
-  `-projection-reconstruct` (its fixtures use a fictional wall shape — green does not prove Load-from-ERP works, KD-36).
+  `-projection-reconstruct` · `-erp-roundtrip` (editor document → ERP → Load from ERP, delete/undo, every kind).
 
 Architecture docs for the integration live in erp-saas: `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`
 and `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-phase0-decisions.md`. Cross-repo defects are canonical in
