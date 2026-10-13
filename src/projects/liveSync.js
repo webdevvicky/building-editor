@@ -741,6 +741,9 @@ export async function fireLiveOp(opType, payload, conn) {
         // Stream 2: canonical MEP point classification. Whitelisted on the ERP element
         // DTO (accepted-and-ignored until the deferred subtype routing lands).
         ...(payload.pointType ? { pointType: payload.pointType } : {}),
+        // The element's descriptive attributes with no typed column (registry `spec`),
+        // stored verbatim so "Load from ERP" can rebuild the element (XR-10).
+        ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
       }
       const elemRoomIds = _resolveRoomIds(payload.roomIds, c)
       if (elemRoomIds.length) body.roomIds = elemRoomIds

@@ -44,7 +44,9 @@ export default function ProjectionMismatchBanner() {
   const onLoad = async () => {
     setBusy(true)
     try {
-      const { skipped } = await loadFromErp(loadProject)
+      // Editor-only data the ERP never holds (settings, stamps, rates) is carried over.
+      const { projectSettings, stamps, ratesByKey } = useStore.getState()
+      const { skipped } = await loadFromErp(loadProject, { projectSettings, stamps, ratesByKey })
       if (skipped?.rooms?.length) {
         console.warn('[projectionGuard] rooms skipped (no dimensions):', skipped.rooms)
       }
@@ -61,7 +63,7 @@ export default function ProjectionMismatchBanner() {
         {mismatch.projWalls} walls for this building, but this canvas shows {mismatch.canvasRooms} /{' '}
         {mismatch.canvasWalls}. The saved drawing document is missing or stale — anything you draw here
         will NOT reflect what the ERP already knows. Load the ERP geometry to continue safely
-        (structural/MEP elements stay ERP-side and are not redrawn).
+        (rooms, walls, openings, structural and MEP elements are rebuilt; your settings are kept).
       </span>
       <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
         <button style={btn} onClick={onLoad} disabled={busy}>

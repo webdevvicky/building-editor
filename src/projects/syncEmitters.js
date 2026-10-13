@@ -214,6 +214,14 @@ export function buildFullSyncOps(state) {
     ops.push(wallAddOp(state, w, room.ifcGlobalId))
     for (const o of (w.openings ?? [])) ops.push(openingAddOp(w, o))
   }
+  // Shared walls: the second room's face, exactly as the live engine emits it — without
+  // it a resynced projection would not know the wall bounds that room (G17).
+  for (const r of Object.values(state.rooms ?? {})) {
+    for (const wid of (r.wallIds ?? [])) {
+      const owner = wallRoom.get(wid)
+      if (owner && owner.id !== r.id && state.walls?.[wid]) ops.push(adjacentSurfaceOp(state.walls[wid], r))
+    }
+  }
   for (const entry of ELEMENT_ENTRIES) {
     for (const el of Object.values(state[entry.collection] ?? {})) ops.push(elementAddOp(state, entry, el))
   }
