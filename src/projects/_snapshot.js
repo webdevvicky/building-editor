@@ -2,10 +2,15 @@
 //
 // Lives outside autosave.js so Node verify scripts can pull this without
 // dragging in Toast.jsx (which Node's ESM loader can't parse).
+//
+// `version` is the ONE schema version (operations/_schemaVersion.js) — the canonical
+// Building Document stored in the ERP carries the editor's real shape version (XR-14).
+
+import { SCHEMA_VERSION } from '../operations/_schemaVersion.js'
 
 export function buildSnapshot(s) {
   return {
-    version:         7,
+    version:         SCHEMA_VERSION,
     nodes:           s.nodes,
     walls:           s.walls,
     rooms:           s.rooms,

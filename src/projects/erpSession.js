@@ -31,6 +31,7 @@ import { initEditorAuth, getEditorToken } from './editorAuth.js'
 import { setErpConnection } from './erpConnection.js'
 import { DEFAULT_FLOOR_ID } from '../structuralSlice.js'
 import { useStore } from '../store.js'
+import { toast } from '../components/ui/Toast'
 
 // ─── ERP REST helpers ───────────────────────────────────────────────────────
 
@@ -163,6 +164,19 @@ export async function initErpSession() {
     })
     reopenVersion = res?.snapshotVersion ?? null
     console.log('[erpSession] reopen source', res?.source ?? 'unknown')
+
+    // VERSION CLASH on reopen (XR-15): this device held unsent edits made on an older
+    // version, and someone has saved a newer one since. The newer version is open; the
+    // local edits were kept aside, never uploaded over it. Tell the user — it stays
+    // until they dismiss it.
+    if (res?.clash) {
+      toast.warning(
+        `This design was changed by someone else (now version ${res.clash.serverVersion}) after your last ` +
+        `unsaved edits on this device (made on version ${res.clash.localBaseVersion}). The newer version is ` +
+        'open; your earlier edits were kept aside on this device and did not overwrite it.',
+        { duration: 0 },
+      )
+    }
 
     // INTEGRITY FAILURE: the server holds a canonical document we could not verify,
     // and no local snapshot rescued it. Engage the write gate and DO NOT start the

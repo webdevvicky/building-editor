@@ -12,8 +12,6 @@
 
 import { buildSnapshot } from './_snapshot.js'
 
-const SCHEMA_VERSION_FALLBACK = 7
-
 // ── Checksum (corruption detection) ─────────────────────────────────────────
 // SHA-256 when a SubtleCrypto is available (browser secure context / Node 18+),
 // else a deterministic FNV-1a fallback. The algorithm only needs to be stable
@@ -57,7 +55,7 @@ export async function buildSnapshotDoc(state) {
   const payload = buildSnapshot(state)
   const checksum = await computeChecksum(JSON.stringify(payload))
   return {
-    schemaVersion: payload.version ?? SCHEMA_VERSION_FALLBACK,
+    schemaVersion: payload.version,
     checksum,
     payload,
   }

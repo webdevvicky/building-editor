@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { fireLiveOp, GEOMETRY_OPS, registerErpId } from '../src/projects/liveSync.js'
+import { fireLiveOp, GEOMETRY_OPS, registerErpId, seedIdMapFromState, knownRowVersion } from '../src/projects/liveSync.js'
+import { isEditorHardReadOnly, _resetEditorWriteGuard } from '../src/projects/editorWriteGuard.js'
 
 // ── Mock fetch ────────────────────────────────────────────────────────────────
 const fetchCalls = []
@@ -27,6 +28,12 @@ registerErpId('SlabIfc000000000000001', 'erpSlab1')
 registerErpId('OpenIfc000000000000001', 'erpOpen1')
 registerErpId('ElemIfc000000000000001', 'erpElem1')
 registerErpId('Wall2Ifc00000000000001', 'erpWall2')
+// Row versions, as GET /state hands them over (CONC-27): a room/wall shape PATCH must
+// carry the version this editor last saw.
+seedIdMapFromState({
+  rooms: [{ id: 'erpRoom1', sourceEditorId: 'RoomIfc000000000000001', version: 3 }],
+  walls: [{ id: 'erpWall1', sourceEditorId: 'WallIfc000000000000001', version: 5, openings: [] }],
+})
 
 // ── Mock conn ─────────────────────────────────────────────────────────────────
 const mockConn = {
@@ -123,6 +130,45 @@ for (const [op] of OP_TEST_CASES) {
   if (!GEOMETRY_OPS.includes(op)) {
     failed.push(`${op}: in test cases but NOT in GEOMETRY_OPS — register it`)
   }
+}
+
+// ── CONC-27: shape PATCHes carry the row version; a clash latches read-only ──────
+{
+  fetchCalls.length = 0
+  await fireLiveOp('UPDATE_WALL', { ifcGlobalId: 'WallIfc000000000000001', height: 130 }, mockConn)
+  const body = JSON.parse(fetchCalls[0].body)
+  if (body.version !== 5) failed.push(`UPDATE_WALL: expected version 5 in the body, got ${body.version}`)
+  else passed.push('UPDATE_WALL carries the row version this editor last saw (5)')
+
+  let unknownThrew = ''
+  try { await fireLiveOp('UPDATE_WALL', { ifcGlobalId: 'Wall2Ifc00000000000001', height: 130 }, mockConn) } catch (e) { unknownThrew = e.message }
+  if (!/→ 400:/.test(unknownThrew)) failed.push('UPDATE_WALL with no known version must refuse (permanent 400), not send an unchecked change')
+  else passed.push('UPDATE_WALL with no known version is refused, never sent unchecked')
+
+  // The response's version becomes the next one sent.
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, opts) => {
+    fetchCalls.push({ url, method: opts?.method ?? 'GET', body: opts?.body })
+    return { ok: true, json: async () => ({ data: { id: 'erpWall1', version: 6 } }), text: async () => '' }
+  }
+  await fireLiveOp('UPDATE_WALL', { ifcGlobalId: 'WallIfc000000000000001', height: 131 }, mockConn)
+  if (knownRowVersion('erpWall1') !== 6) failed.push('UPDATE_WALL response version was not recorded')
+  else passed.push('the PATCH response version is recorded for the next change')
+
+  // Someone else changed the wall: 409 → read-only latch, the op is not re-sent.
+  _resetEditorWriteGuard()
+  globalThis.fetch = async (url, opts) => {
+    fetchCalls.push({ url, method: opts?.method ?? 'GET', body: opts?.body })
+    return { ok: false, status: 409, json: async () => ({}), text: async () => 'version' }
+  }
+  fetchCalls.length = 0
+  let clashThrew = false
+  try { await fireLiveOp('UPDATE_WALL', { ifcGlobalId: 'WallIfc000000000000001', height: 132 }, mockConn) } catch { clashThrew = true }
+  if (!clashThrew || !isEditorHardReadOnly() || fetchCalls.length !== 1) {
+    failed.push('a 409 on a shape PATCH must throw once and latch the editor read-only')
+  } else passed.push('a version clash on a shape PATCH latches read-only (no re-send)')
+  _resetEditorWriteGuard()
+  globalThis.fetch = realFetch
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

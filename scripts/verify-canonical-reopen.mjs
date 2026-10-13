@@ -8,6 +8,9 @@
 //   - checksum mismatch on R2 → falls back to the IDB local snapshot
 //   - no R2 doc, IDB present → loads from IDB
 //   - neither present → 'empty' (blank canvas; loadProject not called with geometry)
+//   - XR-15: unsent local edits on the server's CURRENT version load (they are the
+//     newest copy); unsent local edits on an OLDER version are a clash — the server's
+//     copy loads, the local one is kept aside and never uploaded
 //
 // Pure Node: in-memory IDB + a fake-backend global fetch routing /state vs /document.
 
@@ -17,6 +20,7 @@ import { setAssetStorage } from '../src/projects/storage/getAssetStorage.js'
 import { initLiveSync, resolveErpId, teardownLiveSync } from '../src/projects/liveSync.js'
 import { buildSnapshotDoc } from '../src/projects/canonicalDoc.js'
 import { reopenCanvas } from '../src/projects/canonicalReopen.js'
+import { writeCanonicalQueueMeta, readCanonicalQueueMeta } from '../src/projects/canonicalSyncQueue.js'
 
 let pass = 0, fail = 0
 function ok(label, cond, detail = '') {
@@ -131,6 +135,37 @@ async function main() {
   res = await reopenCanvas(conn, 'bld', (d) => { loaded = d })
   ok("source === 'integrity-failed' (NOT 'empty')", res.source === 'integrity-failed')
   ok('loadProject NOT called (blank, but writes will be gated)', loaded === null)
+
+  // ── 6. Unsent local edits made ON the server's current version → load them ──
+  header('Unsent local edits on the current server version → the local copy is the newest (XR-15)')
+  const localState = topology(); localState.rooms.r1.name = 'Edited offline'
+  const localDoc = await buildSnapshotDoc(localState)
+  const mem6 = makeMemoryAdapter(); setAssetStorage(mem6); teardownLiveSync(); initLiveSync(conn)
+  await mem6.put(DB_STORES.SNAPSHOTS, 'bld', localDoc)
+  await writeCanonicalQueueMeta('bld', { baseVersion: 4, dirty: true })
+  docMode = 'valid'; docVersion = 4
+  loaded = null
+  res = await reopenCanvas(conn, 'bld', (d) => { loaded = d })
+  ok("source === 'idb-unsent'", res.source === 'idb-unsent')
+  ok('the local (newer) copy is on the canvas', loaded?.rooms?.r1?.name === 'Edited offline')
+  ok('the upload base is the server version it descends from (4)', res.snapshotVersion === 4)
+  ok('no clash', res.clash === null)
+
+  // ── 7. Unsent local edits made on an OLDER version → clash: server copy wins ──
+  header('Unsent local edits on an older version → clash: newer server copy loads, local kept aside, never sent')
+  const mem7 = makeMemoryAdapter(); setAssetStorage(mem7); teardownLiveSync(); initLiveSync(conn)
+  await mem7.put(DB_STORES.SNAPSHOTS, 'bld', localDoc)
+  await writeCanonicalQueueMeta('bld', { baseVersion: 2, dirty: true })
+  docMode = 'valid'; docVersion = 6 // someone else saved v3..v6 since
+  loaded = null
+  res = await reopenCanvas(conn, 'bld', (d) => { loaded = d })
+  ok("source === 'r2' (the newer server copy)", res.source === 'r2')
+  ok('the server copy is on the canvas, not the stale local one', deepEq(loaded, docPayload))
+  ok('the clash is reported (local v2 vs server v6)', deepEq(res.clash, { localBaseVersion: 2, serverVersion: 6 }))
+  const meta7 = await readCanonicalQueueMeta('bld')
+  ok('the stale copy will NOT be uploaded (unsent flag cleared, base = 6)', deepEq(meta7, { baseVersion: 6, dirty: false }))
+  const kept = await mem7.getAll(DB_STORES.SNAPSHOTS, 'bld:clash:v2')
+  ok('the stale local copy is kept aside, not destroyed', kept.length === 1 && kept[0].checksum === localDoc.checksum)
   teardownLiveSync()
 
   console.log(`\n${fail === 0 ? '✓ PASS' : '✗ FAIL'} — ${pass} passed, ${fail} failed`)

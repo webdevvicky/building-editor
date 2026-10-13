@@ -8,7 +8,9 @@
 //     with NO field lost, reordered, normalized, or reconstructed
 //   - durable upload + baseVersion advance
 //   - retry after a transient failure
-//   - stale baseVersion → 409 → refetch authoritative version, never overwrite
+//   - stale baseVersion → 409 → NEVER re-sent on the newer number (XR-05): a clash
+//     keeps the copy aside and latches read-only; the server holding OUR document
+//     (a lost response) is recognised by checksum and adopted
 //   - autosave persists to IDB and survives a refresh / browser restart
 //
 // Pure Node: an in-memory IDB adapter + a fake-backend global fetch. This path
@@ -26,6 +28,7 @@ import {
   getCanonicalBaseVersion, isCanonicalDirty, installCanonicalAutosave,
   _setDirtyForTest,
 } from '../src/projects/canonicalSyncQueue.js'
+import { isEditorHardReadOnly, _resetEditorWriteGuard } from '../src/projects/editorWriteGuard.js'
 
 let pass = 0, fail = 0
 function ok(label, cond, detail = '') {
@@ -41,6 +44,7 @@ let putFailsLeft = 0
 let force409 = false
 let forceGetVersion = null
 let lastPutBody = null
+let putCount = 0
 
 globalThis.fetch = async (url, opts = {}) => {
   const method = opts.method ?? 'GET'
@@ -56,6 +60,7 @@ globalThis.fetch = async (url, opts = {}) => {
     }
   }
   // PUT
+  putCount++
   if (force409) return { ok: false, status: 409, json: async () => ({}), text: async () => 'stale-base' }
   if (putFailsLeft > 0) { putFailsLeft--; return { ok: false, status: 503, json: async () => ({}), text: async () => 'unavailable' } }
   lastPutBody = JSON.parse(opts.body)
@@ -66,7 +71,7 @@ globalThis.fetch = async (url, opts = {}) => {
 
 const conn = { erpUrl: 'http://erp.test', getToken: async () => 'scoped-token' }
 
-function resetBackend() { backend.version = 0; backend.stored = null; putFailsLeft = 0; force409 = false; forceGetVersion = null; lastPutBody = null }
+function resetBackend() { backend.version = 0; backend.stored = null; putFailsLeft = 0; force409 = false; forceGetVersion = null; lastPutBody = null; putCount = 0 }
 
 // ── A topology exercising every preservation-critical field ──────────────────
 function buildTopologyState() {
@@ -147,7 +152,7 @@ async function main() {
   resetBackend()
   const mem = (await import('../src/projects/storage/getAssetStorage.js')).getAssetStorage()
   await initCanonicalSyncQueue(conn, 'bld-1')
-  ok('baseVersion seeded from server (0)', getCanonicalBaseVersion() === 0)
+  ok('baseVersion starts at 0 (a new building: nothing loaded, nothing persisted)', getCanonicalBaseVersion() === 0)
   await mem.put(DB_STORES.SNAPSHOTS, 'bld-1', doc)
   _setDirtyForTest()
   const r3 = await sync()
@@ -177,21 +182,51 @@ async function main() {
   ok('second attempt uploads', r4b === 'uploaded')
   ok('baseVersion advanced after retry', getCanonicalBaseVersion() === 1)
 
-  // ── 5. Stale baseVersion → 409 → refetch, never overwrite ─────────────────
-  header('Stale baseVersion → 409 → refetch authoritative version')
-  teardownCanonicalSyncQueue(); resetBackend()
+  // ── 5. Stale baseVersion → 409 → a CLASH: never re-sent on the newer number ──
+  header('Stale baseVersion → 409 → clash: kept aside, read-only, never re-sent (XR-05)')
+  teardownCanonicalSyncQueue(); resetBackend(); _resetEditorWriteGuard()
   setAssetStorage(makeMemoryAdapter())
   const mem5 = (await import('../src/projects/storage/getAssetStorage.js')).getAssetStorage()
-  backend.version = 2 // server already at v2
-  await initCanonicalSyncQueue(conn, 'bld-1')
-  ok('baseVersion seeded to server v2', getCanonicalBaseVersion() === 2)
+  backend.version = 2 // the canvas was loaded from v2
+  await initCanonicalSyncQueue(conn, 'bld-1', { knownBaseVersion: 2 })
+  ok('baseVersion = the version the canvas was loaded from (2)', getCanonicalBaseVersion() === 2)
   await mem5.put(DB_STORES.SNAPSHOTS, 'bld-1', doc)
-  force409 = true; forceGetVersion = 5 // server advanced to v5 elsewhere
+  force409 = true; forceGetVersion = 5 // someone else saved v5 elsewhere
+  backend.stored = { snapshotVersion: 5, checksum: 'sha256:someone-elses-document', payload: { nodes: {} } }
   _setDirtyForTest()
   const r5 = await sync()
-  ok('409 reported as conflict-retry (not dropped)', r5 === 'conflict-retry')
-  ok('refetched the authoritative baseVersion (5)', getCanonicalBaseVersion() === 5)
-  ok('still dirty (will retry at the corrected version)', isCanonicalDirty() === true)
+  ok("409 from another writer reported as 'conflict'", r5 === 'conflict')
+  ok('the newer number (5) was NOT adopted — base stays 2', getCanonicalBaseVersion() === 2)
+  ok('not dirty any more (the copy is not re-sent after a reload either)', isCanonicalDirty() === false)
+  ok('the editor is latched read-only (reload to open the newer version)', isEditorHardReadOnly() === true)
+  const clashCopies = await mem5.getAll(DB_STORES.SNAPSHOTS, 'bld-1:clash:v2')
+  ok('the local copy is kept aside, never destroyed', clashCopies.length === 1 && clashCopies[0].checksum === doc.checksum)
+  _resetEditorWriteGuard()
+  const r5b = await sync()
+  ok('nothing is re-sent afterwards (exactly one PUT in total)', r5b === 'idle' && putCount === 1, `PUTs=${putCount}`)
+
+  // ── 5b. 409 but the server holds OUR document (a PUT landed, its response was lost)
+  header('409 on our own landed write (lost response) → adopt its number, no clash')
+  teardownCanonicalSyncQueue(); resetBackend(); _resetEditorWriteGuard()
+  setAssetStorage(makeMemoryAdapter())
+  const mem5b = (await import('../src/projects/storage/getAssetStorage.js')).getAssetStorage()
+  await initCanonicalSyncQueue(conn, 'bld-1', { knownBaseVersion: 2 })
+  await mem5b.put(DB_STORES.SNAPSHOTS, 'bld-1', doc)
+  force409 = true; forceGetVersion = 3
+  backend.stored = { snapshotVersion: 3, checksum: doc.checksum, payload: doc.payload }
+  _setDirtyForTest()
+  const r5c = await sync()
+  ok("recognised by checksum → 'uploaded'", r5c === 'uploaded')
+  ok('base advanced to the server number of OUR write (3)', getCanonicalBaseVersion() === 3)
+  ok('not latched read-only', isEditorHardReadOnly() === false)
+
+  // ── 5c. A restart never re-seeds the base from the server (XR-15) ──────────
+  header('Restart: the base comes from the loaded canvas, never from a server fetch')
+  teardownCanonicalSyncQueue(); resetBackend()
+  setAssetStorage(makeMemoryAdapter())
+  backend.version = 9 // the server moved on while this device was closed
+  await initCanonicalSyncQueue(conn, 'bld-1')
+  ok('no knownBaseVersion → the persisted base (none → 0), not the server\'s 9', getCanonicalBaseVersion() === 0)
 
   // ── 6. Autosave persists to IDB and survives a restart ────────────────────
   header('Autosave persists to IDB + survives refresh/restart')

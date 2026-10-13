@@ -4,9 +4,52 @@
 const IN_TO_MM = 25.4
 function inToMm(v) { return Math.round(v * IN_TO_MM) }
 
+import { engageEditorReadOnly } from './editorWriteGuard.js'
+
 let _liveMode = false
 let _conn = null
 const _idMap = new Map()
+
+// Row versions (ERP id → `version`) of the rooms and walls this session knows, for the
+// version-checked shape PATCH (CONC-27: the ERP refuses a room/wall shape change without
+// the version it was made against). Seeded from GET /state and refreshed from every
+// room/wall response, so the version sent is always the one this editor last saw. A 409
+// means someone else changed the row since: the editor latches read-only and reloads —
+// it never re-sends on the newer version.
+const _versionMap = new Map()
+
+const VERSION_CLASH_MESSAGE =
+  'Someone else changed this design while you were editing, so your change was not saved over theirs. ' +
+  'Editing is paused — reload to open the newer version.'
+
+function _noteVersion(res) {
+  const row = res?.data ?? res
+  if (row?.id && typeof row.version === 'number') _versionMap.set(row.id, row.version)
+}
+
+function _statusOf(err) {
+  const m = String(err?.message ?? '').match(/→ (\d{3}):/)
+  return m ? Number(m[1]) : null
+}
+
+// A shape PATCH carries the row version this editor last saw; without one it is not sent
+// (permanent `→ 400:` — never a last-write-wins write).
+function _requireVersion(opType, erpId) {
+  const version = _versionMap.get(erpId)
+  if (typeof version === 'number') return version
+  throw new Error(`[liveSync] ${opType} → 400: no known row version for ${erpId} — refusing an unchecked shape change.`)
+}
+
+async function _versionedPatch(path, body, c) {
+  try {
+    const res = await _request('PATCH', path, body, c)
+    _noteVersion(res)
+    return res
+  } catch (err) {
+    if (_statusOf(err) === 409) engageEditorReadOnly(VERSION_CLASH_MESSAGE)
+    throw err
+  }
+}
 
 // A PATCH/DELETE whose target id never resolved must NOT reach the wire as `/null`:
 // one such op is rejected by the backend and its failure lands on the status badge.
@@ -113,6 +156,7 @@ export function initLiveSync(conn) {
   // (cross-building write → backend 403). Never rely on teardownLiveSync()
   // having run between launches.
   _idMap.clear()
+  _versionMap.clear()
   _conn = conn
   _liveMode = true
   console.log('[LIVE] _liveMode set to true')
@@ -122,6 +166,12 @@ export function teardownLiveSync() {
   _conn = null
   _liveMode = false
   _idMap.clear()
+  _versionMap.clear()
+}
+
+/** The row version this session last saw for an ERP room/wall id (test seam + diagnostics). */
+export function knownRowVersion(erpId) {
+  return _versionMap.get(erpId)
 }
 
 export function registerErpId(editorIfcId, erpId) {
@@ -240,6 +290,7 @@ export async function fireLiveOp(opType, payload, conn) {
       }, c)
       const erpId = _extractErpId(res)
       if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
+      _noteVersion(res)
       break
     }
 
@@ -254,9 +305,9 @@ export async function fireLiveOp(opType, payload, conn) {
       if (payload.thickness !== undefined) body.thicknessMm = inToMm(payload.thickness)
       if (payload.orientation !== undefined) body.orientation = payload.orientation
       if (payload.angleDeg !== undefined) body.angleDeg = payload.angleDeg
-      if (payload.version !== undefined) body.version = payload.version
       if (payload.lengthMm !== undefined) body.lengthMm = payload.lengthMm
-      res = await _request('PATCH', `/geometry/walls/${wallErpId}`, body, c)
+      body.version = _requireVersion(opType, wallErpId)
+      res = await _versionedPatch(`/geometry/walls/${wallErpId}`, body, c)
       break
     }
 
@@ -414,6 +465,7 @@ export async function fireLiveOp(opType, payload, conn) {
       res = await _request('POST', `/geometry/floors/${floorErpId}/rooms`, body, c)
       const erpId = _extractErpId(res)
       if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
+      _noteVersion(res)
       break
     }
 
@@ -423,7 +475,8 @@ export async function fireLiveOp(opType, payload, conn) {
       const body = { ...payload }
       delete body.ifcGlobalId
       delete body.roomErpId
-      res = await _request('PATCH', `/geometry/rooms/${roomErpId}`, body, c)
+      body.version = _requireVersion(opType, roomErpId)
+      res = await _versionedPatch(`/geometry/rooms/${roomErpId}`, body, c)
       break
     }
 
@@ -766,11 +819,22 @@ export async function seedIdMapFromErp(conn) {
   const c = conn ?? _conn
   const data = await _request('GET', `/geometry/buildings/${c.buildingId}/state`, undefined, c)
   const state = data?.data ?? data ?? {}
+  return seedIdMapFromState(state, c)
+}
 
+/**
+ * Seed the id-map, the row versions and the floor map from a GET /state payload (the
+ * projection contract). Shared by reopen and "Load from ERP", which both read /state.
+ */
+export function seedIdMapFromState(state, conn) {
+  const c = conn ?? _conn
   const seed = (arr) => {
     for (const e of arr ?? []) if (e?.sourceEditorId && e?.id) _idMap.set(e.sourceEditorId, e.id)
   }
   seed(state.nodes); seed(state.rooms); seed(state.walls); seed(state.elements); seed(state.floors)
+  for (const row of [...(state.rooms ?? []), ...(state.walls ?? [])]) {
+    if (row?.id && typeof row.version === 'number') _versionMap.set(row.id, row.version)
+  }
   // Openings live nested under walls[].openings[] (no top-level array), so iterate
   // walls and seed each opening (sourceEditorId → id) so reopened openings
   // round-trip to UPDATE/DELETE instead of a duplicate ADD.
