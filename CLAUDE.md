@@ -263,10 +263,12 @@ npm run lint      # eslint flat config
 npm run preview   # serve the last build locally (vite preview)
 ```
 
-**Deploy:** GitHub → Actions → "Deploy editor" → Run workflow (`.github/workflows/deploy-editor.yml`). It runs every
-verify harness (only `verify-legacy-shim`, the KD-31 date reminder, never blocks), builds, uploads `dist/` as
-`releases/<sha>` under the site folder and switches the `current` link in one step; the last 5 releases stay.
-Rollback: run it with `rollback_to` = an earlier release's full SHA. CloudPanel's Root Directory for the site is
+**Deploy:** automatic on every push to `main` that changes the editor (`src/`, `public/`, `index.html`,
+`vite.config.js`, `package*.json`, `scripts/`), or GitHub → Actions → "Deploy editor" → Run workflow
+(`.github/workflows/deploy-editor.yml`; erp-saas D-212, D-213). It runs every verify harness (only
+`verify-legacy-shim`, the KD-31 date reminder, never blocks), builds, and asks the server's `jrm-editor-receive` (the
+only program the deploy key may run; erp-saas `deploy/editor/`) to store `dist/` as `releases/<sha>` and switch the
+`current` link in one step; the 5 newest releases stay. Rollback: run it with `rollback_to` = an earlier full SHA. CloudPanel's Root Directory for the site is
 `editor.jrmconstruction.org/current`. The editor holds no secrets, so living in `htdocs` is correct for it.
 
 ERP-connected launch: the ERP mints `POST /api/v1/auth/editor-session` and opens the editor with

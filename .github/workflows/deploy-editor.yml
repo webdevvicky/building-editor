@@ -1,18 +1,29 @@
 name: Deploy editor
 
-# Owner decision (2026-10-21, erp-saas D-212): the editor is static files served by nginx on the company's
-# Hostinger VPS, CloudPanel "Static HTML" site editor.jrmconstruction.org, deployed only by pressing "Run workflow".
-# It runs the verify harnesses, builds dist/, uploads it as a new release folder and switches the site's `current`
-# link to it in one step (visitors never see a half-uploaded version). The last 5 releases stay on the server.
-# Rollback: run it with "rollback_to" = an earlier release's commit SHA (no build; the link switches back).
+# Owner decisions (2026-10-21, erp-saas D-212, D-213): the editor is static files served by nginx on the company's
+# Hostinger VPS (CloudPanel "Static HTML" site editor.jrmconstruction.org). It deploys automatically on every push to
+# main that changes the editor, and by "Run workflow" for a rollback. It runs the verify harnesses, builds dist/,
+# then asks the server's receiver (jrm-editor-receive, the only thing the deploy key may run; no shell) to store it
+# as releases/<sha> and switch the site's `current` link to it in one step. The last 5 releases stay on the server.
+# Rollback: run it with "rollback_to" = an earlier release's full commit SHA (no build; the link switches back).
 #
 # Repository variables (Settings → Secrets and variables → Actions → Variables):
 #   EDITOR_HOST = editor.jrmconstruction.org
 #   DEPLOY_USER = jrmconstruction-editor          (the CloudPanel site user)
-#   SITE_DIR    = /home/jrmconstruction-editor/htdocs/editor.jrmconstruction.org
-#                 (CloudPanel's Root Directory for the site is editor.jrmconstruction.org/current)
+# (the site folder is fixed on the server, in authorized_keys; CloudPanel's Root Directory is <domain>/current)
 # Secrets: EDITOR_SSH_HOST, EDITOR_SSH_KEY, EDITOR_SSH_KNOWN_HOSTS.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/**'
+      - '.github/workflows/deploy-editor.yml'
   workflow_dispatch:
     inputs:
       rollback_to:
@@ -20,6 +31,7 @@ on:
         type: string
         default: ""
 
+# Releases never overlap; a switch is one rename, so finishing an older run first is harmless.
 concurrency:
   group: deploy-editor
   cancel-in-progress: false
@@ -30,7 +42,6 @@ permissions:
 env:
   EDITOR_HOST: ${{ vars.EDITOR_HOST }}
   DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-  SITE_DIR: ${{ vars.SITE_DIR }}
   ROLLBACK_TO: ${{ inputs.rollback_to }}
 
 jobs:
@@ -41,7 +52,7 @@ jobs:
       - name: Settings
         id: release
         run: |
-          for v in EDITOR_HOST DEPLOY_USER SITE_DIR; do
+          for v in EDITOR_HOST DEPLOY_USER; do
             [ -n "${!v}" ] || { echo "Set the $v repository variable." >&2; exit 1; }
           done
           if [ -n "$ROLLBACK_TO" ]; then
@@ -99,22 +110,14 @@ jobs:
           HOST: ${{ secrets.EDITOR_SSH_HOST }}
           SHA: ${{ steps.release.outputs.sha }}
         run: |
-          # Into a temporary folder first, then renamed: a release folder is either complete or absent.
-          tar -C dist -cf - . | ssh "$DEPLOY_USER@$HOST" \
-            "set -e; R='$SITE_DIR/releases/$SHA'; rm -rf \"\$R.tmp\"; mkdir -p \"\$R.tmp\"; tar -C \"\$R.tmp\" -xf -; rm -rf \"\$R\"; mv \"\$R.tmp\" \"\$R\""
+          tar -C dist -cf - . | ssh "$DEPLOY_USER@$HOST" "upload $SHA"
 
       - name: Switch to the release
         env:
           HOST: ${{ secrets.EDITOR_SSH_HOST }}
           SHA: ${{ steps.release.outputs.sha }}
         run: |
-          ssh "$DEPLOY_USER@$HOST" "set -e; cd '$SITE_DIR'
-            [ -f releases/$SHA/index.html ] || { echo 'No release $SHA on the server.' >&2; exit 1; }
-            ln -sfn releases/$SHA current.next
-            mv -Tf current.next current
-            # Keep the 5 newest releases, never the one now live.
-            ls -1t releases | grep -vx '$SHA' | tail -n +5 | while read -r old; do rm -rf \"releases/\$old\"; done
-            echo \"live: \$(readlink current)\""
+          ssh "$DEPLOY_USER@$HOST" "switch $SHA"
 
       - name: Smoke check
         run: |
