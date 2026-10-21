@@ -13,8 +13,9 @@ editor-side BOQ and an IS-2502 bar-bending schedule. When launched from the JRM 
 Building Editor: it writes a canonical Building Document and a live geometry projection to `erp-saas`.
 
 - **Stack:** Vite 8 + React 19 + Zustand 5, plain JavaScript (JSDoc, no TypeScript); jsPDF + jspdf-autotable,
-  SheetJS (`xlsx`), pdfjs-dist (underlay import), lucide-react; deployed to Cloudflare Workers
-  (`@cloudflare/vite-plugin` + `wrangler`). IndexedDB-first persistence; no backend of its own.
+  SheetJS (`xlsx`), pdfjs-dist (underlay import), lucide-react. Static files only: `npm run build` → `dist/`, served
+  by nginx at `https://editor.jrmconstruction.org` (CloudPanel Static HTML site on the company VPS; erp-saas D-212),
+  deployed by the manual GitHub workflow "Deploy editor". IndexedDB-first persistence; no backend of its own.
 - **Structure:** `src/main.jsx` → `src/App.jsx` (every panel mounted flat, self-gating) → `components/Canvas.jsx`.
   One flat store `src/store.js` (2,526 lines) + two slice factories (`structuralSlice.js`, `mepSlice.js`).
   Pure domain in `topology/ snap/ quantities/ mep/ bbs/ specs/ boq/ iso/`; ERP sync + local persistence in
@@ -259,9 +260,14 @@ npm install
 npm run dev       # Vite dev server
 npm run build     # → dist/
 npm run lint      # eslint flat config
-npm run preview   # build + wrangler dev
-npm run deploy    # build + wrangler deploy
+npm run preview   # serve the last build locally (vite preview)
 ```
+
+**Deploy:** GitHub → Actions → "Deploy editor" → Run workflow (`.github/workflows/deploy-editor.yml`). It runs every
+verify harness (only `verify-legacy-shim`, the KD-31 date reminder, never blocks), builds, uploads `dist/` as
+`releases/<sha>` under the site folder and switches the `current` link in one step; the last 5 releases stay.
+Rollback: run it with `rollback_to` = an earlier release's full SHA. CloudPanel's Root Directory for the site is
+`editor.jrmconstruction.org/current`. The editor holds no secrets, so living in `htdocs` is correct for it.
 
 ERP-connected launch: the ERP mints `POST /api/v1/auth/editor-session` and opens the editor with
 `#erpLaunch?buildingId&token&erpUrl&refreshToken&expiresAt` (stripped on boot). In DEV, `window.useStore` is exposed.
@@ -275,7 +281,6 @@ ERP-connected launch: the ERP mints `POST /api/v1/auth/editor-session` and opens
 | `react` / `react-dom` | ^19.2.5 | UI |
 | `zustand` | ^5.0.13 | State |
 | `vite` (dev) | ^8.0.10 | Build |
-| `@cloudflare/vite-plugin` (dev) | ^1.40.2 | Workers integration (`vite.config.js`; `wrangler.jsonc` name `building-editor`, SPA assets) |
 | `jspdf` / `jspdf-autotable` | ^4.2.1 / ^5.0.7 | PDF export |
 | `xlsx` | ^0.18.5 | Excel export (BOQ + BBS) |
 | `pdfjs-dist` | ^4.10.38 | PDF underlay import |

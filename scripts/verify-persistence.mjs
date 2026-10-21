@@ -17,6 +17,7 @@ import {
   splitDataIntoChunks, PROJECT_CHUNKS, DB_STORES,
 } from '../src/projects/storage/indexedDb.js'
 import { uid } from '../src/lib/ids.js'
+import { SCHEMA_VERSION } from '../src/operations/_schemaVersion.js'
 
 const passed = []
 const failed = []
@@ -34,6 +35,8 @@ check('createProject sets name', rec1.name === 'Test A')
 check('createProject sets type', rec1.type === 'Residential')
 check('createProject sets timestamps', rec1.created > 0 && rec1.updated > 0)
 
+// Two creates in the same millisecond share a timestamp and their order is undefined: let the clock pass rec1's.
+while (Date.now() <= rec1.updated) await new Promise((r) => setTimeout(r, 1))
 const rec2 = await p.createProject('Test B', 'Commercial')
 const list = await p.listProjects()
 check('listProjects returns 2 entries', list.length === 2)
@@ -382,8 +385,8 @@ const fakeStoreState = {
   projectSettings: { foo: 'bar' },
 }
 const builtSnap = buildSnapshot(fakeStoreState)
-check('autosave: buildSnapshot stamps version 7',
-      builtSnap.version === 7)
+check(`autosave: buildSnapshot stamps the current SCHEMA_VERSION (${SCHEMA_VERSION})`,
+      builtSnap.version === SCHEMA_VERSION)
 check('autosave: buildSnapshot includes MEP collections',
       builtSnap.plumbingFixtures?.f1?.id === 'f1')
 check('autosave: buildSnapshot includes rates + projectSettings',

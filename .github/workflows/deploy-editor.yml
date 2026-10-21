@@ -1,0 +1,125 @@
+name: Deploy editor
+
+# Owner decision (2026-10-21, erp-saas D-212): the editor is static files served by nginx on the company's
+# Hostinger VPS, CloudPanel "Static HTML" site editor.jrmconstruction.org, deployed only by pressing "Run workflow".
+# It runs the verify harnesses, builds dist/, uploads it as a new release folder and switches the site's `current`
+# link to it in one step (visitors never see a half-uploaded version). The last 5 releases stay on the server.
+# Rollback: run it with "rollback_to" = an earlier release's commit SHA (no build; the link switches back).
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   EDITOR_HOST = editor.jrmconstruction.org
+#   DEPLOY_USER = jrmconstruction-editor          (the CloudPanel site user)
+#   SITE_DIR    = /home/jrmconstruction-editor/htdocs/editor.jrmconstruction.org
+#                 (CloudPanel's Root Directory for the site is editor.jrmconstruction.org/current)
+# Secrets: EDITOR_SSH_HOST, EDITOR_SSH_KEY, EDITOR_SSH_KNOWN_HOSTS.
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_to:
+        description: "Switch back to an earlier release (its commit SHA) instead of building; empty = build this branch"
+        type: string
+        default: ""
+
+concurrency:
+  group: deploy-editor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  EDITOR_HOST: ${{ vars.EDITOR_HOST }}
+  DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+  SITE_DIR: ${{ vars.SITE_DIR }}
+  ROLLBACK_TO: ${{ inputs.rollback_to }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: editor
+    steps:
+      - name: Settings
+        id: release
+        run: |
+          for v in EDITOR_HOST DEPLOY_USER SITE_DIR; do
+            [ -n "${!v}" ] || { echo "Set the $v repository variable." >&2; exit 1; }
+          done
+          if [ -n "$ROLLBACK_TO" ]; then
+            # The value reaches a remote shell: accept only a commit SHA.
+            [[ "$ROLLBACK_TO" =~ ^[0-9a-f]{40}$ ]] || { echo "rollback_to must be a full 40-character commit SHA." >&2; exit 1; }
+            echo "sha=$ROLLBACK_TO" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: inputs.rollback_to == ''
+      - uses: actions/setup-node@v4
+        if: inputs.rollback_to == ''
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        if: inputs.rollback_to == ''
+        run: npm ci
+      - name: Quality gate (verify harnesses)
+        if: inputs.rollback_to == ''
+        run: |
+          # verify-legacy-shim is a dated reminder (KD-31: the legacy accessors' removal date passed), not a test of
+          # behaviour; it is reported here and never blocks. Every other harness must pass.
+          failed=""
+          for f in scripts/verify-*.mjs; do
+            name="$(basename "$f")"
+            if node --experimental-loader ./scripts/resolver-hook.mjs "$f" > "/tmp/$name.log" 2>&1; then
+              echo "pass  $name"
+            elif [ "$name" = "verify-legacy-shim.mjs" ]; then
+              echo "note  $name (KD-31 reminder, not blocking)"
+            else
+              echo "FAIL  $name"; tail -20 "/tmp/$name.log"; failed="$failed $name"
+            fi
+          done
+          [ -z "$failed" ] || { echo "Failing harnesses:$failed" >&2; exit 1; }
+      - name: Build
+        if: inputs.rollback_to == ''
+        run: npm run build
+
+      - name: SSH key and known host
+        env:
+          SSH_KEY: ${{ secrets.EDITOR_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.EDITOR_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload the release
+        if: inputs.rollback_to == ''
+        env:
+          HOST: ${{ secrets.EDITOR_SSH_HOST }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          # Into a temporary folder first, then renamed: a release folder is either complete or absent.
+          tar -C dist -cf - . | ssh "$DEPLOY_USER@$HOST" \
+            "set -e; R='$SITE_DIR/releases/$SHA'; rm -rf \"\$R.tmp\"; mkdir -p \"\$R.tmp\"; tar -C \"\$R.tmp\" -xf -; rm -rf \"\$R\"; mv \"\$R.tmp\" \"\$R\""
+
+      - name: Switch to the release
+        env:
+          HOST: ${{ secrets.EDITOR_SSH_HOST }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          ssh "$DEPLOY_USER@$HOST" "set -e; cd '$SITE_DIR'
+            [ -f releases/$SHA/index.html ] || { echo 'No release $SHA on the server.' >&2; exit 1; }
+            ln -sfn releases/$SHA current.next
+            mv -Tf current.next current
+            # Keep the 5 newest releases, never the one now live.
+            ls -1t releases | grep -vx '$SHA' | tail -n +5 | while read -r old; do rm -rf \"releases/\$old\"; done
+            echo \"live: \$(readlink current)\""
+
+      - name: Smoke check
+        run: |
+          html="$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "https://${EDITOR_HOST}/")"
+          echo "$html" | grep -q 'id="root"' || { echo "The page is not the editor." >&2; exit 1; }
+          asset="$(echo "$html" | grep -oE '/assets/[^"]+\.js' | head -1)"
+          curl -fsS -o /dev/null "https://${EDITOR_HOST}${asset}"
+          echo "Live: https://${EDITOR_HOST} (${asset})"

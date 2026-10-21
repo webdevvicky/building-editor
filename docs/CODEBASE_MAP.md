@@ -14,7 +14,7 @@ mapper: "cartographer (Opus orchestration + 3 Opus audit agents + synthesis), fu
 Vite + React 19 + Zustand 5 SPA (JavaScript, no TypeScript) for drawing Indian residential buildings (walls, rooms,
 structure, MEP) and producing a live editor-side BOQ + IS-2502 BBS. It is the upstream **Building Editor** for the JRM ERP
 (`erp-saas`): in ERP-launch mode it writes a **canonical Building Document** (R2, via the ERP) and a **live geometry
-projection** (`/api/v1/geometry/**`). No backend of its own; IndexedDB-first persistence; deployed to Cloudflare Workers.
+projection** (`/api/v1/geometry/**`). No backend of its own; IndexedDB-first persistence; static files served by nginx at editor.jrmconstruction.org (erp-saas D-212).
 
 ---
 
@@ -114,7 +114,7 @@ carries geometry. The ERP computes its own quantities and is authoritative for e
 | `src/compute/` | 3 / 343 | **DEAD** computation DAG (no src consumer) |
 | `src/store/legacyAccessors.js` | 130 | **EXPIRED** slice-split shim (kill date 2026-08-15) |
 | `scripts/` | 54 | 52 `verify-*.mjs` + `validate-bbs-karthick.mjs` + `resolver-hook.mjs` |
-| root | — | `vite.config.js` (react + `@cloudflare/vite-plugin`), `wrangler.jsonc`, `eslint.config.js`; `index.html` title and `package.json` name are still `house-layout`; two sample BBS workbooks (`*.xlsx`) |
+| root | — | `vite.config.js` (react), `.github/workflows/deploy-editor.yml`, `eslint.config.js`; `index.html` title and `package.json` name are still `house-layout`; two sample BBS workbooks (`*.xlsx`) |
 
 No `tests/` dir, no Jest/Vitest, no npm `verify`/`test` script, no git hooks (`.git/hooks` = samples only).
 
