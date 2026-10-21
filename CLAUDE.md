@@ -15,7 +15,7 @@ Building Editor: it writes a canonical Building Document and a live geometry pro
 - **Stack:** Vite 8 + React 19 + Zustand 5, plain JavaScript (JSDoc, no TypeScript); jsPDF + jspdf-autotable,
   SheetJS (`xlsx`), pdfjs-dist (underlay import), lucide-react. Static files only: `npm run build` → `dist/`, served
   by nginx at `https://editor.jrmconstruction.org` (CloudPanel Static HTML site on the company VPS; erp-saas D-212),
-  deployed by the manual GitHub workflow "Deploy editor". IndexedDB-first persistence; no backend of its own.
+  deployed by the GitHub workflow "Deploy editor" (automatic on code pushes; see Deploy below). IndexedDB-first persistence; no backend of its own.
 - **Structure:** `src/main.jsx` → `src/App.jsx` (every panel mounted flat, self-gating) → `components/Canvas.jsx`.
   One flat store `src/store.js` (2,526 lines) + two slice factories (`structuralSlice.js`, `mepSlice.js`).
   Pure domain in `topology/ snap/ quantities/ mep/ bbs/ specs/ boq/ iso/`; ERP sync + local persistence in
