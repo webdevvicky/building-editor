@@ -128,8 +128,8 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
 
 ### The write pipeline (`src/projects/`)
 - **`syncCoordinator`** is the only store subscriber in ERP mode: **(1) ACCEPT** — write the canonical doc to IDB
-  `SNAPSHOTS[buildingId]`, mark dirty, debounce (10 s) the upload via `canonicalSyncQueue`; **(2) EMIT** — only then
-  `flushSyncEngine` diffs vs a shadow and enqueues ops. (Invariant #5, accept-before-emit.)
+  `SNAPSHOTS[buildingId]`, mark dirty; **(2) ENQUEUE** — persist that exact document with its projection ops.
+  The FIFO worker uploads the document, declares a server checkpoint, executes mutations with durable IDs and exact request receipts, then seals. Resync uses the same coordinator acceptance path.
 - **`syncEngine`** diffs nodes / walls / rooms, floors, and every `ELEMENT_REGISTRY` kind (structural + MEP + risers);
   openings are diffed by id set only (resizes don't sync — KD-8). Stable identity = `sourceEditorId` =
   `ifcGlobalId` (floors: their `id`, e.g. `'F1'`). Server creates are idempotent by `sourceEditorId`.
@@ -228,6 +228,8 @@ modules free of React/zustand so they load in Node. Full harness table: CODEBASE
 ---
 
 ## Working rules
+
+- Drawing synchronization uses durable snapshot batches with checkpoint and mutation UUIDs from the shared `uid()` helper. The queue uploads the exact canonical snapshot, declares its mutation manifest, sends lineage headers on geometry writes and seals only after server acknowledgements. Failed or dropped dependencies keep the checkpoint incomplete; retries retain the same IDs.
 
 These rules govern how to work in this repo. They were stated in the phase log (now archived) and would otherwise
 be lost.

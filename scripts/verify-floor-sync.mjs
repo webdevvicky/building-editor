@@ -1,3 +1,4 @@
+import { initCheckpointTest } from './checkpoint-test-setup.mjs'
 // scripts/verify-floor-sync.mjs
 //
 // Floor-sync verification — the missing piece that lets a mid-session floor reach
@@ -113,11 +114,12 @@ async function main() {
   setAssetStorage(makeMemoryAdapter())
   calls = []
   teardownLiveSync(); initLiveSync(conn)
+  await initCheckpointTest(conn, BID)
   await initLiveSyncQueue(BID)
   const store = makeStore(baseState([F1]))      // shadow seeds floors {F1}, rooms {}
   startSyncEngine(store, { coordinated: true })  // coordinated → no self-subscribe; we drive flush
   store.setState(baseState([F1, F2], { r2: roomOnF2 })) // add Floor 2 + a room on it
-  flushSyncEngine()                              // coordinator's role, simulated
+  await flushSyncEngine()                              // coordinator's role, simulated
   await drain()
 
   const floorPosts = calls.filter((c) => c.method === 'POST' && /\/geometry\/buildings\/[^/]+\/floors$/.test(c.url))
@@ -143,10 +145,11 @@ async function main() {
   setAssetStorage(makeMemoryAdapter())
   calls = []
   teardownLiveSync(); initLiveSync(conn)
+  await initCheckpointTest(conn, BID)
   await initLiveSyncQueue(BID)
   const store2 = makeStore(baseState([F1, F2], { r2: roomOnF2 })) // shadow already has F1+F2
   startSyncEngine(store2, { coordinated: true })
-  flushSyncEngine() // no change since seed
+  await flushSyncEngine() // no change since seed
   await drain()
   ok('no ADD_FLOOR re-emitted for an already-synced floor', !calls.some((c) => c.method === 'POST' && /\/floors$/.test(c.url)))
   stopSyncEngine(); teardownLiveSyncQueue(); teardownLiveSync()

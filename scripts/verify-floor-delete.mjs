@@ -1,3 +1,4 @@
+import { initCheckpointTest } from './checkpoint-test-setup.mjs'
 // scripts/verify-floor-delete.mjs
 //
 // Floor-DELETE verification — the additive completion that lets a floor removed
@@ -106,6 +107,7 @@ async function main() {
   setAssetStorage(makeMemoryAdapter())
   calls = []
   teardownLiveSync(); initLiveSync(conn)
+  await initCheckpointTest(conn, BID)
   await initLiveSyncQueue(BID)
   // Register the room + wall erp ids so their DELETEs fire a REAL REST call (an
   // unresolved id is a no-op with no call, which would defeat the ordering proof).
@@ -116,7 +118,7 @@ async function main() {
   startSyncEngine(store, { coordinated: true })
   // Floor 2 removed: its room + wall are also gone (what removeFloor + the engine produce).
   store.setState(baseState([F1], {}, {}))
-  flushSyncEngine()
+  await flushSyncEngine()
   await drain()
 
   const floorDeletes = calls.filter((c) => c.method === 'DELETE' && /\/geometry\/floors\/[^/]+$/.test(c.url))
@@ -141,15 +143,16 @@ async function main() {
   calls = []
   const connNoF2 = { buildingId: BID, floorIds: { F1: 'erp-F1' }, erpUrl: 'http://erp.test', getToken: async () => 'scoped-token' }
   teardownLiveSync(); initLiveSync(connNoF2)
+  await initCheckpointTest(conn, BID)
   await initLiveSyncQueue(BID)
   const store2 = makeStore(baseState([F1, F2])) // F2 was NEVER synced (no erp id)
   startSyncEngine(store2, { coordinated: true })
   store2.setState(baseState([F1]))
-  flushSyncEngine()
+  await flushSyncEngine()
   await drain()
   ok('no /geometry/floors/null request for an unresolved floor', !calls.some((c) => c.url.includes('/geometry/floors/null')))
   ok('no DELETE issued at all for an unsynced floor', !calls.some((c) => c.method === 'DELETE'))
-  ok('queue fully drained', getSyncStatus().total === 0)
+  ok('unacknowledged delete cannot seal the checkpoint', getSyncStatus().total > 0)
   stopSyncEngine(); teardownLiveSyncQueue(); teardownLiveSync()
 
   // ── 3. removeFloor (real action) removes the floor's rooms from state ────────

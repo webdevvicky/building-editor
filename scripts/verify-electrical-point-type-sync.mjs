@@ -1,3 +1,4 @@
+import { initCheckpointTest } from './checkpoint-test-setup.mjs'
 // scripts/verify-electrical-point-type-sync.mjs
 //
 // Stream 2 — a placed electrical point's canonical `pointType` must flow through the
@@ -89,6 +90,7 @@ function state(over = {}) {
 
 async function main() {
   setAssetStorage(makeMemoryAdapter())
+  await initCheckpointTest(conn, 'b-1')
   await initLiveSyncQueue('b-1')
   initLiveSync(conn)
 
@@ -98,7 +100,7 @@ async function main() {
   await sleep(20)
 
   // Place an AC point → ADD_ELEMENT POST carrying pointType:'AC'.
-  flushSyncEngine(state({ electricalPoints: { ep1: pt({ pointType: 'AC' }) } }))
+  await flushSyncEngine(state({ electricalPoints: { ep1: pt({ pointType: 'AC' }) } }))
   await waitFor(() => elementPosts().length >= 1)
   const post = elementPosts()[0]
   ok('placing a point POSTs to the elements surface', !!post && post.url === 'http://erp.test/api/v1/geometry/buildings/b-1/elements')
@@ -106,7 +108,7 @@ async function main() {
   ok('ADD_ELEMENT body carries kind + sourceEditorId', post?.body?.kind === 'MEP_ELECTRICAL' && post?.body?.sourceEditorId === 'ep-ifc-1')
 
   // Change the point type AC → SOCKET_16A (immutable update) → UPDATE_ELEMENT PATCH.
-  flushSyncEngine(state({ electricalPoints: { ep1: pt({ pointType: 'SOCKET_16A' }) } }))
+  await flushSyncEngine(state({ electricalPoints: { ep1: pt({ pointType: 'SOCKET_16A' }) } }))
   await waitFor(() => elementPatches().length >= 1)
   const patch = elementPatches()[0]
   ok('changing the type PATCHes the element (re-sync)', !!patch)
@@ -114,7 +116,7 @@ async function main() {
 
   // Re-flush unchanged → no new PATCH (signature stable).
   const n = elementPatches().length
-  flushSyncEngine(state({ electricalPoints: { ep1: pt({ pointType: 'SOCKET_16A' }) } }))
+  await flushSyncEngine(state({ electricalPoints: { ep1: pt({ pointType: 'SOCKET_16A' }) } }))
   await sleep(40)
   ok('re-flush of unchanged type emits no new PATCH', elementPatches().length === n, `${elementPatches().length} patches`)
 

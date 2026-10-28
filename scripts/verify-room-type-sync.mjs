@@ -1,3 +1,4 @@
+import { initCheckpointTest } from './checkpoint-test-setup.mjs'
 // scripts/verify-room-type-sync.mjs
 //
 // A room-TYPE change on an ALREADY-synced room must project to the ERP
@@ -71,6 +72,7 @@ function state({ r1Type = 'OTHER', r1Name = 'Room 1', extraRooms = {} } = {}) {
 
 async function main() {
   setAssetStorage(makeMemoryAdapter())
+  await initCheckpointTest(conn, 'b-1')
   await initLiveSyncQueue('b-1')
   initLiveSync(conn)
 
@@ -81,7 +83,7 @@ async function main() {
   ok('start does not emit for already-synced geometry', roomPosts().length === 0, `${roomPosts().length} posts`)
 
   // ── 1. Incremental type change OTHER → BEDROOM (no "Resync all") ─────────────
-  flushSyncEngine(state({ r1Type: 'BEDROOM' }))
+  await flushSyncEngine(state({ r1Type: 'BEDROOM' }))
   await waitFor(() => roomPosts().length >= 1)
   const p1 = roomPosts()
   ok('type change emits exactly ONE room POST (incremental, not a resync)', p1.length === 1, `${p1.length} posts`)
@@ -91,17 +93,17 @@ async function main() {
 
   // ── 2. Re-flush the SAME state → shadow advanced → no spurious re-sync ───────
   const same = state({ r1Type: 'BEDROOM' })
-  flushSyncEngine(same)
+  await flushSyncEngine(same)
   await sleep(40)
   ok('re-flush of unchanged state emits nothing (shadow advanced)', roomPosts().length === 1, `${roomPosts().length} posts`)
 
   // ── 3. A non-type room change (name — ERP-owned) emits nothing ───────────────
-  flushSyncEngine(state({ r1Type: 'BEDROOM', r1Name: 'Master Bedroom' }))
+  await flushSyncEngine(state({ r1Type: 'BEDROOM', r1Name: 'Master Bedroom' }))
   await sleep(40)
   ok('name-only change does NOT re-sync (guard keyed on roomTypeCode)', roomPosts().length === 1, `${roomPosts().length} posts`)
 
   // ── 4. New room + a type change in the same flush → each emits ONCE ──────────
-  flushSyncEngine(state({
+  await flushSyncEngine(state({
     r1Type: 'KITCHEN', r1Name: 'Master Bedroom',
     extraRooms: { R2: { id: 'R2', ifcGlobalId: 'room-R2', floorId: 'F1', roomShape: 'POLYGON', name: 'Room 2', roomTypeCode: 'BATHROOM', nodeOrder: [], wallIds: [] } },
   }))
@@ -115,7 +117,7 @@ async function main() {
   ok('R2 added once as a brand-new room (BATHROOM)', r2Add.length === 1 && r2Add[0]?.body?.roomTypeCode === 'BATHROOM')
 
   // ── 5. Clearing the type (→ null): still re-emits, but with NO roomTypeCode ──
-  flushSyncEngine(state({ r1Type: null, r1Name: 'Master Bedroom', extraRooms: { R2: { id: 'R2', ifcGlobalId: 'room-R2', floorId: 'F1', roomShape: 'POLYGON', name: 'Room 2', roomTypeCode: 'BATHROOM', nodeOrder: [], wallIds: [] } } }))
+  await flushSyncEngine(state({ r1Type: null, r1Name: 'Master Bedroom', extraRooms: { R2: { id: 'R2', ifcGlobalId: 'room-R2', floorId: 'F1', roomShape: 'POLYGON', name: 'Room 2', roomTypeCode: 'BATHROOM', nodeOrder: [], wallIds: [] } } }))
   await waitFor(() => roomPosts().length >= 4)
   await sleep(40)
   const p5 = roomPosts()[roomPosts().length - 1]

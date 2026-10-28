@@ -199,11 +199,16 @@ export const GEOMETRY_OPS = [
 
 async function _request(method, path, body, conn) {
   const c = conn ?? _conn
+  if (c.drawingLineage?.wire) {
+    ({ method, path, body } = c.drawingLineage.wire)
+  } else if (c.drawingLineage?.saveWire) {
+    await c.drawingLineage.saveWire({ method, path, body })
+  }
   const token = await c.getToken()
   const url = `${c.erpUrl.replace(/\/$/, '')}/api/v1${path}`
   const res = await fetch(url, {
     method,
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...(c.drawingLineage ? { 'x-drawing-checkpoint': c.drawingLineage.checkpointId, 'x-drawing-mutation': c.drawingLineage.mutationId } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   if (!res.ok) {
@@ -268,6 +273,17 @@ export async function fireLiveOp(opType, payload, conn) {
   const c = conn ?? _conn
   if (!c) throw new Error('[liveSync] fireLiveOp: no conn available')
 
+  if (c.drawingLineage?.wire) {
+    const { method, path, body } = c.drawingLineage.wire
+    const replay = await _request(method, path, body, c)
+    _noteVersion(replay)
+    const erpId = _extractErpId(replay)
+    if (erpId && payload.ifcGlobalId) {
+      _registerId(payload.ifcGlobalId, erpId, c)
+      if (opType === 'ADD_FLOOR' || opType === 'UPDATE_FLOOR') c.floorIds[payload.ifcGlobalId] = erpId
+    }
+    return replay
+  }
   let res
   switch (opType) {
 
@@ -408,6 +424,7 @@ export async function fireLiveOp(opType, payload, conn) {
     // that follows resolves a real floorErpId. Register the returned id in BOTH
     // _idMap (the _resolveId fallback) and c.floorIds (the primary ADD_ROOM lookup,
     // which is the SAME conn object the new-building F1 bootstrap seeds).
+    case 'UPDATE_FLOOR':
     case 'ADD_FLOOR': {
       const body = {
         floorNumber: payload.floorNumber ?? 1,
@@ -422,14 +439,6 @@ export async function fireLiveOp(opType, payload, conn) {
         _registerId(payload.ifcGlobalId, erpId, c)
         if (c) { c.floorIds = c.floorIds ?? {}; c.floorIds[payload.ifcGlobalId] = erpId }
       }
-      break
-    }
-
-    // No PATCH route exists on /geometry for floors (only POST + GET state), and a
-    // floor's synced fields (height/dims) aren't load-bearing for room attachment,
-    // so a floor change is a projection no-op rather than a 404.
-    case 'UPDATE_FLOOR': {
-      res = { ok: true, noop: true }
       break
     }
 
@@ -851,4 +860,10 @@ export function seedIdMapFromState(state, conn) {
     for (const f of state.floors) if (f?.sourceEditorId && f?.id) c.floorIds[f.sourceEditorId] = f.id
   }
   return state
+}
+
+export async function requestDrawingCheckpoint(action, body) {
+  const path = `/building-structure/buildings/${_conn.buildingId}/checkpoints${action ? `/${action}` : ''}`
+  const response = await _request('POST', path, body, _conn)
+  return response?.data ?? response
 }

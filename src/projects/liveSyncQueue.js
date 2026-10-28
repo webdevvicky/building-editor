@@ -1,3 +1,5 @@
+import { uid } from '../lib/ids.js'
+import { uploadProjectionSnapshot } from './canonicalSyncQueue.js'
 // liveSyncQueue.js — durable transactional outbox for live ERP geometry sync.
 //
 // THE single seam every sync path uses: enqueueGeometryOps([{opType,payload}]).
@@ -19,7 +21,7 @@
 
 import { getAssetStorage } from './storage/getAssetStorage.js'
 import { DB_STORES } from './storage/indexedDb.js'
-import { fireLiveOp, opDependency, resolveErpId } from './liveSync.js'
+import { fireLiveOp, opDependency, resolveErpId, getLiveConn, requestDrawingCheckpoint } from './liveSync.js'
 
 const MAX_ATTEMPTS = 5
 const BACKOFF_MS = [1000, 2000, 4000, 4000] // 1s → 2s → 4s (cap), 4 waits ⇒ 5 attempts
@@ -28,7 +30,7 @@ let _buildingId = null
 let _active = false
 let _queue = []        // [{ id, opType, payload, attempts, status, error }]
 let _draining = false
-let _seq = 0
+let _persistChain = Promise.resolve()
 let _resyncBuilder = null
 const _listeners = new Set()
 
@@ -36,8 +38,10 @@ function _idbKey() { return `liveSyncQueue:${_buildingId}` }
 
 async function _persist() {
   if (!_buildingId) return
-  try { await getAssetStorage().put(DB_STORES.METADATA, _idbKey(), { value: _queue }) }
-  catch (e) { console.warn('[liveSyncQueue] persist failed', e) }
+  const key = _idbKey()
+  const value = structuredClone(_queue)
+  _persistChain = _persistChain.catch(() => {}).then(() => getAssetStorage().put(DB_STORES.METADATA, key, { value }))
+  await _persistChain
 }
 
 async function _loadPersisted() {
@@ -45,12 +49,6 @@ async function _loadPersisted() {
     const rec = await getAssetStorage().get(DB_STORES.METADATA, _idbKey())
     if (rec && Array.isArray(rec.value)) {
       _queue = rec.value
-      // Prune stale dead/failed DELETE_* artifacts left by the old /null bug: a
-      // DELETE whose target id never resolved used to request /geometry/.../null →
-      // 404 → dead-lettered. Deletes are idempotent no-ops (deleting a row that
-      // doesn't exist is success), so these are not real failures — drop them.
-      _queue = _queue.filter((o) =>
-        !((o.status === 'dead' || o.status === 'failed') && String(o.opType).startsWith('DELETE_')))
       // Anything mid-flight when we last died resumes as pending. So does
       // anything that was blocked: this session has a fresh id map (seeded from
       // the ERP), so every dependency is re-asked rather than assumed.
@@ -110,13 +108,19 @@ export function setResyncBuilder(fn) { _resyncBuilder = fn }
 
 // ── Enqueue (the single seam) ────────────────────────────────────────────────
 
-export function enqueueGeometryOps(ops) {
-  if (!_active || !ops || ops.length === 0) return
-  for (const op of ops) {
-    if (!op || !op.opType) continue
-    _queue.push({ id: `op_${++_seq}`, opType: op.opType, payload: op.payload ?? {}, attempts: 0, status: 'pending', error: null })
-  }
-  _persist(); _notify(); _drain()
+export async function enqueueGeometryOps(ops, pinnedDoc) {
+  if (!_active || !ops) return
+  const doc = pinnedDoc ?? await getAssetStorage().get(DB_STORES.SNAPSHOTS, `${_buildingId}`)
+  if (!doc?.payload) throw new Error('Projection requires a durable canonical snapshot')
+  const checkpointId = uid()
+  const mutations = ops.map(op => ({ id: uid(), checkpointId, opType: op.opType, payload: op.payload ?? {}, attempts: 0, status: 'pending', error: null }))
+  _queue.push(
+    { id: uid(), checkpointId, opType: 'BEGIN_CHECKPOINT', payload: { doc, mutationIds: mutations.map(op => op.id) }, attempts: 0, status: 'pending' },
+    ...mutations,
+    { id: uid(), checkpointId, opType: 'SEAL_CHECKPOINT', payload: { mutationCount: mutations.length }, attempts: 0, status: 'pending' },
+  )
+  await _persist()
+  _notify(); _drain()
 }
 
 // ── Worker ───────────────────────────────────────────────────────────────────
@@ -187,8 +191,10 @@ function _dependencyVerdict(item) {
 // without any extra signalling.
 function _pickNext() {
   for (const item of _queue) {
+    if (_isTerminal(item)) return null
     if (item.status !== 'pending' && item.status !== 'blocked') continue
-    const verdict = _dependencyVerdict(item)
+    if (item.opType === 'BEGIN_CHECKPOINT' || item.opType === 'SEAL_CHECKPOINT') return { item, verdict: { action: 'dispatch' } }
+    const verdict = item.wire ? { action: 'dispatch' } : _dependencyVerdict(item)
     if (verdict.action === 'dispatch') return { item, verdict }
     if (verdict.action === 'drop') return { item, verdict }
     item.status = 'blocked'
@@ -207,15 +213,27 @@ async function _drain() {
       const { item, verdict } = next
 
       if (verdict.action === 'drop') {
-        console.warn(`[liveSyncQueue] ${item.opType} dropped — ${verdict.reason}`)
-        _queue = _queue.filter((o) => o.id !== item.id)
+        console.warn(`[liveSyncQueue] ${item.opType} blocked — ${verdict.reason}`)
+        item.status = 'dead'
+        item.error = verdict.reason
         await _persist(); _notify()
-        continue
+        break
       }
 
       item.status = 'inflight'
       try {
-        await fireLiveOp(item.opType, item.payload) // uses the conn from initLiveSync
+        if (item.opType === 'BEGIN_CHECKPOINT') {
+          if (!item.payload.snapshotVersion) {
+            item.payload.snapshotVersion = await uploadProjectionSnapshot(item.payload.doc)
+            await _persist()
+          }
+          if (item.payload.mutationIds.length) await requestDrawingCheckpoint('', { checkpointId: item.checkpointId, snapshotVersion: item.payload.snapshotVersion, checksum: item.payload.doc.checksum, mutationIds: item.payload.mutationIds })
+        } else if (item.opType === 'SEAL_CHECKPOINT') {
+          if (item.payload.mutationCount) await requestDrawingCheckpoint(`${item.checkpointId}/seal`)
+        } else {
+          const result = await fireLiveOp(item.opType, item.payload, { ...getLiveConn(), drawingLineage: { checkpointId: item.checkpointId, mutationId: item.id, wire: item.wire, saveWire: async wire => { item.wire = wire; await _persist() } } })
+          if (result?.noop) throw new Error('Projection mutation was not acknowledged by the server')
+        }
         _queue = _queue.filter((o) => o.id !== item.id) // success → drop
         await _persist(); _notify()
       } catch (err) {
@@ -251,9 +269,11 @@ export function retryFailed() {
   _persist(); _notify(); _drain()
 }
 
-export function resyncAll() {
+export async function resyncAll() {
   if (!_resyncBuilder) return
-  let ops = []
-  try { ops = _resyncBuilder() || [] } catch (e) { console.warn('[liveSyncQueue] resync build failed', e) }
-  enqueueGeometryOps(ops)
+  try {
+    await _resyncBuilder()
+  } catch (error) {
+    console.warn('[liveSyncQueue] resync build failed', error)
+  }
 }

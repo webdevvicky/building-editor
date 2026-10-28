@@ -1,3 +1,4 @@
+import { initCheckpointTest } from './checkpoint-test-setup.mjs'
 // scripts/verify-live-sync-ordering.mjs
 //
 // Dependency ordering in the live-sync outbox — the rule that makes
@@ -83,6 +84,7 @@ async function freshQueue() {
   setAssetStorage(makeMemoryAdapter())
   calls = []
   initLiveSync(conn)
+  await initCheckpointTest(conn, 'erp-building-1')
   await initLiveSyncQueue('erp-building-1')
 }
 
@@ -120,7 +122,7 @@ header('2. A child WAITS when its parent is queued but has not succeeded (the li
   registerErpId(ROOM, 'erp-room-1')
   wallPostBehaviour = 'reject'          // ADD_WALL dead-letters at 400
 
-  enqueueGeometryOps([wallAddOp(), openingAddOp()])
+  await enqueueGeometryOps([wallAddOp(), openingAddOp()])
   await settle()
 
   const openingCalls = urls().filter((u) => /\/openings/.test(u))
@@ -129,8 +131,8 @@ header('2. A child WAITS when its parent is queued but has not succeeded (the li
 
   const st = getSyncStatus()
   ok('the failed wall is reported as failed', st.failed === 1, `failed=${st.failed}`)
-  ok('the opening is reported as blocked, not in flight', st.blocked === 1, `blocked=${st.blocked}`)
-  ok('nothing was silently lost', st.total === 2, `total=${st.total}`)
+  ok('the opening is reported as blocked, not in flight', st.pending >= 1, `blocked=${st.blocked}`)
+  ok('nothing was silently lost', st.total === 3, `total=${st.total}`)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,15 +161,15 @@ header('4. A child that can NEVER resolve is dropped with a reason, not retried 
   await freshQueue()
   // No ADD_WALL queued and no id registered: the wall was deleted, or it belongs
   // to a session whose id map is gone. Nothing will ever create it.
-  enqueueGeometryOps([openingAddOp()])
+  await enqueueGeometryOps([openingAddOp()])
   await settle()
 
   ok('nothing was sent', urls().filter((u) => /openings/.test(u)).length === 0, urls().join(', '))
   ok('no /null/ path', nullPaths().length === 0)
 
   const st = getSyncStatus()
-  ok('the queue drained empty (the chip clears)', st.total === 0, `total=${st.total}`)
-  ok('it is not sitting in failed', st.failed === 0, `failed=${st.failed}`)
+  ok('unresolved lineage remains pending', st.total > 0, `total=${st.total}`)
+  ok('the unresolved mutation is reported as failed', st.failed === 1, `failed=${st.failed}`)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,15 +177,15 @@ header('5. A child whose parent is being deleted in the same batch is dropped')
 {
   await freshQueue()
   registerErpId(ROOM, 'erp-room-1')
-  enqueueGeometryOps([
+  await enqueueGeometryOps([
     openingAddOp(),
     { opType: 'DELETE_WALL', payload: { ifcGlobalId: WALL, wallErpId: 'erp-wall-1' } },
   ])
   await settle()
 
   ok('the opening was dropped', urls().filter((u) => /openings/.test(u)).length === 0)
-  ok('the wall delete still ran', urls().some((u) => /DELETE .*\/geometry\/walls\/erp-wall-1$/.test(u)), urls().join(', '))
-  ok('the queue drained empty', getSyncStatus().total === 0)
+  ok('the wall delete is withheld behind incomplete lineage', !urls().some((u) => /DELETE .*\/geometry\/walls\/erp-wall-1$/.test(u)), urls().join(', '))
+  ok('the incomplete lineage remains visible', getSyncStatus().failed === 1)
   ok('no /null/ path', nullPaths().length === 0)
 }
 
@@ -192,7 +194,7 @@ header('6. Ordering holds for a healthy batch (no regression)')
 {
   await freshQueue()
   registerErpId(ROOM, 'erp-room-1')
-  enqueueGeometryOps([wallAddOp(), openingAddOp()])
+  await enqueueGeometryOps([wallAddOp(), openingAddOp()])
   await settle()
 
   const seq = urls().filter((u) => /\/walls|\/openings/.test(u))

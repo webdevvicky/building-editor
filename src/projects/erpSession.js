@@ -21,8 +21,7 @@ import { getErpLaunchContext } from './erpLaunchContext.js'
 import { initLiveSync, getLiveMode } from './liveSync.js'
 import { initLiveSyncQueue, setResyncBuilder } from './liveSyncQueue.js'
 import { startSyncEngine } from './syncEngine.js'
-import { startSyncCoordinator } from './syncCoordinator.js'
-import { buildFullSyncOps } from './syncEmitters.js'
+import { startSyncCoordinator, requestFullSync } from './syncCoordinator.js'
 import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
 import { reopenCanvas } from './canonicalReopen.js'
 import { checkProjectionMismatch } from './projectionGuard.js'
@@ -149,8 +148,7 @@ export async function initErpSession() {
 
   // Durable outbox queue (FIFO worker, retry/backoff, IDB persistence). Must be
   // active before the engine emits anything.
-  await initLiveSyncQueue(ctx.buildingId)
-  setResyncBuilder(() => buildFullSyncOps(useStore.getState()))
+  setResyncBuilder(requestFullSync)
 
   // REOPEN from the canonical Building Document (R2 → IDB → empty), integrity-gated,
   // with the id-map seeded in every path. A brand-new building has nothing to load —
@@ -214,11 +212,12 @@ export async function initErpSession() {
   // upload stays async + debounced. Only the ordering changed — the diff, queue,
   // projection, checksum, snapshot format, and upload logic are unchanged.
   try {
-    await initCanonicalSyncQueue(conn, ctx.buildingId, { knownBaseVersion: reopenVersion })
+    await initCanonicalSyncQueue(conn, ctx.buildingId, { knownBaseVersion: reopenVersion, deferUpload: true })
   } catch (err) {
     console.warn('[erpSession] canonical document sync init failed', err)
   }
   startSyncEngine(useStore, { coordinated: true })
+  await initLiveSyncQueue(ctx.buildingId)
   startSyncCoordinator(useStore, ctx.buildingId)
 
   // Editor name reflects the ERP project + building (not a local IDB name).

@@ -61,10 +61,10 @@ export function stopSyncEngine() {
 
 /** Re-baseline the shadow to current state WITHOUT emitting (used after a
  *  semantic op the diff shouldn't re-derive). */
-export function reconcileSyncEngine() {
+export function reconcileSyncEngine(stateOverride) {
   if (_active && _store) {
-    _shadow = _snapshot(_store.getState())
-    _floorShadow = _floorMap(_store.getState())
+    _shadow = _snapshot(stateOverride ?? _store.getState())
+    _floorShadow = _floorMap(stateOverride ?? _store.getState())
   }
 }
 
@@ -74,7 +74,7 @@ export function reconcileSyncEngine() {
  * to the exact accepted state, so a mutation landing mid-accept cannot leak into
  * this projection emit.
  */
-export function flushSyncEngine(stateOverride) { _flush(stateOverride) }
+export function flushSyncEngine(stateOverride, doc) { return _flush(stateOverride, doc) }
 
 function _schedule() {
   if (!_active || _scheduled) return
@@ -82,7 +82,7 @@ function _schedule() {
   queueMicrotask(_flush)
 }
 
-function _flush(stateOverride) {
+async function _flush(stateOverride, doc) {
   _scheduled = false
   if (!_active || !_store) return
   const st = stateOverride ?? _store.getState()
@@ -111,7 +111,6 @@ function _flush(stateOverride) {
   // canonical removeFloor cascades the floor's rooms, so those child DELETE_ROOMs
   // are already in deleteOps and land first (FK: room.floorId → floor).
   for (const id in prevFloors) if (!curFloors[id]) floorDeleteOps.push(E.floorDeleteOp(prevFloors[id]))
-  _floorShadow = curFloors
   const emittedNodes = new Set()
   const verticesRoomIds = new Set() // rooms already queued for a vertex emit (dedup)
   const movedNodes = new Set()      // nodes that moved this flush → re-emit owning rooms' vertices
@@ -212,8 +211,9 @@ function _flush(stateOverride) {
   if (prev.nodes) for (const id in prev.nodes) if (!cur.nodes[id]) deleteOps.push(E.nodeDeleteOp(prev.nodes[id].ifcGlobalId))
   for (const coll of ELEMENT_COLLECTIONS) if (prev[coll]) for (const id in prev[coll]) if (!cur[coll]?.[id]) deleteOps.push(E.elementDeleteOp(prev[coll][id].ifcGlobalId))
 
-  _shadow = cur
 
   const ops = [...floorAddOps, ...nodeOps, ...roomOps, ...verticesOps, ...wallOps, ...surfaceOps, ...openingOps, ...elemOps, ...floorUpdateOps, ...updateOps, ...deleteOps, ...floorDeleteOps]
-  if (ops.length) enqueueGeometryOps(ops)
+  if (ops.length || doc) await enqueueGeometryOps(ops, doc)
+  _shadow = cur
+  _floorShadow = curFloors
 }

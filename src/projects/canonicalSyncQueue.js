@@ -1,3 +1,4 @@
+import { isQueueActive } from './liveSyncQueue.js'
 // canonicalSyncQueue.js — Phase 1: durable upload outbox for the canonical
 // Building Document, plus the ERP-mode autosave installer.
 //
@@ -24,7 +25,7 @@
 // whether that snapshot is the newest copy (same base as the server) or a clash.
 //
 // Off the render path, fail-soft: a sync failure never throws into the store. It
-// NEVER touches liveSyncQueue or the PostgreSQL projection (separate path).
+// Live projection batches call uploadProjectionSnapshot with their durable exact document.
 
 import { getAssetStorage } from './storage/getAssetStorage.js'
 import { DB_STORES } from './storage/indexedDb.js'
@@ -141,7 +142,7 @@ export async function initCanonicalSyncQueue(conn, buildingId, opts = {}) {
   if (typeof opts.knownBaseVersion === 'number') _baseVersion = opts.knownBaseVersion
   await _persist()
   _notify()
-  if (_dirty) _pump() // resume an unsent snapshot that reopen confirmed descends from the server's version
+  if (_dirty && !opts.deferUpload) _pump() // resume an unsent snapshot that reopen confirmed descends from the server's version
 }
 
 export function teardownCanonicalSyncQueue() {
@@ -198,9 +199,6 @@ export function noteCanonicalDirty() {
   _notify()
 }
 
-/** Kick the upload worker — the coordinator's debounced upload + unload flush. */
-export function pumpCanonicalUpload() { _pump() }
-
 // ── Worker ───────────────────────────────────────────────────────────────────
 
 function _isPermanentStatus(status) {
@@ -251,12 +249,14 @@ async function _onStaleBase(doc, seqAtStart) {
  * Single upload attempt (also the deterministic test seam — no timers inside).
  * Returns one of: 'idle' | 'uploaded' | 'retry' | 'conflict' | 'failed'.
  */
-export async function sync() {
+export async function sync(pinnedDoc) {
+  if (isQueueActive() && !pinnedDoc) return 'idle'
   // Write gate: refuse to upload after a failed reopen — a blank/partial canvas must
   // never overwrite good canonical data (the base-version CAS can't catch this).
   if (!_active || _inflight || _failed || !_dirty || isEditorReadOnly()) return 'idle'
-  const seqAtStart = _dirtySeq
-  const doc = await getAssetStorage().get(DB_STORES.SNAPSHOTS, _snapKey())
+  const latest = pinnedDoc ? await getAssetStorage().get(DB_STORES.SNAPSHOTS, _snapKey()) : null
+  const seqAtStart = !pinnedDoc || latest?.checksum === pinnedDoc.checksum ? _dirtySeq : -1
+  const doc = pinnedDoc ?? await getAssetStorage().get(DB_STORES.SNAPSHOTS, _snapKey())
   if (!doc || !doc.payload) { _dirty = false; await _persist(); _notify(); return 'idle' }
 
   _inflight = true
@@ -370,4 +370,15 @@ export function installCanonicalAutosave(store, buildingId, opts = {}) {
       unsub()
     },
   }
+}
+
+/** The geometry outbox uploads its durable, exact snapshot before emitting its lineage. */
+export async function uploadProjectionSnapshot(doc) {
+  if (!_active || _inflight) throw new Error('Canonical queue is not available')
+  _dirty = true
+  _failed = false
+  _attempts = 0
+  const result = await sync(doc)
+  if (result !== 'uploaded') throw new Error(`Canonical snapshot upload: ${result}`)
+  return _baseVersion
 }

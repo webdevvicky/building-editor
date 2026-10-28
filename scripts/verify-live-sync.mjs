@@ -46,7 +46,7 @@ const mockConn = {
 // Ops that intentionally fire NO REST call (handled client-side as a no-op).
 // UPDATE_FLOOR has no PATCH route on /geometry (only POST + GET state), so a
 // floor change is a projection no-op rather than a 404.
-const NOOP_OPS = new Set(['UPDATE_FLOOR'])
+const NOOP_OPS = new Set()
 
 // ── Test cases ────────────────────────────────────────────────────────────────
 const OP_TEST_CASES = [
