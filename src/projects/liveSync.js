@@ -130,9 +130,6 @@ const OP_DEPENDENCY = {
   UPDATE_FLOOR: { parents: [one('ifcGlobalId', 'floor', 'floorErpId')] },
   ADD_ROOM: { produces: ownId },
   ADD_NODE: { produces: ownId },
-  ADD_COLUMN: { produces: ownId },
-  ADD_BEAM: { produces: ownId },
-  ADD_SLAB: { parents: [ROOMS_PARENT], produces: ownId },
   ADD_ELEMENT: { parents: [ROOM_PARENT, FLOOR_PARENT, ROOMS_PARENT], produces: ownId },
   UPDATE_ELEMENT: { parents: [ROOMS_PARENT] },
 
@@ -141,9 +138,6 @@ const OP_DEPENDENCY = {
   DELETE_FLOOR: { destroys: ['ifcGlobalId'] },
   DELETE_NODE: { destroys: ['ifcGlobalId'] },
   DELETE_OPENING: { destroys: ['ifcGlobalId'] },
-  DELETE_COLUMN: { destroys: ['ifcGlobalId'] },
-  DELETE_BEAM: { destroys: ['ifcGlobalId'] },
-  DELETE_SLAB: { destroys: ['ifcGlobalId'] },
   DELETE_ELEMENT: { destroys: ['ifcGlobalId'] },
 }
 
@@ -217,9 +211,6 @@ export const GEOMETRY_OPS = [
   'ADD_FLOOR', 'UPDATE_FLOOR', 'DELETE_FLOOR',
   'ADD_ROOM', 'UPDATE_ROOM', 'DELETE_ROOM', 'SAVE_ROOM_VERTICES',
   'ADD_NODE', 'UPDATE_NODE', 'DELETE_NODE',
-  'ADD_COLUMN', 'UPDATE_COLUMN', 'DELETE_COLUMN',
-  'ADD_BEAM', 'UPDATE_BEAM', 'DELETE_BEAM',
-  'ADD_SLAB', 'UPDATE_SLAB', 'DELETE_SLAB',
   'ADD_ELEMENT', 'UPDATE_ELEMENT', 'DELETE_ELEMENT',
 ]
 
@@ -326,6 +317,18 @@ async function _ensureFloorErpId(floorKey, c) {
 function _resolveRoomIds(opType, roomIfcIds, conn) {
   if (!Array.isArray(roomIfcIds)) return []
   return roomIfcIds.map((ifc) => _requireId(opType, 'roomIds', _resolveId(ifc, conn), ifc))
+}
+
+// The ONE element body. ADD_ELEMENT and UPDATE_ELEMENT send the same shape — the
+// registry's `toErpPayload` (sizes, grades, bars, room, point type, spec) — and the
+// ERP create and patch element DTOs accept the same fields (XR-03). Editor room ids
+// are resolved here for both: a slab's `roomIds` as ERP room uuids (XR-09); a point's
+// `roomIfcId` stays an editor id, which the ERP writer resolves. Identity (`ifcGlobalId`,
+// `elementErpId`), `kind` and the floor are ADD-only and never part of a patch.
+function _elementBody(opType, payload, c) {
+  // eslint-disable-next-line no-unused-vars -- identity, kind and floor are stripped from the shape
+  const { ifcGlobalId, elementErpId, kind, floorId, roomIds, ...shape } = payload
+  return roomIds === undefined ? shape : { ...shape, roomIds: _resolveRoomIds(opType, roomIds, c) }
 }
 
 // ─── Main dispatch ────────────────────────────────────────────────────────────
@@ -652,136 +655,6 @@ export async function fireLiveOp(opType, payload, conn) {
       break
     }
 
-    // ── Columns ───────────────────────────────────────────────────────────────
-    case 'ADD_COLUMN': {
-      const buildingId = c?.buildingId
-      const body = {
-        sourceEditorId: payload.ifcGlobalId,
-        kind: 'COLUMN',
-        posXMm: inToMm(payload.x ?? 0),
-        posYMm: inToMm(payload.y ?? 0),
-        ...(payload.sectionShape !== undefined ? { sectionShape: payload.sectionShape } : {}),
-        ...(payload.sectionWidthMm !== undefined ? { sectionWidthMm: payload.sectionWidthMm } : {}),
-        ...(payload.sectionDepthMm !== undefined ? { sectionDepthMm: payload.sectionDepthMm } : {}),
-        ...(payload.diameterMm !== undefined ? { diameterMm: payload.diameterMm } : {}),
-        ...(payload.heightMm !== undefined ? { heightMm: payload.heightMm } : {}),
-        ...(payload.structuralLevel !== undefined ? { structuralLevel: payload.structuralLevel } : {}),
-      }
-      res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
-      break
-    }
-
-    case 'UPDATE_COLUMN': {
-      const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
-      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      const body = {}
-      if (payload.x !== undefined) body.posXMm = inToMm(payload.x)
-      if (payload.y !== undefined) body.posYMm = inToMm(payload.y)
-      if (payload.sectionShape !== undefined) body.sectionShape = payload.sectionShape
-      if (payload.sectionWidthMm !== undefined) body.sectionWidthMm = payload.sectionWidthMm
-      if (payload.sectionDepthMm !== undefined) body.sectionDepthMm = payload.sectionDepthMm
-      if (payload.diameterMm !== undefined) body.diameterMm = payload.diameterMm
-      if (payload.heightMm !== undefined) body.heightMm = payload.heightMm
-      if (payload.structuralLevel !== undefined) body.structuralLevel = payload.structuralLevel
-      if (payload.version !== undefined) body.version = payload.version
-      res = await _request('PATCH', `/geometry/elements/${erpId}`, body, c)
-      break
-    }
-
-    case 'DELETE_COLUMN': {
-      const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
-      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      // Unresolved id → no projection row exists to delete: a delete of a
-      // non-existent row is a successful no-op (never request /geometry/.../null).
-      if (!erpId) { res = { ok: true, noop: true }; break }
-      res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
-      break
-    }
-
-    // ── Beams ─────────────────────────────────────────────────────────────────
-    case 'ADD_BEAM': {
-      const buildingId = c?.buildingId
-      const body = {
-        sourceEditorId: payload.ifcGlobalId,
-        kind: 'BEAM',
-        ...(payload.spanMm !== undefined ? { spanMm: payload.spanMm } : {}),
-        ...(payload.heightMm !== undefined ? { heightMm: payload.heightMm } : {}),
-        ...(payload.sectionWidthMm !== undefined ? { sectionWidthMm: payload.sectionWidthMm } : {}),
-        ...(payload.fromXMm !== undefined ? { fromXMm: payload.fromXMm } : {}),
-        ...(payload.fromYMm !== undefined ? { fromYMm: payload.fromYMm } : {}),
-        ...(payload.toXMm !== undefined ? { toXMm: payload.toXMm } : {}),
-        ...(payload.toYMm !== undefined ? { toYMm: payload.toYMm } : {}),
-        ...(payload.structuralLevel !== undefined ? { structuralLevel: payload.structuralLevel } : {}),
-      }
-      res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
-      break
-    }
-
-    case 'UPDATE_BEAM': {
-      const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
-      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      const body = {}
-      if (payload.spanMm !== undefined) body.spanMm = payload.spanMm
-      if (payload.heightMm !== undefined) body.heightMm = payload.heightMm
-      if (payload.version !== undefined) body.version = payload.version
-      res = await _request('PATCH', `/geometry/elements/${erpId}`, body, c)
-      break
-    }
-
-    case 'DELETE_BEAM': {
-      const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
-      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      // Unresolved id → no projection row exists to delete: a delete of a
-      // non-existent row is a successful no-op (never request /geometry/.../null).
-      if (!erpId) { res = { ok: true, noop: true }; break }
-      res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
-      break
-    }
-
-    // ── Slabs ─────────────────────────────────────────────────────────────────
-    case 'ADD_SLAB': {
-      const buildingId = c?.buildingId
-      const body = {
-        sourceEditorId: payload.ifcGlobalId,
-        kind: payload.slabKind ?? 'SLAB',
-        ...(payload.thicknessMm !== undefined ? { thicknessMm: payload.thicknessMm } : {}),
-        ...(payload.areaSqft !== undefined ? { areaSqft: payload.areaSqft } : {}),
-        ...(payload.slabRole !== undefined ? { slabRole: payload.slabRole } : {}),
-        ...(payload.slabType !== undefined ? { slabType: payload.slabType } : {}),
-      }
-      const slabRoomIds = _resolveRoomIds(opType, payload.roomIds, c)
-      if (slabRoomIds.length) body.roomIds = slabRoomIds
-      res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
-      break
-    }
-
-    case 'UPDATE_SLAB': {
-      const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
-      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      const body = {}
-      if (payload.thicknessMm !== undefined) body.thicknessMm = payload.thicknessMm
-      if (payload.areaSqft !== undefined) body.areaSqft = payload.areaSqft
-      if (payload.version !== undefined) body.version = payload.version
-      res = await _request('PATCH', `/geometry/elements/${erpId}`, body, c)
-      break
-    }
-
-    case 'DELETE_SLAB': {
-      const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
-      if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      // Unresolved id → no projection row exists to delete: a delete of a
-      // non-existent row is a successful no-op (never request /geometry/.../null).
-      if (!erpId) { res = { ok: true, noop: true }; break }
-      res = await _request('DELETE', `/geometry/elements/${erpId}`, undefined, c)
-      break
-    }
-
     // ── Generic elements ──────────────────────────────────────────────────────
     case 'ADD_ELEMENT': {
       const buildingId = c?.buildingId
@@ -794,36 +667,8 @@ export async function fireLiveOp(opType, payload, conn) {
         sourceEditorId: payload.ifcGlobalId,
         kind: payload.kind,
         ...(elemFloorErpId ? { floorId: elemFloorErpId } : {}),
-        ...(payload.posXMm !== undefined ? { posXMm: payload.posXMm } : {}),
-        ...(payload.posYMm !== undefined ? { posYMm: payload.posYMm } : {}),
-        ...(payload.heightMm !== undefined ? { heightMm: payload.heightMm } : {}),
-        ...(payload.thicknessMm !== undefined ? { thicknessMm: payload.thicknessMm } : {}),
-        ...(payload.spanMm !== undefined ? { spanMm: payload.spanMm } : {}),
-        ...(payload.fromXMm !== undefined ? { fromXMm: payload.fromXMm } : {}),
-        ...(payload.fromYMm !== undefined ? { fromYMm: payload.fromYMm } : {}),
-        ...(payload.toXMm !== undefined ? { toXMm: payload.toXMm } : {}),
-        ...(payload.toYMm !== undefined ? { toYMm: payload.toYMm } : {}),
-        ...(payload.sectionWidthMm !== undefined ? { sectionWidthMm: payload.sectionWidthMm } : {}),
-        ...(payload.sectionDepthMm !== undefined ? { sectionDepthMm: payload.sectionDepthMm } : {}),
-        ...(payload.diameterMm !== undefined ? { diameterMm: payload.diameterMm } : {}),
-        ...(payload.structuralLevel !== undefined ? { structuralLevel: payload.structuralLevel } : {}),
-        ...(payload.areaSqft !== undefined ? { areaSqft: payload.areaSqft } : {}),
-        ...(payload.concreteM3 !== undefined ? { concreteM3: payload.concreteM3 } : {}),
-        ...(payload.slabRole !== undefined ? { slabRole: payload.slabRole } : {}),
-        ...(payload.slabType !== undefined ? { slabType: payload.slabType } : {}),
-        ...(payload.bars !== undefined ? { bars: payload.bars } : {}),
-        // Editor room ifcGlobalId (resolved to BuildingElement.roomId server-side) so
-        // placed MEP points count per room under the geometry-first resolver.
-        ...(payload.roomIfcId ? { roomIfcId: payload.roomIfcId } : {}),
-        // Stream 2: canonical MEP point classification. Whitelisted on the ERP element
-        // DTO (accepted-and-ignored until the deferred subtype routing lands).
-        ...(payload.pointType ? { pointType: payload.pointType } : {}),
-        // The element's descriptive attributes with no typed column (registry `spec`),
-        // stored verbatim so "Load from ERP" can rebuild the element (XR-10).
-        ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
+        ..._elementBody(opType, payload, c),
       }
-      const elemRoomIds = _resolveRoomIds(opType, payload.roomIds, c)
-      if (elemRoomIds.length) body.roomIds = elemRoomIds
       res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
       const erpId = _extractErpId(res)
       if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
@@ -833,11 +678,7 @@ export async function fireLiveOp(opType, payload, conn) {
     case 'UPDATE_ELEMENT': {
       const erpId = payload.elementErpId ?? _resolveId(payload.ifcGlobalId, c)
       if (!erpId) { res = _skipUnresolved(opType, payload.ifcGlobalId); break }
-      const body = { ...payload }
-      delete body.ifcGlobalId
-      delete body.elementErpId
-      if (Array.isArray(payload.roomIds)) body.roomIds = _resolveRoomIds(opType, payload.roomIds, c)
-      res = await _request('PATCH', `/geometry/elements/${erpId}`, body, c)
+      res = await _request('PATCH', `/geometry/elements/${erpId}`, _elementBody(opType, payload, c), c)
       break
     }
 

@@ -23,6 +23,7 @@ import { initLiveSync, teardownLiveSync, fireLiveOp } from '../src/projects/live
 import { buildFullSyncOps, wallAddOp, wallDeleteOp, roomAddOp, roomDeleteOp, roomVerticesOp, adjacentSurfaceOp } from '../src/projects/syncEmitters.js'
 import { reconstructFromProjection } from '../src/projects/projectionReconstruct.js'
 import { ELEMENT_ENTRIES } from '../src/projects/elementRegistry.js'
+import { DEFAULT_PROJECT_SETTINGS } from '../src/structuralSlice.js'
 
 let pass = 0, fail = 0
 function ok(label, cond, detail = '') {
@@ -174,7 +175,9 @@ const doc = {
   elvDevices: { ev1: mep('ev1', 'CCTV') },
   solarEquipment: { so1: mep('so1', 'PANEL') },
   ratesByKey: {},
-  projectSettings: { name: 'Karthik Villa — Main Block', floors: [{ id: 'F1', label: 'Ground', sequence: 0, plinthHeightFt: 1.5, floorHeightFt: 10, meta: null, underlay: null }] },
+  // A project's settings as the store holds them (loadProject fills the defaults): element payloads read its
+  // column types, beam sizes, slab and BBS settings (XR-02).
+  projectSettings: { ...DEFAULT_PROJECT_SETTINGS, name: 'Karthik Villa — Main Block', floors: [{ id: 'F1', label: 'Ground', sequence: 0, plinthHeightFt: 1.5, floorHeightFt: 10, meta: null, underlay: null }] },
 }
 
 const conn = { erpUrl: 'http://erp.test', buildingId: BUILDING, floorIds: {}, getToken: async () => 'scoped-token' }

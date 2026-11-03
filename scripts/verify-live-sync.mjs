@@ -71,18 +71,6 @@ const OP_TEST_CASES = [
   ['ADD_NODE',          { ifcGlobalId: 'NodeIfc000000000000002', x: 0, y: 0, kind: 'CORNER' }],
   ['UPDATE_NODE',       { ifcGlobalId: 'NodeIfc000000000000001', nodeErpId: 'erpNode1', x: 10, y: 20 }],
   ['DELETE_NODE',       { ifcGlobalId: 'NodeIfc000000000000001', nodeErpId: 'erpNode1' }],
-  // Columns
-  ['ADD_COLUMN',        { ifcGlobalId: 'ColmIfc000000000000002', x: 0, y: 0 }],
-  ['UPDATE_COLUMN',     { ifcGlobalId: 'ColmIfc000000000000001', elementErpId: 'erpCol1', x: 10, y: 10 }],
-  ['DELETE_COLUMN',     { ifcGlobalId: 'ColmIfc000000000000001', elementErpId: 'erpCol1' }],
-  // Beams
-  ['ADD_BEAM',          { ifcGlobalId: 'BeamIfc000000000000002', spanMm: 3000 }],
-  ['UPDATE_BEAM',       { ifcGlobalId: 'BeamIfc000000000000001', elementErpId: 'erpBeam1', spanMm: 3500 }],
-  ['DELETE_BEAM',       { ifcGlobalId: 'BeamIfc000000000000001', elementErpId: 'erpBeam1' }],
-  // Slabs
-  ['ADD_SLAB',          { ifcGlobalId: 'SlabIfc000000000000002', thicknessMm: 125 }],
-  ['UPDATE_SLAB',       { ifcGlobalId: 'SlabIfc000000000000001', elementErpId: 'erpSlab1', thicknessMm: 150 }],
-  ['DELETE_SLAB',       { ifcGlobalId: 'SlabIfc000000000000001', elementErpId: 'erpSlab1' }],
   // Generic elements
   ['ADD_ELEMENT',       { ifcGlobalId: 'ElemIfc000000000000002', kind: 'FOUNDATION', posXMm: 100, posYMm: 200 }],
   ['UPDATE_ELEMENT',    { ifcGlobalId: 'ElemIfc000000000000001', elementErpId: 'erpElem1', posXMm: 150 }],

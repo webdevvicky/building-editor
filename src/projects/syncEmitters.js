@@ -294,11 +294,11 @@ export function elementDeleteOp(ifcGlobalId) {
 }
 
 // ── Per-collection change signature (excludes volatile labelNo/meta) ─────────
-// Nodes sign on position + kind. Element collections sign on their full
-// toErpPayload (the synced fields) read against the state the element belongs to,
-// so a change that lives in the state — a slab's rooms, a beam's endpoints — is a
-// change (KD-37). The caller passes the previous state for the previous element.
-export function signature(collection, e, state = {}) {
+// Nodes sign on position + kind. Element collections sign on their full toErpPayload over the
+// WHOLE project state (`state` is required for them): an element's sizes, bars and room references
+// are worked out from the state around it, so a column-type, cover, room-area or room change
+// re-sends the elements it reaches (XR-02, KD-37).
+export function signature(collection, e, state) {
   if (collection === 'nodes') return `${e.x},${e.y},${e.kind ?? 'CORNER'}`
   const entry = entryForCollection(collection)
   if (entry) return JSON.stringify(entry.toErpPayload(e, state))

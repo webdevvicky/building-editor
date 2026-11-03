@@ -19,7 +19,7 @@ Building Editor: it writes a canonical Building Document and a live geometry pro
 - **Structure:** `src/main.jsx` → `src/App.jsx` (every panel mounted flat, self-gating) → `components/Canvas.jsx`.
   One flat store `src/store.js` (2,526 lines) + two slice factories (`structuralSlice.js`, `mepSlice.js`).
   Pure domain in `topology/ snap/ quantities/ mep/ bbs/ specs/ boq/ iso/`; ERP sync + local persistence in
-  `projects/`. 52 `scripts/verify-*.mjs` harnesses (no Jest/Vitest).
+  `projects/`. 56 `scripts/verify-*.mjs` harnesses (no Jest/Vitest).
 - **Map:** [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md) (last mapped 2026-09-23).
 
 ---
@@ -89,7 +89,7 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
 4. **Beam endpoints are a 4-type union** `{type: COLUMN|BEAM|WALL|POINT, …}` — always resolve through
    `resolveBeamEndpoint()`.
 5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
-   the BBS panel + BBS export. The legacy `computeBBSQuantities` is meant to be deprecated but is **still the live
+   the BBS panel, the BBS export and the bars sent to the ERP (`projects/structuralFacts.js`, D-271). The legacy `computeBBSQuantities` is meant to be deprecated but is **still the live
    source of every BOQ steel line** (`boq/lines.js:37,248`) — KD-29. `verify-bbs` currently pins the legacy numbers.
 6. **IFC readiness.** Every entity has `id` (UUID) **and** `ifcGlobalId` (22-char IFC GUID), minted only in
    `src/lib/ids.js`. Never remove or repurpose `ifcGlobalId` — it is also the ERP `sourceEditorId`.
@@ -118,11 +118,13 @@ The editor is the **source of truth for geometry** of a connected building. Two 
   IDB rescue → HARD read-only latch.
 - **Geometry projection** — ERP PostgreSQL rows written live through `/api/v1/geometry/**`, one op at a time.
 
-The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. Today BBS never leaves the
-editor: the projection sends **no** structural sections, heights, concrete or bars (KD-7). ⚠️ At the same time the
-ERP has a "BBS-direct" steel path that **expects** bars from the editor (erp-saas `structural-quantity.service.ts:46-50`),
-so ERP steel/concrete is never computed (`erp-saas:docs/bugs.md` XR-02). Both facts are
-true; which steel number is authoritative is open question OQ-027 in `erp-saas:docs/open-questions.md`
+The snapshot stores **raw editor entities only** — no `structural` / `bbs` sub-objects. **The bars DO leave the
+editor through the projection (erp-saas D-271, XR-02 fixed 2026-11-03):** `projects/structuralFacts.js`
+(`structuralFacts(erpKind, el, state)`, pure) gives every structural element its section as real sizes (a column TYPE
+is resolved to mm here; the ERP cannot read type ids), its height / slab area / footing pad, its concrete and steel
+grade and its bar list from `computeRebarGroups` only (never the legacy `computeBBSQuantities`). The ERP stores them
+and works out concrete m³ and steel kg itself; it refuses a concrete or steel figure on the wire. Members with no
+entity of their own (wall-derived beams, inline footings, tie beams, sunshades, lofts) are not sent yet
 (`docs/DOMAIN-RULES.md` §12 C-4). Wire units are integer **mm**
 for coordinates, heights, thicknesses and lengths; feet only for floor height and ERP room length/width.
 
@@ -131,7 +133,9 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   `SNAPSHOTS[buildingId]`, mark dirty; **(2) ENQUEUE** — persist that exact document with its projection ops.
   The FIFO worker uploads the document, declares a server checkpoint, executes mutations with durable IDs and exact request receipts, then seals. Resync uses the same coordinator acceptance path.
 - **`syncEngine`** diffs nodes / walls / rooms, floors, every opening and every `ELEMENT_REGISTRY` kind (structural +
-  MEP + risers), each entity's change detection in ONE place in `_flush`. Stable identity = `sourceEditorId` =
+  MEP + risers), each entity's change detection in ONE place in `_flush`; an element's change signature is its
+  `toErpPayload` over the WHOLE state of the flush (`_elementSignatures`), so a column-type, reinforcement, cover or
+  room change re-sends every element it reaches (KD-37 fixed). Stable identity = `sourceEditorId` =
   `ifcGlobalId` (floors: their `id`, e.g. `'F1'`). Server creates are idempotent by `sourceEditorId`.
   - **Walls:** a wall a room owns is `ADD_WALL` under that room; a wall no room owns is `ADD_WALL` on its floor (XR-11)
     and is re-sent under a room drawn on it later (the ERP then adds that room's faces). A height / thickness /
@@ -203,8 +207,11 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
 - **Electrical point types (Stream 2).** A placed electrical point carries a canonical `pointType`
   (`src/mep/catalogs/electricalPointTypes.js`) chosen from the floating palette; it rides `ADD_ELEMENT` /
   `UPDATE_ELEMENT` (in `toErpPayload`, part of the change signature) → ERP `BuildingElement.mepPointType`.
-  ⚠️ Updates to any point that has a `roomId` are rejected 400 and dead-lettered (PATCH DTO lacks `roomIfcId`) —
-  **KD-5**. Verified (mocked fetch only) by `verify-electrical-point-type-sync.mjs`.
+  ADD and UPDATE send ONE element body (`liveSync._elementBody`; room ids resolved), and the ERP create and patch DTOs
+  accept the same shape (KD-5 / XR-03, KD-6 / XR-09 fixed 2026-11-03). Verified (mocked fetch) by
+  `verify-electrical-point-type-sync.mjs` and `verify-structural-element-sync.mjs`, whose request bodies are validated
+  against the real ERP DTOs by erp-saas `building-structure/dto/editor-element-payloads.spec.ts` (regenerate its
+  fixture with `ERP_ELEMENT_FIXTURE=<path>` when the payload changes).
 - **Read-only latch** (`editorWriteGuard`): HARD on integrity failure, a canonical-document clash or a row-version
   clash on a shape PATCH; releasable when
   offline. ⚠️ The UI does not consult it — editing continues locally (KD-23).
@@ -213,6 +220,7 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   `-live-sync-ordering` · `-room-type-sync` · `-electrical-point-type-sync` · `-editor-write-guard` · `-readonly-gate` ·
   `-projection-reconstruct` · `-erp-roundtrip` (editor document → ERP → Load from ERP, delete/undo, every kind) ·
   `-wall-opening-sync` (store actions → ops: free wall, opening edit, split, join, undo-of-split, floor edit) ·
+  `-structural-element-sync` (sizes, grades and IS-2502 bars on the wire; whole-state re-send; one ADD/UPDATE body) ·
   `-erp-connection`.
 
 Architecture docs for the integration live in erp-saas: `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`
@@ -221,7 +229,7 @@ and `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-ph
 
 ---
 
-## Verification (55 harnesses)
+## Verification (56 harnesses)
 
 No Jest/Vitest, **no npm `verify`/`test` script, and no git hook** — nothing runs these automatically. Run them
 yourself before committing.
