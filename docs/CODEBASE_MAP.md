@@ -83,7 +83,7 @@ carries geometry. The ERP computes its own quantities and is authoritative for e
 | Path | Files / lines | Purpose |
 |---|---|---|
 | `src/main.jsx` | 82 | Boot: parse+strip `#erpLaunch`, `installAutosave`, `bootPersistence` → taxonomy cache → `initErpSession` (ERP only) → render |
-| `src/App.jsx` | 157 | Legacy `#connect` handoff screen, else `DesktopGate` + every panel mounted flat (App.jsx:116-153). **No `Panels.jsx`.** |
+| `src/App.jsx` | — | `DesktopGate` + every panel mounted flat (the legacy `#connect` handoff is deleted, XR-06). **No `Panels.jsx`.** |
 | `src/store.js` | 2526 | The zustand store: nodes/walls/rooms/stamps, UI keys, history, `loadProject`, quantity getters |
 | `src/structuralSlice.js` | 2170 | columns/beams/slabs/staircases/foundations, `DEFAULT_PROJECT_SETTINGS`, floors, structural quantity getters |
 | `src/mepSlice.js` | 490 | 6 MEP disciplines (plumbing, electrical, hvac, fire, elv, solar) + risers |

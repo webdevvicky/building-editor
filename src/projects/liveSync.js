@@ -670,8 +670,7 @@ export async function fireLiveOp(opType, payload, conn) {
         ..._elementBody(opType, payload, c),
       }
       res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
+      _registerProduced(opType, payload, res, c)
       break
     }
 
