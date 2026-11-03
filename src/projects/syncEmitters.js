@@ -283,7 +283,15 @@ export function elementAddOp(state, entry, el) {
   // leaks into the SHAPE-only UPDATE body or the change signature. Omitted (never
   // null) if an element genuinely has no floor.
   const floorId = el.baseFloorId ?? el.floorId ?? null
-  return { opType: entry.erpOpType, payload: { ...entry.toErpPayload(el, state), kind: entry.erpKind, ...(floorId ? { floorId } : {}) } }
+  return {
+    opType: entry.erpOpType,
+    payload: {
+      ...entry.toErpPayload(el, state),
+      ...(entry.toErpCreateExtras ? entry.toErpCreateExtras(el, state) : {}),
+      kind: entry.erpKindOf ? entry.erpKindOf(el) : entry.erpKind,
+      ...(floorId ? { floorId } : {}),
+    },
+  }
 }
 export function elementUpdateOp(state, entry, el) {
   // UPDATE body is SHAPE-only — must NOT carry `kind` (not whitelisted by PATCH).

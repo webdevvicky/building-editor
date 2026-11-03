@@ -3,8 +3,8 @@ import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 //
 // 2026-05-29 (BBS-categories phase). Pure function. A loft is a shallow slab
 // spanning a wall niche (kitchen / wardrobe / study). Geometry is DERIVED from
-// the wall's loft attribute (no entity of its own):
-//   wall.loft = { enabled, widthFt, depthFt, heightFt }
+// the wall's loft attribute; its identity is a derived member (D-280):
+//   wall.loft = { enabled, widthFt, depthFt, heightFt, thicknessIn }
 // Emits TOP + BOTTOM main mats (each embedded into the wall by a bearing
 // length) + a distribution bar set. Emits only when wall.loft.enabled AND a
 // loft spec resolves; default → no groups, zero BBS impact.
@@ -21,8 +21,9 @@ import {
   getBarMarkPrefix, makeRebarGroup,
 } from '../types.js'
 
-export function generateLoftRebarGroups(ctx, wall) {
-  if (!ctx || !wall) return []
+// elementId: the loft's derived-member id (D-280).
+export function generateLoftRebarGroups(ctx, wall, elementId) {
+  if (!ctx || !wall || !elementId) return []
   const { state } = ctx
   let { params } = ctx
   if (!state || !params) return []
@@ -44,7 +45,6 @@ export function generateLoftRebarGroups(ctx, wall) {
   const prefix = getBarMarkPrefix(BBS_CATEGORY.LOFT)
   const idSlice = String(wall.id ?? '').slice(0, 4)
   const label = `${prefix}-${idSlice}`
-  const elementId = `${wall.id}::loft`
   const floorId = wall.floorId ?? null
   const catMeta = { bbsCategory: BBS_CATEGORY.LOFT, parentMark: label, wallId: wall.id }
 

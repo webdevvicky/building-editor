@@ -105,6 +105,17 @@ const ROOM_PARENT = one('roomIfcId', 'room', 'roomErpId')
 const FLOOR_PARENT = one('floorId', 'floor', 'floorErpId')
 const SELF_WALL = one('ifcGlobalId', 'wall', 'wallErpId')
 const ROOMS_PARENT = many('roomIds', 'room')
+// A derived member (D-280) names the wall, opening or column it hangs from; the ERP
+// resolves them, so they must be there first.
+const derivationHost = (field, kind) => ({
+  kind, field: `derivation.${field}`,
+  pick: (p) => (p.derivation?.[field] ? [p.derivation[field]] : []),
+})
+const DERIVATION_HOSTS = [
+  derivationHost('hostWallIfcId', 'wall'),
+  derivationHost('hostOpeningIfcId', 'opening'),
+  derivationHost('hostColumnIfcId', 'column'),
+]
 
 const OP_DEPENDENCY = {
   ADD_WALL: { parents: [ROOM_PARENT, FLOOR_PARENT], produces: ownId },
@@ -130,8 +141,8 @@ const OP_DEPENDENCY = {
   UPDATE_FLOOR: { parents: [one('ifcGlobalId', 'floor', 'floorErpId')] },
   ADD_ROOM: { produces: ownId },
   ADD_NODE: { produces: ownId },
-  ADD_ELEMENT: { parents: [ROOM_PARENT, FLOOR_PARENT, ROOMS_PARENT], produces: ownId },
-  UPDATE_ELEMENT: { parents: [ROOMS_PARENT] },
+  ADD_ELEMENT: { parents: [ROOM_PARENT, FLOOR_PARENT, ROOMS_PARENT, ...DERIVATION_HOSTS], produces: ownId },
+  UPDATE_ELEMENT: { parents: [ROOMS_PARENT, ...DERIVATION_HOSTS] },
 
   DELETE_WALL: { destroys: ['ifcGlobalId', 'id'] },
   DELETE_ROOM: { destroys: ['ifcGlobalId'] },

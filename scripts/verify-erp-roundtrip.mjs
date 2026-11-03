@@ -24,6 +24,7 @@ import { buildFullSyncOps, wallAddOp, wallDeleteOp, roomAddOp, roomDeleteOp, roo
 import { reconstructFromProjection } from '../src/projects/projectionReconstruct.js'
 import { ELEMENT_ENTRIES } from '../src/projects/elementRegistry.js'
 import { DEFAULT_PROJECT_SETTINGS } from '../src/structuralSlice.js'
+import { reconcileDerivedMembers } from '../src/topology/derivedMembers.js'
 
 let pass = 0, fail = 0
 function ok(label, cond, detail = '') {
@@ -81,6 +82,7 @@ function state() {
       diameterMm: null, heightMm: e.heightMm ?? null, spanMm: e.spanMm ?? null, thicknessMm: e.thicknessMm ?? null,
       structuralLevel: e.structuralLevel ?? null, slabRole: e.slabRole ?? null, slabType: e.slabType ?? null,
       spec: e.spec ?? null, roomSourceEditorIds: (e.roomIds ?? []).map((rid) => sidOf('rooms', rid)).filter(Boolean),
+      derivation: e.derivation ?? null,
     })),
   }
 }
@@ -154,7 +156,9 @@ const doc = {
   nodes: { n1: node('n1', 0, 0), n2: node('n2', 120, 0), n3: node('n3', 120, 120), n4: node('n4', 0, 120), n5: node('n5', 240, 0), n6: node('n6', 240, 120) },
   walls: {
     w1: wall('w1', 'n1', 'n2', [{ id: 'o1', ifcGlobalId: 'ifc-o1', type: 'door', subtype: 'INTERNAL_DOOR', width: 35, height: 85, offset: 20, orient: 0 }]),
-    w2: wall('w2', 'n2', 'n3'), w3: wall('w3', 'n3', 'n4'), w4: wall('w4', 'n4', 'n1'),
+    w2: wall('w2', 'n2', 'n3'),
+    w3: wall('w3', 'n3', 'n4', [{ id: 'o2', ifcGlobalId: 'ifc-o2', type: 'window', width: 48, height: 48, offset: 30, orient: 0, hasSunshade: true }]),
+    w4: wall('w4', 'n4', 'n1'),
     w5: wall('w5', 'n2', 'n5'), w6: wall('w6', 'n5', 'n6'), w7: wall('w7', 'n6', 'n3'),
   },
   rooms: {
@@ -179,6 +183,9 @@ const doc = {
   // column types, beam sizes, slab and BBS settings (XR-02).
   projectSettings: { ...DEFAULT_PROJECT_SETTINGS, name: 'Karthik Villa — Main Block', floors: [{ id: 'F1', label: 'Ground', sequence: 0, plinthHeightFt: 1.5, floorHeightFt: 10, meta: null, underlay: null }] },
 }
+// The derived members (D-280) the drawing implies — its wall bands and the window's sunshade — as the store
+// registers them.
+doc.derivedMembers = reconcileDerivedMembers({}, null, doc)
 
 const conn = { erpUrl: 'http://erp.test', buildingId: BUILDING, floorIds: {}, getToken: async () => 'scoped-token' }
 const fire = async (ops) => { for (const op of ops) if (op) await fireLiveOp(op.opType, op.payload, conn) }
@@ -191,7 +198,9 @@ async function main() {
   await fire(buildFullSyncOps(doc))
   ok('every room and wall reached the ERP once', db.rooms.length === 2 && db.walls.length === 7)
   ok('the shared wall bounds BOTH rooms (owner face + adjacent face)', db.faces.filter((f) => f.wallId === db.walls.find((w) => w.sourceEditorId === 'ifc-w2').id).length === 2)
-  ok('one ERP element per editor element (every kind)', db.elements.length === ELEMENT_ENTRIES.length, `${db.elements.length}/${ELEMENT_ENTRIES.length}`)
+  const elementTotal = ELEMENT_ENTRIES.reduce((n, e) => n + Object.keys(doc[e.collection] ?? {}).length, 0)
+  ok('one ERP element per editor element (every kind, derived members included)', db.elements.length === elementTotal && ELEMENT_ENTRIES.every((e) => Object.keys(doc[e.collection] ?? {}).length > 0), `${db.elements.length}/${elementTotal}`)
+  ok('a derived member names its parents by editor id', db.elements.some((e) => e.derivation?.kind === 'SUNSHADE' && e.derivation.hostOpeningIfcId === 'ifc-o2' && e.derivation.hostWallIfcId === 'ifc-w3'))
 
   console.log('\n2. Delete then undo (the same editor ids come back)')
   const wallRow = db.walls.find((w) => w.sourceEditorId === 'ifc-w2')
@@ -230,6 +239,7 @@ async function main() {
   ok('staircase, riser keep their type', payload.staircases['ifc-st1'].type === 'STRAIGHT' && payload.risers['ifc-rs1'].kind === 'SOIL_STACK')
   ok('MEP keeps type, room, wall, point type', payload.plumbingFixtures['ifc-p1'].type === 'WC' && payload.plumbingFixtures['ifc-p1'].roomId === 'ifc-r1'
     && payload.plumbingFixtures['ifc-p1'].wallId === 'ifc-w1' && payload.electricalPoints['ifc-e1'].pointType === 'AC')
+  ok('the window keeps its sunshade (rebuilt from its derived member)', payload.walls['ifc-w3'].openings[0].hasSunshade === true)
   ok('settings kept, floors from the ERP', payload.projectSettings.name === doc.projectSettings.name && payload.projectSettings.floors[0].label === 'Ground')
 
   console.log('\n4. The rebuilt document synced back changes nothing (no duplicates)')

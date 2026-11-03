@@ -1,6 +1,7 @@
 // elementRegistry.js — SINGLE SOURCE OF TRUTH for BuildingElement kinds.
 //
-// Keyed by the ERP `BuildingElementKind`. Each entry knows everything BOTH
+// Keyed by the ERP `BuildingElementKind` (plus DERIVED_MEMBER_ENTRY below, whose kind
+// is per member: `erpKindOf`). Each entry knows everything BOTH
 // directions need, so adding a new element type = ONE entry here, nothing else:
 //   - collection   : editor store slice key
 //   - erpKind      : ERP BuildingElementKind (== the key)
@@ -32,7 +33,8 @@
 // structural half, structuralFacts.js.
 
 import { inToMm, mmToIn } from './syncMappers.js'
-import { structuralFacts } from './structuralFacts.js'
+import { structuralFacts, derivedMemberFacts, derivedMemberErpKind } from './structuralFacts.js'
+import { describeDerivedMember } from '../boq/elementLabels.js'
 import { resolveBeamEndpoint } from '../topology/beams.js'
 
 const xy = (el) => ({ posXMm: inToMm(el.x), posYMm: inToMm(el.y) })
@@ -230,13 +232,58 @@ export const ELEMENT_REGISTRY = Object.freeze({
   MEP_SOLAR: mep('solarEquipment', 'MEP_SOLAR', 'SOLAR'),
 })
 
+// Derived structural members (erp-saas D-280): bands, inline footings, sunshades,
+// lofts — read-only members the BBS engine builds from a wall, an opening or a column
+// (topology/derivedMembers.js holds their permanent identity). Each goes to the ERP as
+// an element of the kind it is quantified as (`erpKindOf`: BEAM, FOUNDATION or SLAB)
+// with its sizes and bars, its name, and its `derivation` — the kind and the editor
+// ids of the parents it hangs from and of the members it was cut from or combined out
+// of; its name rides the ADD only. Its label number rides in `spec`. "Load from ERP" rebuilds the registry from
+// the projection's `derivation` (`toEditorShape`) and the parent flags it implies.
+export const DERIVED_MEMBER_ENTRY = Object.freeze({
+  collection: 'derivedMembers', erpKind: null, erpOpType: 'ADD_ELEMENT',
+  erpKindOf: derivedMemberErpKind,
+  // The member's name ("Lintel band LB-004") is initial display metadata on the ERP: sent with the ADD only.
+  toErpCreateExtras: (member, state) => ({ name: describeDerivedMember(state, member).title }),
+  toErpPayload: (member, state) => {
+    const wall = member.hostWallId ? state.walls?.[member.hostWallId] : null
+    const opening = member.hostOpeningId ? wall?.openings?.find((o) => o.id === member.hostOpeningId) : null
+    return {
+      ifcGlobalId: member.ifcGlobalId,
+      ...derivedMemberFacts(member, state),
+      derivation: {
+        kind: member.derivationKind,
+        ...(wall ? { hostWallIfcId: wall.ifcGlobalId } : {}),
+        ...(opening ? { hostOpeningIfcId: opening.ifcGlobalId } : {}),
+        ...(member.hostColumnId ? { hostColumnIfcId: ifcOf(state.columns, member.hostColumnId) } : {}),
+        predecessorIfcIds: member.predecessorIfcIds ?? [],
+      },
+      spec: {
+        labelNo: member.labelNo ?? 0,
+        ...(member.derivationKind === 'LOFT' && wall?.loft?.heightFt != null ? { loftHeightFt: wall.loft.heightFt } : {}),
+      },
+    }
+  },
+  toEditorShape: (e, ctx) => ({
+    derivationKind: e.derivation.kind,
+    level: e.derivation.kind === 'WALL_BEAM' || e.derivation.kind === 'TIE_BEAM' ? String(e.structuralLevel ?? '').toLowerCase() : null,
+    hostWallId: e.derivation.hostWallIfcId ?? null,
+    hostOpeningId: e.derivation.hostOpeningIfcId ?? null,
+    hostColumnId: e.derivation.hostColumnIfcId ?? null,
+    floorId: floorOf(e, ctx) ?? null,
+    labelNo: e.spec?.labelNo ?? 0,
+    predecessorIfcIds: e.derivation.predecessorIfcIds ?? [],
+  }),
+})
+
 // A spec value the editor never set stays unset on rebuild, so the schema default applies.
 function withoutNulls(obj) {
   return Object.fromEntries(Object.entries(obj ?? {}).filter(([, v]) => v !== null && v !== undefined))
 }
 
-export const ELEMENT_ENTRIES = Object.values(ELEMENT_REGISTRY)
+export const ELEMENT_ENTRIES = [...Object.values(ELEMENT_REGISTRY), DERIVED_MEMBER_ENTRY]
 export const ELEMENT_COLLECTIONS = ELEMENT_ENTRIES.map((e) => e.collection)
-export const entryForErpKind = (kind) => ELEMENT_REGISTRY[kind] ?? null
+/** The registry entry that rebuilds a projected element: a derived member by its derivation, else by its kind. */
+export const entryForErpElement = (e) => (e.derivation ? DERIVED_MEMBER_ENTRY : ELEMENT_REGISTRY[e.kind] ?? null)
 export const entryForCollection = (collection) =>
   ELEMENT_ENTRIES.find((e) => e.collection === collection) ?? null

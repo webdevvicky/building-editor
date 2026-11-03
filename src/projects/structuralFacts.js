@@ -24,6 +24,8 @@ import { resolveColumnSectionForFloor } from '../specs/resolution.js'
 import { getColumnHeightFt } from '../topology/columns.js'
 import { getRoomGeometry } from '../topology/rooms.js'
 import { safeR2, safeRound } from '../lib/numbers.js'
+import { resolveBeamEndpoint, getDerivedWallBeams, tieBeamForWall } from '../topology/beams.js'
+import { DERIVATION_KIND, inlineFootingColumns } from '../topology/derivedMembers.js'
 
 // ── Bars: one IS-2502 run per project state, grouped by the element they belong to ──
 // The state object is immutable per store version, so a WeakMap keyed on it runs the
@@ -103,5 +105,100 @@ export function structuralFacts(erpKind, el, state) {
     ...(concreteGrade ? { concreteGrade } : {}),
     steelGrade: getIs2502Params(state).defaultSteelGrade,
     bars: barsOf(state, el.id),
+  }
+}
+
+// ── Derived members (D-280): a band, footing, sunshade or loft the BBS engine builds from
+// its parent. Each is quantified like the drawn element of its ERP kind — a band as a
+// BEAM (section × span), a footing as a FOUNDATION pad, a sunshade or loft as a SLAB
+// (plan width × depth × thickness) — from its parent's sizes and its own bars.
+
+const beamEnds = (state, beam) => {
+  const f = resolveBeamEndpoint(state, beam.endpoints?.from)
+  const t = resolveBeamEndpoint(state, beam.endpoints?.to)
+  if (!f || !t) return {}
+  return {
+    fromXMm: inToMm(f.x), fromYMm: inToMm(f.y), toXMm: inToMm(t.x), toYMm: inToMm(t.y),
+    spanMm: inToMm(Math.hypot(t.x - f.x, t.y - f.y)),
+  }
+}
+
+function bandSizes(state, member) {
+  const beam = member.derivationKind === DERIVATION_KIND.TIE_BEAM
+    ? tieBeamForWall(state, member.hostWallId, member.id)
+    : getDerivedWallBeams(state).find((b) => b.sourceWallId === member.hostWallId && b.level === member.level)
+  if (!beam) return {}
+  return { structuralLevel: member.level, ...beamSection(state, { level: member.level }), ...beamEnds(state, beam) }
+}
+
+function footingSizes(state, member) {
+  const hit = inlineFootingColumns(state).find((x) => x.column.id === member.hostColumnId)
+  if (!hit) return {}
+  const { column, columnType: ct } = hit
+  const at = column.attachedNodeId ? state.nodes?.[column.attachedNodeId] : column
+  return {
+    ...(at ? { posXMm: inToMm(at.x), posYMm: inToMm(at.y) } : {}),
+    sectionShape: 'RECT', sectionWidthMm: ftToMm(ct.footingWidthFt), sectionDepthMm: ftToMm(ct.footingLengthFt),
+    thicknessMm: ftToMm(ct.footingDepthFt),
+  }
+}
+
+// A point a given distance along a wall from its n1 node (null: the wall's middle).
+function alongWall(state, wall, offsetIn) {
+  const a = state.nodes?.[wall.n1], b = state.nodes?.[wall.n2]
+  if (!a || !b) return {}
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len === 0) return {}
+  const t = offsetIn == null ? 0.5 : offsetIn / len
+  return { posXMm: inToMm(a.x + (b.x - a.x) * t), posYMm: inToMm(a.y + (b.y - a.y) * t) }
+}
+
+function sunshadeSizes(state, member) {
+  const wall = state.walls?.[member.hostWallId]
+  const opening = wall?.openings?.find((o) => o.id === member.hostOpeningId)
+  const ss = state.projectSettings.sunshadeSettings ?? {}
+  if (!opening || !(ss.projectionFt > 0) || !(ss.thicknessIn > 0)) return {}
+  return {
+    ...alongWall(state, wall, (opening.offset ?? 0) + opening.width / 2),
+    sectionShape: 'RECT', sectionWidthMm: inToMm(opening.width), sectionDepthMm: ftToMm(ss.projectionFt),
+    thicknessMm: inToMm(ss.thicknessIn),
+  }
+}
+
+// A loft's slab is its width × depth; its thickness is the one the loft records — an
+// unset thickness sends none, so the ERP quantifies its bars and no concrete.
+function loftSizes(state, member) {
+  const wall = state.walls?.[member.hostWallId]
+  const loft = wall?.loft
+  if (!loft) return {}
+  return {
+    ...alongWall(state, wall, null),
+    sectionShape: 'RECT', sectionWidthMm: ftToMm(loft.widthFt), sectionDepthMm: ftToMm(loft.depthFt),
+    ...(loft.thicknessIn > 0 ? { thicknessMm: inToMm(loft.thicknessIn) } : {}),
+  }
+}
+
+const DERIVED_KINDS = Object.freeze({
+  WALL_BEAM: { erpKind: 'BEAM', rccKey: 'BEAM', sizes: bandSizes },
+  TIE_BEAM: { erpKind: 'BEAM', rccKey: 'BEAM', sizes: bandSizes },
+  INLINE_FOOTING: { erpKind: 'FOUNDATION', rccKey: 'FOOTING', sizes: footingSizes },
+  SUNSHADE: { erpKind: 'SLAB', rccKey: 'SLAB', sizes: sunshadeSizes },
+  LOFT: { erpKind: 'SLAB', rccKey: 'SLAB', sizes: loftSizes },
+})
+
+/** The ERP element kind a derived member is quantified as. */
+export function derivedMemberErpKind(member) {
+  return DERIVED_KINDS[member.derivationKind].erpKind
+}
+
+/** The structural facts of one derived member: its sizes, grades and bars (never m³ or kg). */
+export function derivedMemberFacts(member, state) {
+  const kind = DERIVED_KINDS[member.derivationKind]
+  const concreteGrade = state.projectSettings.rccSpecs?.concreteGrade?.[kind.rccKey] ?? null
+  return {
+    ...kind.sizes(state, member),
+    ...(concreteGrade ? { concreteGrade } : {}),
+    steelGrade: getIs2502Params(state).defaultSteelGrade,
+    bars: barsOf(state, member.id),
   }
 }

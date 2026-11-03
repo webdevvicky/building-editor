@@ -8,6 +8,7 @@ import { OFFLINE_BBS_SNAPSHOT } from './specs/effectiveBbsSettings.js'
 // `uid` is the store-level ID generator (same counter as nodes/walls/rooms/stamps).
 
 import { MATERIAL_LIBRARY, BONDING } from './materials'
+import { inlineFootingColumns } from './topology/derivedMembers.js'
 import {
   CEMENT_BAGS_PER_M3, STEEL_KG_PER_M3, AGGREGATE_SPLIT,
   SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY, PCC_BEDDING_THICKNESS_FT,
@@ -1485,7 +1486,8 @@ export const createStructuralSlice = (set, get, uid) => ({
   },
 
   // Loft attribute on a wall. partial merges into { enabled, widthFt, depthFt,
-  // heightFt }; pass null to clear the loft entirely.
+  // heightFt, thicknessIn }; pass null to clear the loft entirely. An unset
+  // thickness leaves the loft's concrete unquantified (its bars still count).
   setWallLoft: (wallId, partial) => {
     get()._save()
     set(state => {
@@ -1653,11 +1655,12 @@ export const createStructuralSlice = (set, get, uid) => ({
     const colQ = get().getColumnQuantities()
 
     return _foundationMemo([columns, foundations, projectSettings, colQ], () => {
-    // Fix 1: a column is "attached to a foundation" iff its id appears in some
-    // foundation.columnIds[]. Inline auto-isolated path covers everything else.
-    const attachedSet = new Set()
-    for (const f of Object.values(foundations)) {
-      for (const cid of (f.columnIds || [])) attachedSet.add(cid)
+    // A column a drawn foundation carries has no inline footing; every other column
+    // whose type gives a pad stands on one — the ONE rule, shared with the derived
+    // footing members (topology/derivedMembers.js `inlineFootingColumns`, D-280).
+    const inlineCount = {}
+    for (const { columnType } of inlineFootingColumns({ columns, foundations, projectSettings })) {
+      inlineCount[columnType.id] = (inlineCount[columnType.id] ?? 0) + 1
     }
     const defaultPlumDepthFt = projectSettings.foundationDefaults?.plumDepthFt ?? 0
     const byColumnTypeInline = {}
@@ -1665,8 +1668,7 @@ export const createStructuralSlice = (set, get, uid) => ({
       const ct = columnTypes.find(t => t.id === ctId)
       if (!ct) continue
       const { footingLengthFt: lFt, footingWidthFt: wFt, footingDepthFt: dFt } = ct
-      if (!lFt || !wFt || !dFt) continue
-      const count = Object.values(columns).filter(col => col.columnTypeId === ctId && !attachedSet.has(col.id)).length
+      const count = inlineCount[ctId] ?? 0
       if (count === 0) continue
       const footprintFt2 = lFt * wFt
       byColumnTypeInline[ctId] = {

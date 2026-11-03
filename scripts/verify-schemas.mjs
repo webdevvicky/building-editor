@@ -23,8 +23,8 @@ function check(name, cond, info) {
 }
 
 // ── 1. Registry well-formedness ─────────────────────────────────────────
-check('ENTITY_SCHEMAS has 17 schemas',
-      Object.keys(ENTITY_SCHEMAS).length === 17,
+check('ENTITY_SCHEMAS has 18 schemas (incl. derivedMember, D-280)',
+      Object.keys(ENTITY_SCHEMAS).length === 18,
       `got ${Object.keys(ENTITY_SCHEMAS).length}`)
 
 check('ENTITY_SCHEMAS is frozen', Object.isFrozen(ENTITY_SCHEMAS))

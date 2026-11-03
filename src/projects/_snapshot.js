@@ -27,6 +27,7 @@ export function buildSnapshot(s) {
     elvDevices:       s.elvDevices       ?? {},
     solarEquipment:   s.solarEquipment   ?? {},
     risers:           s.risers           ?? {},
+    derivedMembers:   s.derivedMembers   ?? {},
     ratesByKey:      s.ratesByKey ?? {},
     projectSettings: s.projectSettings,
   }

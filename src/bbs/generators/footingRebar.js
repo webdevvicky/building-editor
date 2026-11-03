@@ -9,8 +9,8 @@ import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 //     dedicated generators — RAFT mesh, STRIP linear, PILE shaft+cap).
 //   • FOUNDATION_ENTITY of type ISOLATED/COMBINED → X + Y mesh + dowels
 //     (one dowel group per unique column type served).
-//   • INLINE_BUCKET → X + Y mesh + dowels (one dowel group, count =
-//     columnSpec.longitudinalBarCount × inline.count).
+//   • INLINE_COLUMN → the inline pad under ONE column no foundation carries (a
+//     derived member, erp-saas D-280): X + Y mesh + that column's dowels.
 //
 // X/Y mesh math fix vs the legacy computeFootingBBS:
 //   the legacy code used max(xDia, yDia) for development length on BOTH
@@ -57,14 +57,8 @@ export function generateFootingRebarGroups(ctx, descriptor) {
     return _buildForFoundationEntity(state, params, foundation)
   }
 
-  if (descriptor.kind === 'INLINE_BUCKET') {
-    return _buildForInlineBucket(
-      state,
-      params,
-      descriptor.columnTypeId,
-      descriptor.inline,
-      descriptor.floorId,
-    )
+  if (descriptor.kind === 'INLINE_COLUMN') {
+    return _buildForInlineColumn(state, params, descriptor)
   }
 
   return []
@@ -109,20 +103,22 @@ function _buildForFoundationEntity(state, params, foundation) {
   return groups
 }
 
-// ── INLINE_BUCKET (auto-isolated, keyed by columnTypeId) ────────────────────
-function _buildForInlineBucket(state, params, columnTypeId, inline, floorId) {
-  if (!columnTypeId || !inline) return []
-  const { lengthFt = 0, widthFt = 0, count = 0 } = inline
-  if (lengthFt <= 0 || widthFt <= 0 || count <= 0) return []
+// ── INLINE_COLUMN (the auto-isolated pad of one column) ─────────────────────
+// descriptor: { column, columnType, elementId, floorId } — elementId is the footing's
+// derived-member id. The pad is the column type's footing size.
+function _buildForInlineColumn(state, params, { column, columnType, elementId, floorId }) {
+  if (!column || !columnType || !elementId) return []
+  const lengthFt = columnType.footingLengthFt ?? 0
+  const widthFt  = columnType.footingWidthFt ?? 0
+  if (lengthFt <= 0 || widthFt <= 0) return []
 
-  const resolved = resolveFootingReinforcementSpec(state, { columnTypeId })
+  const resolved = resolveFootingReinforcementSpec(state, { columnTypeId: columnType.id })
   if (!resolved.spec) return []
 
-  const footingLabel = _sanitizeLabel(inline.label) ?? `F-${columnTypeId}`
-  const elementId = `INLINE:${columnTypeId}`
+  const typeLabel = _sanitizeLabel(columnType.label) ?? `F-${columnType.id}`
+  const footingLabel = column.labelNo != null ? `${typeLabel}-${column.labelNo}` : typeLabel
   const groups = []
 
-  // X + Y mesh — counts multiplied by inline.count (bucket aggregates N footings).
   groups.push(..._buildMeshGroups({
     spec:          resolved.spec,
     specId:        resolved.specId,
@@ -133,33 +129,25 @@ function _buildForInlineBucket(state, params, columnTypeId, inline, floorId) {
     footingLabel,
     elementId,
     floorId,
-    footingCount:  count,
+    footingCount:  1,
   }))
 
-  // Dowels — pick a representative column of this type to resolve column spec.
-  const repColumn = _findRepresentativeColumnForType(state, columnTypeId)
-  if (repColumn) {
-    const columnTypes = state.projectSettings?.columnTypes ?? []
-    const ct = columnTypes.find(t => t.id === columnTypeId)
-    const colResolved = resolveColumnReinforcementSpecForColumn(state, repColumn, ct)
-    if (colResolved.spec) {
-      const cSpec = colResolved.spec
-      const totalDowels = (cSpec.longitudinalBarCount ?? 0) * count
-      if (totalDowels > 0) {
-        groups.push(_buildDowelGroup({
-          params,
-          markId:        `${footingLabel}-D`,
-          elementId,
-          floorId,
-          columnSpec:    cSpec,
-          columnSpecId:  colResolved.specId,
-          columnSource:  colResolved.source,
-          count:         totalDowels,
-          columnTypeId,
-          parentMark:    footingLabel,
-        }))
-      }
-    }
+  // Dowels — this column's own longitudinal bars.
+  const colResolved = resolveColumnReinforcementSpecForColumn(state, column, columnType)
+  const dowels = colResolved.spec?.longitudinalBarCount ?? 0
+  if (dowels > 0) {
+    groups.push(_buildDowelGroup({
+      params,
+      markId:        `${footingLabel}-D`,
+      elementId,
+      floorId,
+      columnSpec:    colResolved.spec,
+      columnSpecId:  colResolved.specId,
+      columnSource:  colResolved.source,
+      count:         dowels,
+      columnTypeId:  columnType.id,
+      parentMark:    footingLabel,
+    }))
   }
 
   return groups
@@ -374,16 +362,4 @@ function _sanitizeLabel(label) {
   if (typeof label !== 'string') return null
   const cleaned = label.replace(/\s+/g, '')
   return cleaned.length > 0 ? cleaned : null
-}
-
-function _findRepresentativeColumnForType(state, columnTypeId) {
-  const columns = state.columns
-  if (!columns) return null
-  // Stable: sort ids lex asc, pick first matching column.
-  const ids = Object.keys(columns).sort()
-  for (const id of ids) {
-    const col = columns[id]
-    if (col?.columnTypeId === columnTypeId) return col
-  }
-  return null
 }
