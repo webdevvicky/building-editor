@@ -513,6 +513,9 @@ export const FK_DESCRIPTORS = Object.freeze([
   // Foundations → columns + walls
   Object.freeze({ collection: 'foundations', field: 'columnIds', target: 'columns', isArray: true }),
   Object.freeze({ collection: 'foundations', field: 'wallIds',   target: 'walls',   isArray: true }),
+  // Derived structural members (D-280) → the wall / column they hang from
+  Object.freeze({ collection: 'derivedMembers', field: 'hostWallId',   target: 'walls',   optional: true }),
+  Object.freeze({ collection: 'derivedMembers', field: 'hostColumnId', target: 'columns', optional: true }),
   // MEP — wallId + roomId on 6 collections
   ...[
     'plumbingFixtures', 'electricalPoints', 'hvacUnits',
@@ -544,6 +547,7 @@ export const FLOOR_REF_DESCRIPTORS = Object.freeze([
   ...['plumbingFixtures', 'electricalPoints', 'hvacUnits',
       'fireDevices', 'elvDevices', 'solarEquipment'].map(coll =>
     Object.freeze({ collection: coll, field: 'floorId' })),
+  Object.freeze({ collection: 'derivedMembers', field: 'floorId' }),
   Object.freeze({ collection: 'risers', field: 'fromFloorId' }),
   Object.freeze({ collection: 'risers', field: 'toFloorId' }),
 ])

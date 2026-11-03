@@ -7,6 +7,7 @@ import { toast } from './ui/Toast'
 import SelectionPanel from './ui/SelectionPanel'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
+import DerivedMembersSection from './DerivedMembersSection'
 
 const rowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' }
 
@@ -239,6 +240,7 @@ export default function ColumnPanel() {
           </div>
         )
       })()}
+      <DerivedMembersSection columnId={selectedColumnId} />
     </SelectionPanel>
   )
 }

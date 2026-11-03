@@ -23,6 +23,7 @@ import fireDeviceSchema       from './fireDevice.js'
 import elvDeviceSchema        from './elvDevice.js'
 import solarEquipmentSchema   from './solarEquipment.js'
 import riserSchema            from './riser.js'
+import derivedMemberSchema    from './derivedMember.js'
 
 export const ENTITY_SCHEMAS = Object.freeze({
   node:             nodeSchema,
@@ -42,6 +43,7 @@ export const ENTITY_SCHEMAS = Object.freeze({
   elvDevice:        elvDeviceSchema,
   solarEquipment:   solarEquipmentSchema,
   riser:            riserSchema,
+  derivedMember:    derivedMemberSchema,
 })
 
 // Map an entity's storeSlice path (e.g. 'model.walls' or legacy 'walls')
@@ -71,5 +73,5 @@ export {
   nodeSchema, wallSchema, openingSchema, roomSchema, stampSchema,
   columnSchema, beamSchema, slabSchema, staircaseSchema, foundationSchema,
   plumbingFixtureSchema, electricalPointSchema, hvacUnitSchema,
-  fireDeviceSchema, elvDeviceSchema, solarEquipmentSchema, riserSchema,
+  fireDeviceSchema, elvDeviceSchema, solarEquipmentSchema, riserSchema, derivedMemberSchema,
 }

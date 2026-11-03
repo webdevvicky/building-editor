@@ -58,6 +58,7 @@ export const LEGACY_ACCESSORS = Object.freeze([
   Object.freeze({ path: 'elvDevices',       slice: 'model', kind: 'collection', killBy: KILL_BY, notes: 'MEP — ELV devices' }),
   Object.freeze({ path: 'solarEquipment',   slice: 'model', kind: 'collection', killBy: KILL_BY, notes: 'MEP — solar (deferred)' }),
   Object.freeze({ path: 'risers',           slice: 'model', kind: 'collection', killBy: KILL_BY, notes: 'Cross-discipline risers' }),
+  Object.freeze({ path: 'derivedMembers',   slice: 'model', kind: 'collection', killBy: KILL_BY, notes: 'Derived structural members (bands, inline footings, sunshades, lofts) — identity only, D-280' }),
   Object.freeze({ path: 'projectSettings',  slice: 'model', kind: 'object',     killBy: KILL_BY, notes: 'Project-level configuration tree' }),
 
   // ── View slice (selection / panels / transient) ──────────────────────

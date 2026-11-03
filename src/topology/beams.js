@@ -86,10 +86,16 @@ export function getBeamLengthFt(state, beam) {
 // callers (boq/scope) pass in a state shim with floor-filtered collections,
 // so the memo cell naturally distinguishes scoped vs unscoped via the
 // reference of the rooms map (different objects).
+//
+// No double counting (erp-saas D-280): a wall whose band an EXPLICIT beam of the same
+// level already covers end to end implies no derived beam of that level — the drawn
+// beam is that member.
 export function getDerivedWallBeams(state) {
   const { walls, nodes, columns, rooms } = state
-  return _derivedBeamsMemo([walls, nodes, columns, rooms], () => {
+  const beams = state.beams ?? {}
+  return _derivedBeamsMemo([walls, nodes, columns, rooms, beams], () => {
     const nodeToColId = getNodeToColumnIndex(state)
+    const explicit = Object.values(beams)
     const result = []
     for (const wall of Object.values(walls)) {
       if (wall.isVirtual || wall.isPlot) continue
@@ -98,6 +104,7 @@ export function getDerivedWallBeams(state) {
       if (!n1 || !n2) continue
       for (const lvl of BEAM_LEVEL_REGISTRY) {
         if (!flags[lvl.flagName]) continue
+        if (explicit.some((b) => b.level === lvl.id && _beamCoversWall(state, b, n1, n2))) continue
         const fromRef = nodeToColId[wall.n1]
           ? { type: 'COLUMN', columnId: nodeToColId[wall.n1] }
           : { type: 'POINT', x: n1.x, y: n1.y }
@@ -115,6 +122,39 @@ export function getDerivedWallBeams(state) {
     }
     return result
   })
+}
+
+// A tie / grade band along a wall that opts in (`wall.hasTieBeam`): a wall-derived
+// band of class 'tie'. Not in BEAM_LEVEL_REGISTRY, so the editor's own beam BOQ never
+// counts it; its BBS and its ERP element read it here (a derived member, D-280).
+export function tieBeamForWall(state, wallId, id) {
+  const wall = state.walls[wallId]
+  const n1 = state.nodes[wall.n1], n2 = state.nodes[wall.n2]
+  return {
+    id,
+    source: 'WALL_DERIVED',
+    beamClass: 'tie',
+    level: 'tie',
+    sourceWallId: wall.id,
+    floorId: wall.floorId,
+    endpoints: { from: { type: 'POINT', x: n1.x, y: n1.y }, to: { type: 'POINT', x: n2.x, y: n2.y } },
+  }
+}
+
+// An explicit beam lies along the wall n1→n2 and spans it end to end (within 1 in).
+const COVER_TOLERANCE_IN = 1
+function _beamCoversWall(state, beam, n1, n2) {
+  const a = resolveBeamEndpoint(state, beam.endpoints?.from)
+  const b = resolveBeamEndpoint(state, beam.endpoints?.to)
+  if (!a || !b) return false
+  const dx = n2.x - n1.x, dy = n2.y - n1.y
+  const len = Math.hypot(dx, dy)
+  if (len === 0) return false
+  const off = (p) => Math.abs((p.x - n1.x) * dy - (p.y - n1.y) * dx) / len
+  if (off(a) > COVER_TOLERANCE_IN || off(b) > COVER_TOLERANCE_IN) return false
+  const t = (p) => ((p.x - n1.x) * dx + (p.y - n1.y) * dy) / len
+  const lo = Math.min(t(a), t(b)), hi = Math.max(t(a), t(b))
+  return lo <= COVER_TOLERANCE_IN && hi >= len - COVER_TOLERANCE_IN
 }
 
 // Merges EXPLICIT (persisted) + WALL_DERIVED (in-memory) beams into one list.

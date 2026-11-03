@@ -12,6 +12,7 @@ import FeetInchesInput from './ui/FeetInchesInput'
 import InchesInput from './ui/InchesInput'
 import { DEFAULT_PRECISION } from '../lib/units'
 import { useUnits } from '../hooks/useUnits'
+import DerivedMembersSection from './DerivedMembersSection'
 
 const PRESETS = {
   door:   { width: 3, height: 7 },
@@ -47,6 +48,8 @@ export default function OpeningPanel() {
   const setWallBeamFlags    = useStore(s => s.setWallBeamFlags)
   const classifyWallBeamFlags = useStore(s => s.classifyWallBeamFlags)
   const setOpeningSunshade  = useStore(s => s.setOpeningSunshade)
+  const setWallTieBeam      = useStore(s => s.setWallTieBeam)
+  const setWallLoft         = useStore(s => s.setWallLoft)
   const selectWall          = useStore(s => s.selectWall)
   const selectOpening       = useStore(s => s.selectOpening)
   const { fmtLength }       = useUnits()
@@ -275,6 +278,41 @@ export default function OpeningPanel() {
         )
       })}
 
+      {/* Tie band + loft — wall attributes the BBS builds derived members from (D-280) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
+        <input type="checkbox" id="tieBeamChk" checked={wall.hasTieBeam === true}
+          onChange={e => setWallTieBeam(selectedWallId, e.target.checked ? true : null)} style={{ cursor: 'pointer' }} />
+        <label htmlFor="tieBeamChk" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
+          Tie / grade band
+        </label>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
+        <input type="checkbox" id="loftChk" checked={wall.loft?.enabled === true}
+          onChange={e => setWallLoft(selectedWallId, e.target.checked
+            ? { enabled: true }
+            : null)}
+          style={{ cursor: 'pointer' }} />
+        <label htmlFor="loftChk" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
+          Loft (RCC shelf){wall.loft?.enabled === true && !(wall.loft.widthFt > 0 && wall.loft.depthFt > 0) ? ' — set its width and depth' : ''}
+        </label>
+      </div>
+      {wall.loft?.enabled === true && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+          <Field label="W" inline>
+            <FeetInchesInput value={Number(wall.loft.widthFt ?? 0)} onCommit={ft => setWallLoft(selectedWallId, { widthFt: ft })} min={0.5} />
+          </Field>
+          <Field label="D" inline>
+            <FeetInchesInput value={Number(wall.loft.depthFt ?? 0)} onCommit={ft => setWallLoft(selectedWallId, { depthFt: ft })} min={0.5} />
+          </Field>
+          <Field label="At" inline>
+            <FeetInchesInput value={Number(wall.loft.heightFt ?? 0)} onCommit={ft => setWallLoft(selectedWallId, { heightFt: ft })} min={0} />
+          </Field>
+          <Field label="Thk" inline>
+            <InchesInput value={wall.loft.thicknessIn ?? null} onCommit={inches => setWallLoft(selectedWallId, { thicknessIn: inches })} />
+          </Field>
+        </div>
+      )}
+
       <div style={{ borderTop: '1px solid var(--color-border)', margin: 'var(--space-2) 0' }} />
       <div style={{
         fontWeight: 'var(--weight-semibold)',
@@ -435,6 +473,8 @@ export default function OpeningPanel() {
           </button>
         ))}
       </div>
+
+      <DerivedMembersSection wallId={selectedWallId} />
     </SelectionPanel>
   )
 }

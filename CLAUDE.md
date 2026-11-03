@@ -87,6 +87,23 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
   Wastage is captured with the snapshot; procurement wastage is applied by the ERP's same project/company reader.
   `verify-bbs-settings.mjs` covers the drawing action, calculations, snapshot/reopen, overrides, review/apply and failures.
 
+- **Derived structural members (erp-saas D-280):** `topology/derivedMembers.js` is the one answer to which bands
+  (plinth/lintel/roof, tie), inline footings, sunshades and lofts the drawing implies (`derivedMemberCandidates`) and
+  to who each is (`reconcileDerivedMembers`). `state.derivedMembers` holds only identity and parent links (wall,
+  opening, column, floor, label number, predecessors); sizes and bars are always derived. The store keeps it in step
+  in the SAME commit as the parent change (`store/derivedMembersMiddleware.js` wraps every `set` and `setState`); it is
+  in undo frames and the canonical snapshot. Ids are permanent: a sunshade is keyed by its opening (move/resize/split
+  keep it), a footing by its column, a loft by its wall, a band by wall + level; a band cut by a split or merged by a
+  join gets new ids naming its predecessors, a band rebuilt whole on the same line keeps its id. The BBS engine groups
+  every member's bars under its id (one inline footing per column, no longer one bucket per column type). No double
+  counting: a column a drawn foundation carries has no inline footing (`inlineFootingColumns`, shared with
+  `getFoundationQuantities`), and `getDerivedWallBeams` skips a band an explicit beam of the same level covers end to
+  end. They sync through `elementRegistry.DERIVED_MEMBER_ENTRY` (kind BEAM / FOUNDATION / SLAB via `erpKindOf`, sizes
+  and bars from `structuralFacts.derivedMemberFacts`, `derivation` with the parents' ifcGlobalIds, the name on the
+  ADD only); `liveSync` makes ADD/UPDATE wait for the parents. Read-only in the UI: `DerivedMembersSection` in the wall
+  and column panels; the wall panel also sets the tie band and the loft (a loft without a thickness has no concrete).
+  The lintel is the IS 4326 band along a wall (per wall, not per opening). `verify-derived-members.mjs` covers it.
+
 These are the load-bearing rules. They are an adopted design basis; no owner decision is recorded for them unless a
 rule says so. The full list (about 29 rule blocks), each with status and authority, is in
 [`docs/DOMAIN-RULES.md`](docs/DOMAIN-RULES.md).
@@ -139,8 +156,8 @@ editor through the projection (erp-saas D-271, XR-02 fixed 2026-11-03):** `proje
 is resolved to mm here; the ERP cannot read type ids), its height / slab area / footing pad, its concrete and steel
 grade and its bar list from `computeRebarGroups` only (never the legacy `computeBBSQuantities`). The ERP stores them
 and works out concrete m³ and steel kg itself; it refuses a concrete or steel figure on the wire. Members with no
-entity of their own (wall-derived beams, inline footings, tie beams, sunshades, lofts) are not sent yet
-(`docs/DOMAIN-RULES.md` §12 C-4). Wire units are integer **mm**
+entity of their own (wall bands, inline footings, tie bands, sunshades, lofts) are sent as **derived members**
+(erp-saas D-280, below). Wire units are integer **mm**
 for coordinates, heights, thicknesses and lengths; feet only for floor height and ERP room length/width.
 
 ### The write pipeline (`src/projects/`)
@@ -236,6 +253,7 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   `-projection-reconstruct` · `-erp-roundtrip` (editor document → ERP → Load from ERP, delete/undo, every kind) ·
   `-wall-opening-sync` (store actions → ops: free wall, opening edit, split, join, undo-of-split, floor edit) ·
   `-structural-element-sync` (sizes, grades and IS-2502 bars on the wire; whole-state re-send; one ADD/UPDATE body) ·
+  `-derived-members` (derived member identity across move / split / join / delete / reopen, no double counting) ·
   `-erp-connection`.
 
 Architecture docs for the integration live in erp-saas: `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`

@@ -33,6 +33,10 @@ import { generateSunshadeRebarGroups } from './generators/sunshadeRebar.js'
 import { generateLoftRebarGroups }   from './generators/loftRebar.js'
 import { generateStaircaseRebarGroups } from './generators/staircaseRebar.js'
 import { getIs2502Params, CATALOG_VERSION } from '../specs/cuttingLength.js'
+import { getDerivedWallBeams, tieBeamForWall } from '../topology/beams.js'
+import {
+  DERIVATION_KIND, derivedMembersWithIdentity, derivedElementId, inlineFootingColumns,
+} from '../topology/derivedMembers.js'
 import { ELEMENT_TYPE, REBAR_ROLE } from './types.js'
 
 // Site-order for elements within a floor — matches construction sequence.
@@ -138,31 +142,49 @@ export function computeRebarGroups(state, opts = {}) {
     const groups = generateFootingRebarGroups(ctx, { kind: 'FOUNDATION_ENTITY', foundation: f })
     if (groups && groups.length) all.push(...groups)
   }
-  // Inline auto-isolated buckets (columns with no foundation attached).
-  // We use the existing aggregator's inline summary to know which buckets exist.
-  const fdnQ = state.getFoundationQuantities?.()
-  if (fdnQ?.byColumnTypeInline) {
-    for (const [ctId, inline] of Object.entries(fdnQ.byColumnTypeInline)) {
-      const inlineFloorId = _inlineFootingFloorIdForType(state, ctId, ctx.floorIdFilter)
-      if (ctx.floorIdFilter && inlineFloorId !== ctx.floorIdFilter) continue
-      const groups = generateFootingRebarGroups(ctx, {
-        kind: 'INLINE_BUCKET',
-        columnTypeId: ctId,
-        inline,
-        floorId: inlineFloorId,
-      })
-      if (groups && groups.length) all.push(...groups)
-    }
+  // Derived members (erp-saas D-280): every member the drawing implies, each under
+  // its permanent id (topology/derivedMembers.js) — the id the ERP element carries.
+  const derived = derivedMembersWithIdentity(state)
+  const ofKind = (kind) => derived.filter((d) => d.candidate.derivationKind === kind
+    && (!ctx.floorIdFilter || d.candidate.floorId === ctx.floorIdFilter))
+
+  // Inline footings — one per column no drawn foundation carries.
+  const inlineByColumn = new Map(inlineFootingColumns(state).map((x) => [x.column.id, x]))
+  for (const d of ofKind(DERIVATION_KIND.INLINE_FOOTING)) {
+    const { column, columnType } = inlineByColumn.get(d.candidate.hostColumnId)
+    const groups = generateFootingRebarGroups(ctx, {
+      kind: 'INLINE_COLUMN', column, columnType, elementId: derivedElementId(d), floorId: d.candidate.floorId,
+    })
+    if (groups && groups.length) all.push(...groups)
   }
 
   // ── Beams ──────────────────────────────────────────────────────────────
-  const allBeams = state.getAllBeams?.() ?? Object.values(state.beams ?? {})
-  for (const beam of allBeams) {
-    if (ctx.floorIdFilter && beam.floorId !== ctx.floorIdFilter) {
-      const wall = state.walls?.[beam.sourceWallId]
-      if (!wall || wall.floorId !== ctx.floorIdFilter) continue
-    }
+  for (const beam of Object.values(state.beams ?? {})) {
+    if (ctx.floorIdFilter && beam.floorId !== ctx.floorIdFilter) continue
     const groups = generateBeamRebarGroups(ctx, beam)
+    if (groups && groups.length) all.push(...groups)
+  }
+  // Wall-derived bands (plinth / lintel / roof) and tie bands, as beams along their wall.
+  const wallBeams = new Map(getDerivedWallBeams(state).map((b) => [`${b.sourceWallId}|${b.level}`, b]))
+  for (const d of ofKind(DERIVATION_KIND.WALL_BEAM)) {
+    const beam = wallBeams.get(`${d.candidate.hostWallId}|${d.candidate.level}`)
+    const groups = generateBeamRebarGroups(ctx, { ...beam, id: derivedElementId(d) })
+    if (groups && groups.length) all.push(...groups)
+  }
+  for (const d of ofKind(DERIVATION_KIND.TIE_BEAM)) {
+    const groups = generateBeamRebarGroups(ctx, tieBeamForWall(state, d.candidate.hostWallId, derivedElementId(d)))
+    if (groups && groups.length) all.push(...groups)
+  }
+
+  // ── Sunshades (window openings with hasSunshade) and lofts (walls with a loft). ──
+  for (const d of ofKind(DERIVATION_KIND.SUNSHADE)) {
+    const wall = state.walls[d.candidate.hostWallId]
+    const opening = wall.openings.find((o) => o.id === d.candidate.hostOpeningId)
+    const groups = generateSunshadeRebarGroups(ctx, { wall, opening, elementId: derivedElementId(d) })
+    if (groups && groups.length) all.push(...groups)
+  }
+  for (const d of ofKind(DERIVATION_KIND.LOFT)) {
+    const groups = generateLoftRebarGroups(ctx, state.walls[d.candidate.hostWallId], derivedElementId(d))
     if (groups && groups.length) all.push(...groups)
   }
 
@@ -170,44 +192,6 @@ export function computeRebarGroups(state, opts = {}) {
   for (const slab of Object.values(state.slabs ?? {})) {
     if (ctx.floorIdFilter && slab.floorId !== ctx.floorIdFilter) continue
     const groups = generateSlabRebarGroups(ctx, slab)
-    if (groups && groups.length) all.push(...groups)
-  }
-
-  // ── Tie / grade band beams (BBS-only, derived from walls opted in via
-  // wall.hasTieBeam). Synthesized as wall-derived band beams — NOT added to
-  // BEAM_LEVEL_REGISTRY, so the legacy BOQ / masonry pipeline is untouched.
-  for (const wall of Object.values(state.walls ?? {})) {
-    if (wall.hasTieBeam !== true) continue
-    if (wall.isVirtual || wall.isPlot) continue
-    if (ctx.floorIdFilter && wall.floorId !== ctx.floorIdFilter) continue
-    const n1 = state.nodes?.[wall.n1], n2 = state.nodes?.[wall.n2]
-    if (!n1 || !n2) continue
-    const tieBeam = {
-      id: `tie_${wall.id}`,
-      source: 'WALL_DERIVED',
-      beamClass: 'tie',
-      level: 'tie',
-      sourceWallId: wall.id,
-      floorId: wall.floorId,
-      endpoints: { from: { type: 'POINT', x: n1.x, y: n1.y }, to: { type: 'POINT', x: n2.x, y: n2.y } },
-    }
-    const groups = generateBeamRebarGroups(ctx, tieBeam)
-    if (groups && groups.length) all.push(...groups)
-  }
-
-  // ── Sunshades (per window opening with hasSunshade). ─────────────────────
-  for (const wall of Object.values(state.walls ?? {})) {
-    if (ctx.floorIdFilter && wall.floorId !== ctx.floorIdFilter) continue
-    for (const opening of (wall.openings ?? [])) {
-      const groups = generateSunshadeRebarGroups(ctx, { wall, opening })
-      if (groups && groups.length) all.push(...groups)
-    }
-  }
-
-  // ── Lofts (per wall with loft.enabled). ──────────────────────────────────
-  for (const wall of Object.values(state.walls ?? {})) {
-    if (ctx.floorIdFilter && wall.floorId !== ctx.floorIdFilter) continue
-    const groups = generateLoftRebarGroups(ctx, wall)
     if (groups && groups.length) all.push(...groups)
   }
 
@@ -347,22 +331,6 @@ function _columnSpansFloor(state, column, floorId) {
   const here = seqOf.get(floorId)
   if (base == null || top == null || here == null) return column.floorId === floorId
   return here >= base && here <= top
-}
-
-// For an inline-footing bucket keyed by columnTypeId, find any one column on
-// the requested floor that owns this type. Used to assign a floorId to the
-// inline RebarGroups (they don't carry one natively — the bucket is per-type).
-function _inlineFootingFloorIdForType(state, columnTypeId, floorIdFilter) {
-  for (const col of Object.values(state.columns ?? {})) {
-    if (col.columnTypeId !== columnTypeId) continue
-    const base = col.baseFloorId ?? col.floorId
-    if (!floorIdFilter || base === floorIdFilter) return base
-  }
-  // Default: the lowest-sequence floor.
-  const floors = state?.projectSettings?.floors ?? []
-  if (!floors.length) return null
-  const sorted = floors.slice().sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
-  return sorted[0]?.id ?? null
 }
 
 export { ELEMENT_TYPE, REBAR_ROLE } from './types.js'

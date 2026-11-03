@@ -28,7 +28,7 @@
 //     order (N,S,E,W; the state endpoint returns walls createdAt-asc).
 
 import { mmToIn } from './syncMappers.js'
-import { ELEMENT_ENTRIES, entryForErpKind } from './elementRegistry.js'
+import { ELEMENT_ENTRIES, entryForErpElement } from './elementRegistry.js'
 import { SCHEMAS_BY_SLICE } from '../schema/entities/index.js'
 import { normalizeEntity } from '../schema/normalize.js'
 import { SCHEMA_VERSION } from '../operations/_schemaVersion.js'
@@ -295,7 +295,7 @@ export function reconstructFromProjection(state, keep = {}) {
   // 4. Every element kind, through its registry inverse + its entity schema defaults.
   const collections = Object.fromEntries(ELEMENT_ENTRIES.map((e) => [e.collection, {}]))
   for (const e of erpElements) {
-    const entry = entryForErpKind(e.kind)
+    const entry = entryForErpElement(e)
     if (!entry) { skipped.elements.push(e.kind); continue }
     const id = e.sourceEditorId ?? uid('el')
     if (!e.sourceEditorId && e.id) idMappings.push([id, e.id])
@@ -304,6 +304,27 @@ export function reconstructFromProjection(state, keep = {}) {
     )
     const { entity } = normalizeEntity({ ...shape, id, ifcGlobalId: id }, SCHEMAS_BY_SLICE[entry.collection])
     collections[entry.collection][id] = entity
+  }
+
+  // A derived member stands for a flag on its parent (D-280): restore the flags the
+  // projection's derived sunshades, tie bands and lofts imply.
+  for (const e of erpElements) {
+    const kind = e.derivation?.kind
+    const wall = walls[e.derivation?.hostWallIfcId]
+    if (!wall) continue
+    if (kind === 'SUNSHADE') {
+      wall.openings = wall.openings.map((o) => (o.id === e.derivation.hostOpeningIfcId ? { ...o, hasSunshade: true } : o))
+    } else if (kind === 'TIE_BEAM') {
+      wall.hasTieBeam = true
+    } else if (kind === 'LOFT') {
+      wall.loft = {
+        enabled: true,
+        widthFt: mmToIn(e.sectionWidthMm) / 12,
+        depthFt: mmToIn(e.sectionDepthMm) / 12,
+        heightFt: e.spec?.loftHeightFt ?? null,
+        thicknessIn: e.thicknessMm != null ? mmToIn(e.thicknessMm) : null,
+      }
+    }
   }
 
   const currentSettings = keep.projectSettings ?? undefined

@@ -57,7 +57,7 @@ export const wallSchema = Object.freeze({
     // BBS impact). true = synthesize a BBS-only tie band along this wall.
     hasTieBeam:            Object.freeze({ type: 'boolean|null',  required: true, default: null }),
     // Loft (RCC shelf cast into this wall). null = none. When non-null:
-    //   { enabled: bool, widthFt, depthFt, heightFt }
+    //   { enabled: bool, widthFt, depthFt, heightFt, thicknessIn }
     loft:                  Object.freeze({ type: 'object|null',   required: true, default: null }),
     // Per-wall loft reinforcement spec override (resolveLoftReinforcementSpec
     // INSTANCE tier). null = inherit bbsDefaults.LOFT.

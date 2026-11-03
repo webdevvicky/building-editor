@@ -4,7 +4,7 @@ import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // 2026-05-29 (BBS-categories phase). Pure function. A sunshade is a cantilever
 // slab projecting from the lintel above a window opening. It carries TOP steel
 // only (cantilever tension is on the top face). Geometry is DERIVED from the
-// opening (no entity of its own):
+// opening; its identity is a derived member (D-280):
 //   • main (top) cantilever bars — anchored INTO the lintel by a development
 //     length, run the projection, and turn down at the free edge. Shape L-bar.
 //   • distribution bars — straight, run along the opening width.
@@ -26,13 +26,13 @@ import {
   getBarMarkPrefix, makeRebarGroup,
 } from '../types.js'
 
-// descriptor: { wall, opening }
+// descriptor: { wall, opening, elementId } — elementId is the sunshade's derived-member id (D-280)
 export function generateSunshadeRebarGroups(ctx, descriptor) {
   if (!ctx || !descriptor) return []
   const { state } = ctx
   let { params } = ctx
-  const { wall, opening } = descriptor
-  if (!state || !params || !wall || !opening) return []
+  const { wall, opening, elementId } = descriptor
+  if (!state || !params || !wall || !opening || !elementId) return []
   // Sunshades sit over window openings (matches getSunshadeQuantities).
   if (opening.type !== 'window' || !opening.hasSunshade) return []
 
@@ -54,7 +54,6 @@ export function generateSunshadeRebarGroups(ctx, descriptor) {
   const prefix       = getBarMarkPrefix(BBS_CATEGORY.SUNSHADE)
   const idSlice      = String(opening.id ?? '').slice(0, 4)
   const label        = `${prefix}-${idSlice}`
-  const elementId    = `${wall.id}::${opening.id}`
   const floorId      = wall.floorId ?? null
   const catMeta      = { bbsCategory: BBS_CATEGORY.SUNSHADE, parentMark: label, openingId: opening.id, wallId: wall.id }
 

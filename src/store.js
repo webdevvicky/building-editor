@@ -59,6 +59,9 @@ import {
 } from './constants/joinery.js'
 import { uid, uidIfc, newEntityIds } from './lib/ids.js'
 import { assignLabelsToState } from './boq/elementLabels.js'
+import { derivedMembersMiddleware } from './store/derivedMembersMiddleware.js'
+import { derivedMemberSchema } from './schema/entities/derivedMember.js'
+import { normalizeEntity } from './schema/normalize.js'
 // Live ERP geometry sync is wired centrally via the diff-based syncEngine
 // (src/projects/syncEngine.js) which subscribes to this store — NOT inline in
 // each action. Mutation actions stay sync-agnostic.
@@ -112,6 +115,16 @@ function removeOrphanNodes(nodes, walls) {
 // getActiveFloorNodes / getActiveFloorWalls imports above. Topology principle:
 // spatial alignment across floors NEVER implies shared ownership.
 
+// The collections one undo frame holds. `derivedMembers` rides with the geometry so an
+// undo restores the derived members' identities with their parents (D-280).
+const HISTORY_COLLECTIONS = Object.freeze([
+  'nodes', 'walls', 'rooms', 'stamps', 'columns', 'beams', 'slabs', 'staircases', 'foundations',
+  'plumbingFixtures', 'electricalPoints', 'hvacUnits', 'fireDevices', 'elvDevices', 'solarEquipment', 'risers',
+  'derivedMembers',
+])
+const historyFrame = (s) => Object.fromEntries(HISTORY_COLLECTIONS.map((k) => [k, s[k]]))
+const restoreFrame = (frame, s) => Object.fromEntries(HISTORY_COLLECTIONS.map((k) => [k, frame[k] ?? s[k]]))
+
 // Dev-only handle for browser console debugging. Stripped from production builds.
 // Usage in DevTools: useStore.getState().getValidRoomIds(), etc.
 function exposeStoreForDev(store) {
@@ -121,8 +134,9 @@ function exposeStoreForDev(store) {
   }
 }
 
-export const useStore = create((set, get) => ({
+export const useStore = create(derivedMembersMiddleware((set, get) => ({
   nodes:  {},
+  derivedMembers: {},
   walls:  {},
   rooms:  {},
   stamps: {},
@@ -205,15 +219,9 @@ export const useStore = create((set, get) => ({
       set(s => ({ boqRevision: (s.boqRevision ?? 0) + 1 }))
       return
     }
-    const {
-      nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
-      plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
-    } = get()
+    const frame = historyFrame(get())
     set(s => ({
-      history: [...s.history.slice(-49), {
-        nodes, walls, rooms, stamps, columns, beams, slabs, staircases, foundations,
-        plumbingFixtures, electricalPoints, hvacUnits, fireDevices, elvDevices, solarEquipment, risers,
-      }],
+      history: [...s.history.slice(-49), frame],
       future: [],
       // ADD 7: any structural mutation invalidates BOQ memo subscribers.
       boqRevision: (s.boqRevision ?? 0) + 1,
@@ -241,29 +249,8 @@ export const useStore = create((set, get) => ({
     const prev = history[history.length - 1]
     set(s => ({
       history: s.history.slice(0, -1),
-      future:  [{
-        nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
-        columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations,
-        plumbingFixtures: s.plumbingFixtures, electricalPoints: s.electricalPoints,
-        hvacUnits: s.hvacUnits, fireDevices: s.fireDevices, elvDevices: s.elvDevices,
-        solarEquipment: s.solarEquipment, risers: s.risers,
-      }, ...s.future.slice(0, 49)],
-      nodes:   prev.nodes,
-      walls:   prev.walls,
-      rooms:   prev.rooms,
-      stamps:  prev.stamps,
-      columns: prev.columns    ?? s.columns,
-      beams:   prev.beams      ?? s.beams,
-      slabs:   prev.slabs      ?? s.slabs,
-      staircases:  prev.staircases  ?? s.staircases,
-      foundations: prev.foundations ?? s.foundations,
-      plumbingFixtures: prev.plumbingFixtures ?? s.plumbingFixtures,
-      electricalPoints: prev.electricalPoints ?? s.electricalPoints,
-      hvacUnits:        prev.hvacUnits        ?? s.hvacUnits,
-      fireDevices:      prev.fireDevices      ?? s.fireDevices,
-      elvDevices:       prev.elvDevices       ?? s.elvDevices,
-      solarEquipment:   prev.solarEquipment   ?? s.solarEquipment,
-      risers:           prev.risers           ?? s.risers,
+      future:  [historyFrame(s), ...s.future.slice(0, 49)],
+      ...restoreFrame(prev, s),
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, pendingWallIds: [],
     }))
   },
@@ -274,29 +261,8 @@ export const useStore = create((set, get) => ({
     const next = future[0]
     set(s => ({
       future:  s.future.slice(1),
-      history: [...s.history.slice(-49), {
-        nodes: s.nodes, walls: s.walls, rooms: s.rooms, stamps: s.stamps,
-        columns: s.columns, beams: s.beams, slabs: s.slabs, staircases: s.staircases, foundations: s.foundations,
-        plumbingFixtures: s.plumbingFixtures, electricalPoints: s.electricalPoints,
-        hvacUnits: s.hvacUnits, fireDevices: s.fireDevices, elvDevices: s.elvDevices,
-        solarEquipment: s.solarEquipment, risers: s.risers,
-      }],
-      nodes:   next.nodes,
-      walls:   next.walls,
-      rooms:   next.rooms,
-      stamps:  next.stamps,
-      columns: next.columns    ?? s.columns,
-      beams:   next.beams      ?? s.beams,
-      slabs:   next.slabs      ?? s.slabs,
-      staircases:  next.staircases  ?? s.staircases,
-      foundations: next.foundations ?? s.foundations,
-      plumbingFixtures: next.plumbingFixtures ?? s.plumbingFixtures,
-      electricalPoints: next.electricalPoints ?? s.electricalPoints,
-      hvacUnits:        next.hvacUnits        ?? s.hvacUnits,
-      fireDevices:      next.fireDevices      ?? s.fireDevices,
-      elvDevices:       next.elvDevices       ?? s.elvDevices,
-      solarEquipment:   next.solarEquipment   ?? s.solarEquipment,
-      risers:           next.risers           ?? s.risers,
+      history: [...s.history.slice(-49), historyFrame(s)],
+      ...restoreFrame(next, s),
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedBeamId: null, pendingWallIds: [],
     }))
   },
@@ -1012,6 +978,11 @@ export const useStore = create((set, get) => ({
         hasPlinthBeam: wall.hasPlinthBeam ?? null,
         hasLintelBeam: wall.hasLintelBeam ?? null,
         hasRoofBeam:   wall.hasRoofBeam ?? null,
+        // Band attributes run the wall's whole length, so both pieces keep them (the
+        // derived bands they imply are cut with the wall, D-280).
+        hasTieBeam:    wall.hasTieBeam ?? null,
+        wallBeamSpecs: wall.wallBeamSpecs ?? null,
+        hasBalconyRailingEdge: wall.hasBalconyRailingEdge ?? null,
         floorId: wallFloorId,
         classification: wall.classification ?? null,
         meta: wall.meta ?? null,
@@ -1028,6 +999,11 @@ export const useStore = create((set, get) => ({
         hasPlinthBeam: wall.hasPlinthBeam ?? null,
         hasLintelBeam: wall.hasLintelBeam ?? null,
         hasRoofBeam:   wall.hasRoofBeam ?? null,
+        // Band attributes run the wall's whole length, so both pieces keep them (the
+        // derived bands they imply are cut with the wall, D-280).
+        hasTieBeam:    wall.hasTieBeam ?? null,
+        wallBeamSpecs: wall.wallBeamSpecs ?? null,
+        hasBalconyRailingEdge: wall.hasBalconyRailingEdge ?? null,
         floorId: wallFloorId,
         classification: wall.classification ?? null,
         meta: wall.meta ?? null,
@@ -2286,6 +2262,7 @@ export const useStore = create((set, get) => ({
       elvDevices:       loadedElvDevices,
       solarEquipment:   loadedSolarEquipment,
       risers:           loadedRisers,
+      derivedMembers:   Object.fromEntries(Object.entries(data.derivedMembers ?? {}).map(([id, m]) => [id, normalizeEntity({ ...m, id }, derivedMemberSchema).entity])),
       ratesByKey: (data.ratesByKey && typeof data.ratesByKey === 'object') ? { ...data.ratesByKey } : {},
       history: [], future: [],
       drawStartId: null, selectedWallId: null, selectedWallIds: [], selectedStampId: null, selectedColumnId: null, selectedFoundationId: null, selectedBeamId: null, pendingWallIds: [],
@@ -2524,6 +2501,6 @@ export const useStore = create((set, get) => ({
 
   // ── MEP slice (6 disciplines + risers) ──
   ...createMepSlice(set, get, uid),
-}))
+})))
 
 exposeStoreForDev(useStore)

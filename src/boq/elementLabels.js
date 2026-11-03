@@ -23,6 +23,7 @@
 
 import { isExternalWall, getRoomsForWall } from '../topology/walls.js'
 import { ROOM_TYPE_LABELS } from '../roomPresets.js'
+import { DERIVATION_KINDS, DERIVATION_KIND } from '../topology/derivedMembers.js'
 
 const DEFAULT_FLOOR_ID = 'F1'
 
@@ -246,4 +247,32 @@ export function getElementLabels(state) {
   }
 
   return result
+}
+
+/**
+ * How a derived structural member (D-280) reads: its permanent label (`LB-003`, with a
+ * floor segment in multi-floor projects), what it is, and what it comes from —
+ * "Lintel band LB-003 · on wall W-012". The editor's inspector and the ERP element
+ * name (`elementRegistry`) both read it.
+ */
+export function describeDerivedMember(state, member) {
+  const multi = isMultiFloor(state)
+  const kind = DERIVATION_KINDS[member.derivationKind]
+  const floorId = member.floorId ?? DEFAULT_FLOOR_ID
+  const label = formatLabel(kind.prefix(member.level), floorId, member.labelNo, multi, member.id)
+  const title = `${kind.noun(member.level)} ${label}`
+  const wall = member.hostWallId ? state.walls?.[member.hostWallId] : null
+  const wallLabel = wall ? formatLabel(LABEL_PREFIX.wall, wall.floorId ?? DEFAULT_FLOOR_ID, wall.labelNo, multi, wall.id) : null
+  let source
+  if (member.derivationKind === DERIVATION_KIND.INLINE_FOOTING) {
+    const column = state.columns?.[member.hostColumnId]
+    source = `under column ${column ? formatLabel(LABEL_PREFIX.column, column.baseFloorId ?? column.floorId ?? DEFAULT_FLOOR_ID, column.labelNo, multi, column.id) : '—'}`
+  } else if (member.derivationKind === DERIVATION_KIND.SUNSHADE) {
+    const opening = wall?.openings?.find((o) => o.id === member.hostOpeningId)
+    const widthMm = opening ? Math.round(opening.width * 25.4) : null
+    source = `over window${widthMm ? ` (${widthMm} mm)` : ''} on wall ${wallLabel ?? '—'}`
+  } else {
+    source = `on wall ${wallLabel ?? '—'}`
+  }
+  return { label, title, source, name: `${title} · ${source}` }
 }
