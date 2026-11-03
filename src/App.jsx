@@ -44,7 +44,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 export default function App() {
   const status = useStore(s => s.bbsSettingsStatus)
   const settings = useStore(s => s.projectSettings.bbsSettings)
-  if (getErpLaunchContext() && (status !== 'ready' || settings?.source !== 'ERP')) return <BbsSettingsBanner />
+  if (getErpLaunchContext() && (status !== 'ready' || settings?.source !== 'ERP')) return <><EditorReadOnlyBanner /><BbsSettingsBanner /></>
   return <EditorWorkspace />
 }
 

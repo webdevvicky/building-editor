@@ -68,7 +68,7 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
 
 ## Key Design Rules (engineering invariants)
 
-- **Company/project structural settings (ERP D-275, D-276):** `specs/effectiveBbsSettings.js` is the one editor resolver.
+- **Company/project structural settings (ERP D-275, D-278):** `specs/effectiveBbsSettings.js` is the one editor resolver.
   Member/spec overrides win over the applied `projectSettings.bbsSettings` snapshot (ERP project → company).
   Presets omit inherited cover/lap/development fields; empty spec inputs clear overrides. Stock length also uses
   this resolver in BBS, the quantity adapter, the panel and exports. Development-length tables remain the existing
@@ -78,7 +78,12 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
   sync starts. Only a fresh drawing adopts automatically. Reopen keeps saved inputs; “Company bar settings changed —
   review” presents old/new values and an explicit apply action. Applying uses the existing project-settings action,
   so whole-state structural signatures re-send affected bars. A connected fetch failure blocks the workspace and
-  exposes Retry, never silently using offline defaults. Standalone mode explicitly labels built-in IS-code defaults.
+  exposes Retry, never silently using offline defaults. A reopened drawing with no saved ERP snapshot is status
+  `review`: `writePipeline.beginWritePipeline` defers the canonical queue, sync engine and coordinator (their
+  signatures call BBS), and Apply (`applyPendingBbsSettings`) starts them, re-projects every element and only then
+  moves to `ready`; a failed start resets what it started. An integrity-failed reopen ends in status `aborted`, and
+  `App.jsx` renders `EditorReadOnlyBanner` outside the settings gate so the real error and Reload stay visible.
+  `scripts/verify-bbs-startup.mjs` covers both. Standalone mode explicitly labels built-in IS-code defaults.
   Wastage is captured with the snapshot; procurement wastage is applied by the ERP's same project/company reader.
   `verify-bbs-settings.mjs` covers the drawing action, calculations, snapshot/reopen, overrides, review/apply and failures.
 
@@ -92,7 +97,7 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
    topology graph. Only the explicit user Split tool (`splitWall`) cuts a wall.
 3. **IS 2502 catalog and structural settings have separate owners.** Engineering tables for bends, hooks and
    development lengths live in `src/specs/cuttingLength.js`; inherited cover, lap and stock-length resolution lives
-   in `effectiveBbsSettings.js`. ERP D-275/D-276 approve company defaults and the project/editor precedence.
+   in `effectiveBbsSettings.js`. ERP D-275/D-278 approve company defaults and the project/editor precedence.
    Remaining engineering choices (confinement and detailing) are documented in `docs/DOMAIN-RULES.md` §11.3.
    BOQ steel still uses the older `computeBBSQuantities` formula with its existing lap-unit defect, and D²/162 is
    repeated (KD-29/KD-30); both quantity and BBS paths now receive the same resolved settings.

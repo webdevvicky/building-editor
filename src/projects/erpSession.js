@@ -1,4 +1,5 @@
-import { loadBbsSettings } from './bbsSettingsSession.js'
+import { loadBbsSettings, resetDeferredWritePipeline } from './bbsSettingsSession.js'
+import { beginWritePipeline } from './writePipeline.js'
 // erpSession.js — activate live ERP sync from an erpLaunchContext.
 //
 // Boot order (main.jsx):
@@ -20,10 +21,8 @@ import { loadBbsSettings } from './bbsSettingsSession.js'
 
 import { getErpLaunchContext } from './erpLaunchContext.js'
 import { initLiveSync, getLiveMode } from './liveSync.js'
-import { initLiveSyncQueue, setResyncBuilder } from './liveSyncQueue.js'
-import { startSyncEngine } from './syncEngine.js'
-import { startSyncCoordinator, requestFullSync } from './syncCoordinator.js'
-import { initCanonicalSyncQueue } from './canonicalSyncQueue.js'
+import { setResyncBuilder } from './liveSyncQueue.js'
+import { requestFullSync } from './syncCoordinator.js'
 import { reopenCanvas } from './canonicalReopen.js'
 import { checkProjectionMismatch } from './projectionGuard.js'
 import { engageEditorReadOnly, editorReadOnlyReason, initEditorConnectionWatch } from './editorWriteGuard.js'
@@ -109,6 +108,7 @@ export async function initErpSession() {
     : null)
   if (!ctx) return false
   useStore.setState({ bbsSettingsRequired: true, bbsSettingsStatus: 'loading', bbsSettingsError: null })
+  resetDeferredWritePipeline()
 
   // Surface connection loss (doc 48A Phase 0): a disconnected editor must never *look*
   // saved-to-server. This marks the read-only/offline banner + pauses uploads while
@@ -190,6 +190,7 @@ export async function initErpSession() {
         'the page; if this keeps happening, contact support.',
       )
       console.error('[erpSession] canonical integrity failure —', editorReadOnlyReason())
+      useStore.setState({ bbsSettingsStatus: 'aborted', bbsSettingsError: editorReadOnlyReason() })
       return true
     }
 
@@ -208,22 +209,7 @@ export async function initErpSession() {
 
   if (!await loadBbsSettings(useStore, conn, { initial: isNewBuilding || reopenSource === 'empty' })) return true
 
-  // The ONE ORDERED write pipeline (Invariants #5/#7). Init the canonical upload
-  // outbox first (baseVersion seed; failures swallowed so a sync hiccup never
-  // blocks the editor), then start the sync engine in COORDINATED mode (it no
-  // longer self-subscribes) and the coordinator. On every committed change the
-  // coordinator ACCEPTS the canonical snapshot locally (IDB write + enqueue
-  // upload) BEFORE the projection diff is emitted into liveSyncQueue; the R2
-  // upload stays async + debounced. Only the ordering changed — the diff, queue,
-  // projection, checksum, snapshot format, and upload logic are unchanged.
-  try {
-    await initCanonicalSyncQueue(conn, ctx.buildingId, { knownBaseVersion: reopenVersion, deferUpload: true })
-  } catch (err) {
-    console.warn('[erpSession] canonical document sync init failed', err)
-  }
-  startSyncEngine(useStore, { coordinated: true })
-  await initLiveSyncQueue(ctx.buildingId)
-  startSyncCoordinator(useStore, ctx.buildingId)
+  await beginWritePipeline(useStore, conn, ctx.buildingId, reopenVersion)
 
   // Editor name reflects the ERP project + building (not a local IDB name).
   // Done AFTER loadProject so it isn't overwritten; projectSettings isn't a
