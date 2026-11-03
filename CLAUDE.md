@@ -130,11 +130,27 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
 - **`syncCoordinator`** is the only store subscriber in ERP mode: **(1) ACCEPT** — write the canonical doc to IDB
   `SNAPSHOTS[buildingId]`, mark dirty; **(2) ENQUEUE** — persist that exact document with its projection ops.
   The FIFO worker uploads the document, declares a server checkpoint, executes mutations with durable IDs and exact request receipts, then seals. Resync uses the same coordinator acceptance path.
-- **`syncEngine`** diffs nodes / walls / rooms, floors, and every `ELEMENT_REGISTRY` kind (structural + MEP + risers);
-  openings are diffed by id set only (resizes don't sync — KD-8). Stable identity = `sourceEditorId` =
+- **`syncEngine`** diffs nodes / walls / rooms, floors, every opening and every `ELEMENT_REGISTRY` kind (structural +
+  MEP + risers), each entity's change detection in ONE place in `_flush`. Stable identity = `sourceEditorId` =
   `ifcGlobalId` (floors: their `id`, e.g. `'F1'`). Server creates are idempotent by `sourceEditorId`.
+  - **Walls:** a wall a room owns is `ADD_WALL` under that room; a wall no room owns is `ADD_WALL` on its floor (XR-11)
+    and is re-sent under a room drawn on it later (the ERP then adds that room's faces). A height / thickness /
+    material / node change is `UPDATE_WALL` (one op). `detectWallResegmentation` turns a wall replaced by a chain of
+    new walls along it into ONE `SPLIT_WALL` (each piece names the rooms it really bounds — midpoint on the room
+    ring), and the Join tool (survivor + partner) or an undo of a split into ONE `JOIN_WALLS`, so wall faces — their
+    BOQ identity, finishes, progress — move instead of being deleted and re-added (XR-16, XR-08).
+  - **Openings:** new on a wall, or retyped → `ADD_OPENING` (it names the wall it is on now, so an opening carried
+    by a split/join moves); resized / moved along the wall / sill changed → `UPDATE_OPENING`; gone from every wall →
+    `DELETE_OPENING` (XR-17). Each carries `count` 1 and its sill: a door 0, a window its `sillHeight` (opening
+    panel) or nothing while unset (XR-07).
+  - **Floors:** number, height, plinth; an edit is `UPDATE_FLOOR` → `PATCH /geometry/floors/:id` (XR-12). Length,
+    width, name and label are ERP-owned and never sent. **The editor has no per-room height:** a room's height is its
+    walls' height, so `BuildingRoom.height` is not sent.
+  - **Elements** sign on `toErpPayload` read against their own state (prev for prev), so a slab / MEP room change
+    emits `UPDATE_ELEMENT` (KD-37).
 - **`liveSyncQueue`** = durable IDB FIFO outbox with a dependency gate; **`liveSync.fireLiveOp`** maps ops → HTTP,
-  resolves editor ids → ERP UUIDs, converts in → mm. 400/404/409/422 dead-letter; 401/403/408/429/5xx/network retry
+  resolves editor ids → ERP UUIDs (floors through this connection's `floorIds`), converts in → mm; one rule
+  (`_registerProduced`) registers what a response produced, live or replayed. 400/404/409/422 dead-letter; 401/403/408/429/5xx/network retry
   ×5 then `failed` (badge offers Retry / Resync all).
 - **`canonicalReopen`** seeds the id map and row versions from `GET /geometry/buildings/:id/state` (never loads the
   canvas from it), then loads the copy the save rule picks (see Canonical Building Document above).
@@ -151,9 +167,12 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   / `OP_DEPENDENCY` in `liveSync.js` is the ONE table of what each op `needs` / `produces` / `destroys`;
   `liveSyncQueue._drain` answers it against the dispatcher's id map: **dispatch** when resolved · **wait** (`blocked`,
   keeps position) when a queued op will produce the parent · **drop with a logged reason** when nothing can.
-  *Adding an op that puts a parent id in a URL or required body field means adding its `OP_DEPENDENCY` row.*
-  Backstops: `_requireId()` guards the parent ids of `ADD_WALL`, `ADD_OPENING`, `SPLIT_WALL`, `ADD_WALL_SURFACE`
-  (throws a permanent `→ 400:`); UPDATE_*/DELETE_* with an unresolved id are skipped as no-op success; `UPDATE_NODE`
+  *Adding an op that puts a parent id in a URL or required body field means adding its `OP_DEPENDENCY` row.* A row
+  names single parents (`one(field, kind)`) and LISTS of parents (`many('roomIds', 'room')`, the walls of a join, the
+  rooms of each split piece): every id in a list must resolve — a list never silently loses an unresolved id (XR-09).
+  `produces` is a list (a split produces each piece).
+  Backstops: `_requireId()` guards the parent ids of `ADD_WALL` (room or floor), `ADD_OPENING`, `SPLIT_WALL`,
+  `JOIN_WALLS`, `UPDATE_FLOOR`, `ADD_WALL_SURFACE` and every room id in a `roomIds` list (throws a permanent `→ 400:`); UPDATE_*/DELETE_* with an unresolved id are skipped as no-op success; `UPDATE_NODE`
   with an unresolved id heals by POSTing a create. (`ADD_NODE`/`ADD_ELEMENT` interpolate only `buildingId`.)
   ⚠️ **Test fixtures must pass EDITOR ids** (`wallIfcId`/`roomIfcId`) and let `liveSync` resolve them.
 - **No automatic reconstruction.** Reopen never derives the canvas from the projection. The only reconstruction
@@ -178,9 +197,9 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   the editor acquires no lock or lease, and the only guard against a second writer is the canonical-document CAS
   (409 on a stale `baseVersion`; since G17 a clash is never re-sent). Building either lock depends on the answer to
   OQ-057.
-- **Legacy connect path** (`#connect` deep link → `connectHandoff.js`, `cloudConn.js`, `ConnectErpDialog`,
-  `ErpConnection`) still ships and is wired in `App.jsx`/`main.jsx`, but the ERP routes it calls no longer exist
-  (KD-15). `buildPackage` / blob-import are deleted.
+- **The only launch path is the ERP's `#erpLaunch`.** The legacy manual connect path (`#connect`, `cloudConn.js`,
+  `connectHandoff.js`, `ConnectErpDialog`, `ErpConnection`) called ERP routes that no longer exist and is deleted
+  (XR-06, KD-15); `verify-erp-connection` fails if it returns. `buildPackage` / blob-import are deleted.
 - **Electrical point types (Stream 2).** A placed electrical point carries a canonical `pointType`
   (`src/mep/catalogs/electricalPointTypes.js`) chosen from the floating palette; it rides `ADD_ELEMENT` /
   `UPDATE_ELEMENT` (in `toErpPayload`, part of the change signature) → ERP `BuildingElement.mepPointType`.
@@ -192,7 +211,9 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
 - **Quality gate for any geometry/sync change** (run with the resolver hook, all must stay green):
   `verify-canonical-sync` · `-canonical-reopen` · `-invariant-5-7` · `-floor-sync` · `-floor-delete` · `-live-sync` ·
   `-live-sync-ordering` · `-room-type-sync` · `-electrical-point-type-sync` · `-editor-write-guard` · `-readonly-gate` ·
-  `-projection-reconstruct` · `-erp-roundtrip` (editor document → ERP → Load from ERP, delete/undo, every kind).
+  `-projection-reconstruct` · `-erp-roundtrip` (editor document → ERP → Load from ERP, delete/undo, every kind) ·
+  `-wall-opening-sync` (store actions → ops: free wall, opening edit, split, join, undo-of-split, floor edit) ·
+  `-erp-connection`.
 
 Architecture docs for the integration live in erp-saas: `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-integration.md`
 and `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-phase0-decisions.md`. Cross-repo defects are canonical in
@@ -200,7 +221,7 @@ and `erp-saas:packages/backend/src/modules/building-structure/docs/editor-erp-ph
 
 ---
 
-## Verification (52 harnesses)
+## Verification (55 harnesses)
 
 No Jest/Vitest, **no npm `verify`/`test` script, and no git hook** — nothing runs these automatically. Run them
 yourself before committing.

@@ -14,9 +14,10 @@
 //     duplicate ADD that inflates the BOQ. References between entities (wall n1/n2,
 //     room walls, slab rooms, a point's room/wall, a foundation's columns, a beam's
 //     column) are the referenced row's editor id, as the projection gives them.
-//   • floors: the editor floor list is rebuilt from the ERP floors (label, plinth and
-//     underlay — editor-only — kept from the current settings by floor id); rooms,
-//     walls, nodes and elements land on their own floor.
+//   • floors: the editor floor list is rebuilt from the ERP floors (number, height,
+//     plinth; label and underlay — editor-only — kept from the current settings by
+//     floor id); rooms, walls (by their own floor, so a wall that bounds no room
+//     too), nodes and elements land on their own floor.
 //   • every ELEMENT_REGISTRY kind is rebuilt through its registry `toEditorShape`
 //     (typed columns + the descriptive `spec`), then completed by its entity schema
 //     defaults — no kind is dropped.
@@ -61,14 +62,17 @@ function openingTypeFor(erpType) {
 function mapOpenings(erpOpenings) {
   return (erpOpenings ?? []).map((o) => {
     const id = o.sourceEditorId ?? uid('op')
+    const type = openingTypeFor(o.openingType)
     return {
       id,
       ifcGlobalId: id,
       offset: mmToIn(o.offsetFromStartMm),
       width: mmToIn(o.widthMm),
       height: mmToIn(o.heightMm),
-      type: openingTypeFor(o.openingType),
+      type,
       orient: 0,
+      // A window's sill as the ERP holds it; a door stands on the floor.
+      sillHeight: type === 'window' && o.heightFromFloorMm != null ? mmToIn(o.heightFromFloorMm) : null,
     }
   })
 }
@@ -114,7 +118,6 @@ function rebuildFloors(erpFloors, currentFloors, editorFloorIdOf) {
       const cur = currentById.get(id) ?? {}
       const floorNumber = f.floorNumber ?? i + 1
       return {
-        plinthHeightFt: 1.5,
         meta: null,
         underlay: null,
         ...cur,
@@ -122,8 +125,7 @@ function rebuildFloors(erpFloors, currentFloors, editorFloorIdOf) {
         label: cur.label ?? `Floor ${floorNumber}`,
         sequence: floorNumber - 1,
         floorHeightFt: f.floorHeight != null ? Number(f.floorHeight) : (cur.floorHeightFt ?? 10),
-        ...(f.floorLength != null ? { floorLength: Number(f.floorLength) } : {}),
-        ...(f.floorWidth != null ? { floorWidth: Number(f.floorWidth) } : {}),
+        plinthHeightFt: f.plinthHeight != null ? Number(f.plinthHeight) : (cur.plinthHeightFt ?? 0),
       }
     })
 }
@@ -158,9 +160,7 @@ export function reconstructFromProjection(state, keep = {}) {
   const idMappings = []
   const skipped = { rooms: [], elements: [] }
 
-  // Room → its floor, and room → its wall rows (every room a wall bounds, by editor id).
-  const roomFloor = new Map()
-  for (const r of erpRooms) if (r.sourceEditorId) roomFloor.set(r.sourceEditorId, floorFor(r.floorId) ?? DEFAULT_FLOOR_ID)
+  // Room → its wall rows (every room a wall bounds, by editor id).
   const roomWallRows = new Map()
   for (const w of erpWalls) {
     for (const roomSid of w.roomSourceEditorIds ?? []) {
@@ -168,7 +168,8 @@ export function reconstructFromProjection(state, keep = {}) {
       roomWallRows.get(roomSid).push(w)
     }
   }
-  const wallFloor = (w) => roomFloor.get((w.roomSourceEditorIds ?? [])[0]) ?? DEFAULT_FLOOR_ID
+  // Every wall names its own floor (a wall that bounds no room included).
+  const wallFloor = (w) => floorFor(w.floorId) ?? DEFAULT_FLOOR_ID
 
   // 1. Real node graph (editor-born buildings).
   for (const n of erpNodes) {

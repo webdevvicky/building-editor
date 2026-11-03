@@ -82,28 +82,59 @@ function _requireId(opType, fieldName, erpId, editorId) {
 // the queue SEE that edge instead of discovering it on the wire:
 //
 //   parents  — the editor ids this op must have resolved before it can be sent.
-//              `erpField` is the escape hatch: a payload that already carries the
-//              resolved server id has no dependency at all.
-//   produces — the editor id this op registers a server id for when it succeeds.
+//              `one(idField, kind, erpField)` names a single id; `erpField` is the
+//              escape hatch (a payload that already carries the resolved server id
+//              has no dependency). `many(idsField, kind)` names a LIST of ids (a
+//              slab's rooms, the walls a join merges): every one must resolve — an
+//              unresolved id never silently drops out of the list (XR-09).
+//   produces — the editor ids this op registers server ids for when it succeeds.
 //   destroys — the editor ids this op removes, so a child waiting on one can be
 //              dropped instead of waiting for ever.
-const WALL_PARENT = { idField: 'wallIfcId', erpField: 'wallErpId', kind: 'wall' }
-const ROOM_PARENT = { idField: 'roomIfcId', erpField: 'roomErpId', kind: 'room' }
+const one = (idField, kind, erpField) => ({
+  kind, field: idField,
+  pick: (p) => (erpField && p[erpField]) || !p[idField] ? [] : [p[idField]],
+})
+const many = (idsField, kind) => ({
+  kind, field: idsField,
+  pick: (p) => (Array.isArray(p[idsField]) ? p[idsField].filter(Boolean) : []),
+})
+const ownId = (p) => (p.ifcGlobalId ? [p.ifcGlobalId] : [])
+
+const WALL_PARENT = one('wallIfcId', 'wall', 'wallErpId')
+const ROOM_PARENT = one('roomIfcId', 'room', 'roomErpId')
+const FLOOR_PARENT = one('floorId', 'floor', 'floorErpId')
+const SELF_WALL = one('ifcGlobalId', 'wall', 'wallErpId')
+const ROOMS_PARENT = many('roomIds', 'room')
 
 const OP_DEPENDENCY = {
-  ADD_WALL: { parents: [ROOM_PARENT], produces: 'ifcGlobalId' },
-  SPLIT_WALL: { parents: [{ idField: 'ifcGlobalId', erpField: 'wallErpId', kind: 'wall' }] },
-  ADD_OPENING: { parents: [WALL_PARENT], produces: 'ifcGlobalId' },
+  ADD_WALL: { parents: [ROOM_PARENT, FLOOR_PARENT], produces: ownId },
+  UPDATE_WALL: { parents: [SELF_WALL] },
+  SPLIT_WALL: {
+    parents: [
+      SELF_WALL,
+      { kind: 'room', field: 'newWalls[].roomIfcIds', pick: (p) => (p.newWalls ?? []).flatMap((w) => w.roomIfcIds ?? []) },
+    ],
+    produces: (p) => (p.newWalls ?? []).map((w) => w.ifcGlobalId).filter(Boolean),
+    destroys: ['ifcGlobalId'],
+  },
+  JOIN_WALLS: {
+    parents: [many('wallIfcIds', 'wall')],
+    produces: (p) => (p.mergedIfcGlobalId ? [p.mergedIfcGlobalId] : []),
+  },
+  ADD_OPENING: { parents: [WALL_PARENT], produces: ownId },
+  UPDATE_OPENING: { parents: [one('ifcGlobalId', 'opening', 'openingErpId')] },
   ADD_WALL_SURFACE: { parents: [WALL_PARENT, ROOM_PARENT] },
   SAVE_ROOM_VERTICES: { parents: [ROOM_PARENT] },
 
-  ADD_FLOOR: { produces: 'ifcGlobalId' },
-  ADD_ROOM: { produces: 'ifcGlobalId' },
-  ADD_NODE: { produces: 'ifcGlobalId' },
-  ADD_COLUMN: { produces: 'ifcGlobalId' },
-  ADD_BEAM: { produces: 'ifcGlobalId' },
-  ADD_SLAB: { produces: 'ifcGlobalId' },
-  ADD_ELEMENT: { produces: 'ifcGlobalId' },
+  ADD_FLOOR: { produces: ownId },
+  UPDATE_FLOOR: { parents: [one('ifcGlobalId', 'floor', 'floorErpId')] },
+  ADD_ROOM: { produces: ownId },
+  ADD_NODE: { produces: ownId },
+  ADD_COLUMN: { produces: ownId },
+  ADD_BEAM: { produces: ownId },
+  ADD_SLAB: { parents: [ROOMS_PARENT], produces: ownId },
+  ADD_ELEMENT: { parents: [ROOM_PARENT, FLOOR_PARENT, ROOMS_PARENT], produces: ownId },
+  UPDATE_ELEMENT: { parents: [ROOMS_PARENT] },
 
   DELETE_WALL: { destroys: ['ifcGlobalId', 'id'] },
   DELETE_ROOM: { destroys: ['ifcGlobalId'] },
@@ -120,18 +151,15 @@ const OP_DEPENDENCY = {
  * What this op needs before it can be sent, and what it will provide.
  *
  * @returns {{ needs: Array<{editorId: string, field: string, kind: string}>,
- *             produces: string|null, destroys: string[] }}
+ *             produces: string[], destroys: string[] }}
  */
 export function opDependency(opType, payload = {}) {
   const spec = OP_DEPENDENCY[opType]
-  if (!spec) return { needs: [], produces: null, destroys: [] }
+  if (!spec) return { needs: [], produces: [], destroys: [] }
 
   const needs = []
-  for (const p of spec.parents ?? []) {
-    if (payload[p.erpField]) continue          // already resolved — nothing to wait for
-    const editorId = payload[p.idField]
-    if (!editorId) continue                    // nothing to wait ON; _requireId reports it
-    needs.push({ editorId, field: p.idField, kind: p.kind })
+  for (const parent of spec.parents ?? []) {
+    for (const editorId of parent.pick(payload)) needs.push({ editorId, field: parent.field, kind: parent.kind })
   }
 
   const destroys = []
@@ -139,7 +167,7 @@ export function opDependency(opType, payload = {}) {
     if (payload[f]) destroys.push(payload[f])
   }
 
-  return { needs, produces: (spec.produces && payload[spec.produces]) || null, destroys }
+  return { needs, produces: spec.produces ? spec.produces(payload) : [], destroys }
 }
 
 
@@ -183,7 +211,7 @@ export function resolveErpId(editorIfcId, conn) {
 }
 
 export const GEOMETRY_OPS = [
-  'ADD_WALL', 'UPDATE_WALL', 'DELETE_WALL', 'SET_WALL_MATERIAL', 'SET_WALL_HEIGHT',
+  'ADD_WALL', 'UPDATE_WALL', 'DELETE_WALL',
   'SPLIT_WALL', 'JOIN_WALLS',
   'ADD_OPENING', 'UPDATE_OPENING', 'DELETE_OPENING',
   'ADD_FLOOR', 'UPDATE_FLOOR', 'DELETE_FLOOR',
@@ -218,9 +246,15 @@ async function _request(method, path, body, conn) {
   return res.json()
 }
 
+// Editor id → ERP id. Floors are keyed by their editor floor id ('F1', 'F2', …) in
+// THIS connection's per-building `floorIds` map (seeded at launch, extended by
+// ADD_FLOOR); everything else by its ifcGlobalId in the id map. The two key
+// spaces never collide (a floor id is never a 22-char IFC GUID).
 function _resolveId(ifcId, conn) {
-  if (conn?.resolveErpId) return conn.resolveErpId(ifcId)
-  return _idMap.get(ifcId) ?? null
+  if (!ifcId) return null
+  const c = conn ?? _conn
+  if (c?.resolveErpId) return c.resolveErpId(ifcId)
+  return _idMap.get(ifcId) ?? c?.floorIds?.[ifcId] ?? null
 }
 
 function _registerId(ifcId, erpId, conn) {
@@ -230,6 +264,31 @@ function _registerId(ifcId, erpId, conn) {
 
 function _extractErpId(res) {
   return res?.data?.id ?? res?.id ?? null
+}
+
+// The ONE rule for what a successful response registers: the server id of every
+// editor id the op `produces` (opDependency) and the row version of every room or
+// wall it returns. Used by the live dispatch and by a replayed request alike.
+function _registerProduced(opType, payload, res, c) {
+  const body = res?.data ?? res
+  if (opType === 'SPLIT_WALL') {
+    for (const w of body?.walls ?? []) {
+      if (w?.sourceEditorId && w?.id) _registerId(w.sourceEditorId, w.id, c)
+      _noteVersion(w)
+    }
+    return
+  }
+  if (opType === 'JOIN_WALLS') {
+    const merged = body?.wall
+    if (merged?.id && payload.mergedIfcGlobalId) _registerId(payload.mergedIfcGlobalId, merged.id, c)
+    _noteVersion(merged)
+    return
+  }
+  _noteVersion(res)
+  const erpId = _extractErpId(res)
+  if (!erpId || !payload.ifcGlobalId || !opDependency(opType, payload).produces.includes(payload.ifcGlobalId)) return
+  _registerId(payload.ifcGlobalId, erpId, c)
+  if (opType === 'ADD_FLOOR') { c.floorIds = c.floorIds ?? {}; c.floorIds[payload.ifcGlobalId] = erpId }
 }
 
 // Floor ids are BUILDING-SCOPED. A room MUST resolve its floor only from THIS
@@ -260,11 +319,13 @@ async function _ensureFloorErpId(floorKey, c) {
   return erpId
 }
 
-// Map editor room ifcGlobalIds → ERP room UUIDs (slab/element roomIds are
-// @IsUUID on the backend, so unresolved editor ids must be dropped).
-function _resolveRoomIds(roomIfcIds, conn) {
+// Map editor room ifcGlobalIds → ERP room UUIDs. EVERY id must resolve: a list
+// with a room silently missing would tell the ERP the element covers fewer rooms
+// than it does (XR-09). The dependency gate makes the op wait for its rooms; this
+// is the backstop, thrown as a permanent `→ 400:` (no retry can invent the id).
+function _resolveRoomIds(opType, roomIfcIds, conn) {
   if (!Array.isArray(roomIfcIds)) return []
-  return roomIfcIds.map((ifc) => _resolveId(ifc, conn)).filter(Boolean)
+  return roomIfcIds.map((ifc) => _requireId(opType, 'roomIds', _resolveId(ifc, conn), ifc))
 }
 
 // ─── Main dispatch ────────────────────────────────────────────────────────────
@@ -276,22 +337,21 @@ export async function fireLiveOp(opType, payload, conn) {
   if (c.drawingLineage?.wire) {
     const { method, path, body } = c.drawingLineage.wire
     const replay = await _request(method, path, body, c)
-    _noteVersion(replay)
-    const erpId = _extractErpId(replay)
-    if (erpId && payload.ifcGlobalId) {
-      _registerId(payload.ifcGlobalId, erpId, c)
-      if (opType === 'ADD_FLOOR' || opType === 'UPDATE_FLOOR') c.floorIds[payload.ifcGlobalId] = erpId
-    }
+    _registerProduced(opType, payload, replay, c)
     return replay
   }
   let res
   switch (opType) {
 
     // ── Walls ────────────────────────────────────────────────────────────────
+    // A wall a room owns goes under that room (the ERP adds the room's faces); a wall
+    // that bounds no room goes on its floor (XR-11) and gets faces when a room it
+    // bounds is added (the engine then re-sends it under that room).
     case 'ADD_WALL': {
-      const roomErpId = _requireId('ADD_WALL', 'roomId',
-        payload.roomErpId ?? _resolveId(payload.roomIfcId, c), payload.roomIfcId)
-      res = await _request('POST', `/geometry/rooms/${roomErpId}/walls`, {
+      const path = payload.roomIfcId || payload.roomErpId
+        ? `/geometry/rooms/${_requireId('ADD_WALL', 'roomId', payload.roomErpId ?? _resolveId(payload.roomIfcId, c), payload.roomIfcId)}/walls`
+        : `/geometry/floors/${_requireId('ADD_WALL', 'floorId', payload.floorErpId ?? _resolveId(payload.floorId, c), payload.floorId)}/walls`
+      res = await _request('POST', path, {
         sourceEditorId: payload.ifcGlobalId,
         wallMaterial: payload.materialKey ?? null,
         orientation: payload.orientation ?? 'INTERNAL',
@@ -304,15 +364,11 @@ export async function fireLiveOp(opType, payload, conn) {
         // so elevation work anchors correctly and interior-only rooms emit no exterior.
         isExterior: payload.isExterior ?? false,
       }, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
-      _noteVersion(res)
+      _registerProduced(opType, payload, res, c)
       break
     }
 
-    case 'UPDATE_WALL':
-    case 'SET_WALL_MATERIAL':
-    case 'SET_WALL_HEIGHT': {
+    case 'UPDATE_WALL': {
       const wallErpId = payload.wallErpId ?? _resolveId(payload.ifcGlobalId ?? payload.id, c)
       if (!wallErpId) { res = _skipUnresolved('UPDATE_WALL', payload.ifcGlobalId ?? payload.id); break }
       const body = {}
@@ -322,6 +378,8 @@ export async function fireLiveOp(opType, payload, conn) {
       if (payload.orientation !== undefined) body.orientation = payload.orientation
       if (payload.angleDeg !== undefined) body.angleDeg = payload.angleDeg
       if (payload.lengthMm !== undefined) body.lengthMm = payload.lengthMm
+      if (payload.n1IfcId) { const id = _resolveId(payload.n1IfcId, c); if (id) body.n1NodeId = id }
+      if (payload.n2IfcId) { const id = _resolveId(payload.n2IfcId, c); if (id) body.n2NodeId = id }
       body.version = _requireVersion(opType, wallErpId)
       res = await _versionedPatch(`/geometry/walls/${wallErpId}`, body, c)
       break
@@ -336,12 +394,12 @@ export async function fireLiveOp(opType, payload, conn) {
       break
     }
 
+    // The editor cut a wall into pieces. Each piece names the rooms it bounds, so
+    // the ERP gives each face of the old wall to the piece it lies on (XR-08).
     case 'SPLIT_WALL': {
       const wallErpId = _requireId('SPLIT_WALL', 'wallId',
         payload.wallErpId ?? _resolveId(payload.ifcGlobalId, c), payload.ifcGlobalId)
       const body = {
-        atFractions: payload.atFractions,
-        ...(payload.atNodeIfcId ? { atNodeId: _resolveId(payload.atNodeIfcId, c) } : {}),
         newWalls: (payload.newWalls ?? []).map(w => ({
           sourceEditorId: w.ifcGlobalId,
           lengthMm: w.lengthMm ?? 0,
@@ -349,18 +407,22 @@ export async function fireLiveOp(opType, payload, conn) {
           thicknessMm: inToMm(w.thickness ?? 9),
           orientation: w.orientation ?? 'INTERNAL',
           ...(w.materialKey ? { wallMaterial: w.materialKey } : {}),
-          ...(w.angleDeg !== undefined ? { angleDeg: w.angleDeg } : {}),
-          ...(w.n1IfcId ? { n1NodeId: _resolveId(w.n1IfcId, c) } : {}),
-          ...(w.n2IfcId ? { n2NodeId: _resolveId(w.n2IfcId, c) } : {}),
+          ...(w.n1IfcId && _resolveId(w.n1IfcId, c) ? { n1NodeId: _resolveId(w.n1IfcId, c) } : {}),
+          ...(w.n2IfcId && _resolveId(w.n2IfcId, c) ? { n2NodeId: _resolveId(w.n2IfcId, c) } : {}),
+          roomIds: _resolveRoomIds('SPLIT_WALL', w.roomIfcIds ?? [], c),
         })),
       }
       res = await _request('POST', `/geometry/walls/${wallErpId}/split`, body, c)
+      _registerProduced(opType, payload, res, c)
       break
     }
 
+    // The editor merged walls into one (its Join survivor, or an undo of a split).
+    // Every wall must resolve — a join of fewer walls than the editor merged would
+    // leave one standing in the ERP.
     case 'JOIN_WALLS': {
       const body = {
-        wallIds: (payload.wallIfcIds ?? []).map(ifc => _resolveId(ifc, c)).filter(Boolean),
+        wallIds: (payload.wallIfcIds ?? []).map(ifc => _requireId('JOIN_WALLS', 'wallIds', _resolveId(ifc, c), ifc)),
         merged: {
           sourceEditorId: payload.mergedIfcGlobalId,
           lengthMm: payload.lengthMm ?? 0,
@@ -368,10 +430,12 @@ export async function fireLiveOp(opType, payload, conn) {
           thicknessMm: inToMm(payload.thickness ?? 9),
           orientation: payload.orientation ?? 'INTERNAL',
           ...(payload.materialKey ? { wallMaterial: payload.materialKey } : {}),
-          ...(payload.angleDeg !== undefined ? { angleDeg: payload.angleDeg } : {}),
+          ...(payload.n1IfcId && _resolveId(payload.n1IfcId, c) ? { n1NodeId: _resolveId(payload.n1IfcId, c) } : {}),
+          ...(payload.n2IfcId && _resolveId(payload.n2IfcId, c) ? { n2NodeId: _resolveId(payload.n2IfcId, c) } : {}),
         },
       }
       res = await _request('POST', `/geometry/walls/join`, body, c)
+      _registerProduced(opType, payload, res, c)
       break
     }
 
@@ -389,8 +453,7 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.count !== undefined ? { count: payload.count } : {}),
       }
       res = await _request('POST', `/geometry/walls/${wallErpId}/openings`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
+      _registerProduced(opType, payload, res, c)
       break
     }
 
@@ -403,7 +466,6 @@ export async function fireLiveOp(opType, payload, conn) {
       if (payload.offset !== undefined) body.offsetFromStartMm = inToMm(payload.offset)
       if (payload.heightFromFloor !== undefined) body.heightFromFloorMm = inToMm(payload.heightFromFloor)
       if (payload.count !== undefined) body.count = payload.count
-      if (payload.version !== undefined) body.version = payload.version
       res = await _request('PATCH', `/geometry/openings/${openingErpId}`, body, c)
       break
     }
@@ -421,24 +483,32 @@ export async function fireLiveOp(opType, payload, conn) {
     // A floor created mid-session (editor addFloor → projectSettings.floors[])
     // must reach the ERP before any room is placed on it. payload.ifcGlobalId is
     // the floor's editor id (== room.floorId == the c.floorIds key), so the room
-    // that follows resolves a real floorErpId. Register the returned id in BOTH
-    // _idMap (the _resolveId fallback) and c.floorIds (the primary ADD_ROOM lookup,
-    // which is the SAME conn object the new-building F1 bootstrap seeds).
-    case 'UPDATE_FLOOR':
+    // that follows resolves a real floorErpId. The returned id is registered in
+    // BOTH _idMap and c.floorIds (the primary ADD_ROOM lookup, which is the SAME
+    // conn object the new-building F1 bootstrap seeds).
     case 'ADD_FLOOR': {
       const body = {
         floorNumber: payload.floorNumber ?? 1,
         sourceEditorId: payload.ifcGlobalId,
         ...(payload.floorHeight !== undefined ? { floorHeight: payload.floorHeight } : {}),
-        ...(payload.floorLength !== undefined ? { floorLength: payload.floorLength } : {}),
-        ...(payload.floorWidth !== undefined ? { floorWidth: payload.floorWidth } : {}),
+        ...(payload.plinthHeight !== undefined ? { plinthHeight: payload.plinthHeight } : {}),
       }
       res = await _request('POST', `/geometry/buildings/${c.buildingId}/floors`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) {
-        _registerId(payload.ifcGlobalId, erpId, c)
-        if (c) { c.floorIds = c.floorIds ?? {}; c.floorIds[payload.ifcGlobalId] = erpId }
+      _registerProduced(opType, payload, res, c)
+      break
+    }
+
+    // A floor the editor changed (height, plinth, its place in the stack): PATCH
+    // THE row (XR-12) — never a create replay.
+    case 'UPDATE_FLOOR': {
+      const floorErpId = _requireId('UPDATE_FLOOR', 'floorId',
+        payload.floorErpId ?? _resolveId(payload.ifcGlobalId, c), payload.ifcGlobalId)
+      const body = {
+        ...(payload.floorNumber !== undefined ? { floorNumber: payload.floorNumber } : {}),
+        ...(payload.floorHeight !== undefined ? { floorHeight: payload.floorHeight } : {}),
+        ...(payload.plinthHeight !== undefined ? { plinthHeight: payload.plinthHeight } : {}),
       }
+      res = await _request('PATCH', `/geometry/floors/${floorErpId}`, body, c)
       break
     }
 
@@ -472,9 +542,7 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.computedAreaSqft !== undefined ? { computedAreaSqft: payload.computedAreaSqft } : {}),
       }
       res = await _request('POST', `/geometry/floors/${floorErpId}/rooms`, body, c)
-      const erpId = _extractErpId(res)
-      if (erpId && payload.ifcGlobalId) _registerId(payload.ifcGlobalId, erpId, c)
-      _noteVersion(res)
+      _registerProduced(opType, payload, res, c)
       break
     }
 
@@ -685,7 +753,7 @@ export async function fireLiveOp(opType, payload, conn) {
         ...(payload.slabRole !== undefined ? { slabRole: payload.slabRole } : {}),
         ...(payload.slabType !== undefined ? { slabType: payload.slabType } : {}),
       }
-      const slabRoomIds = _resolveRoomIds(payload.roomIds, c)
+      const slabRoomIds = _resolveRoomIds(opType, payload.roomIds, c)
       if (slabRoomIds.length) body.roomIds = slabRoomIds
       res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
       const erpId = _extractErpId(res)
@@ -754,7 +822,7 @@ export async function fireLiveOp(opType, payload, conn) {
         // stored verbatim so "Load from ERP" can rebuild the element (XR-10).
         ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
       }
-      const elemRoomIds = _resolveRoomIds(payload.roomIds, c)
+      const elemRoomIds = _resolveRoomIds(opType, payload.roomIds, c)
       if (elemRoomIds.length) body.roomIds = elemRoomIds
       res = await _request('POST', `/geometry/buildings/${buildingId}/elements`, body, c)
       const erpId = _extractErpId(res)
@@ -768,6 +836,7 @@ export async function fireLiveOp(opType, payload, conn) {
       const body = { ...payload }
       delete body.ifcGlobalId
       delete body.elementErpId
+      if (Array.isArray(payload.roomIds)) body.roomIds = _resolveRoomIds(opType, payload.roomIds, c)
       res = await _request('PATCH', `/geometry/elements/${erpId}`, body, c)
       break
     }

@@ -162,7 +162,7 @@ No `tests/` dir, no Jest/Vitest, no npm `verify`/`test` script, no git hooks (`.
 | `canonicalReopen.js` | 80 | seed id-map → R2 doc → IDB → integrity-failed / empty | |
 | `projectionGuard.js` | 73 | canvas-vs-projection count check + banner + `loadFromErp` | |
 | `projectionReconstruct.js` | 270 | ERP state → editor payload (nodes/walls/openings/rooms only) | KD-3, KD-4 |
-| `syncEngine.js` | 219 | shadow diff → ordered ops (coordinated mode only in prod) | KD-8, KD-9 |
+| `syncEngine.js` | — | shadow diff → ordered ops (coordinated mode only in prod); one change detector per entity (floors, nodes, rooms, walls + `detectWallResegmentation` for split/join, each opening, element kinds) | |
 | `syncEmitters.js` | 231 | pure op builders, `signature`, `buildFullSyncOps` (Resync all) | |
 | `syncMappers.js` | 75 | `inToMm/mmToIn` + enum mappers | a 2nd `inToMm` lives in liveSync.js:4-5 |
 | `elementRegistry.js` | 119 | element-kind registry (COLUMN, BEAM, SLAB, STAIRCASE, FOUNDATION, RISER, 6×MEP), editor→ERP only | `toEditorShape`/`entryForErpKind` unused |
@@ -170,7 +170,6 @@ No `tests/` dir, no Jest/Vitest, no npm `verify`/`test` script, no git hooks (`.
 | `liveSyncQueue.js` | 259 | durable FIFO outbox + dependency gate (154-198) + classifier (126-136) | |
 | `taxonomy.js` | 143 | ERP RoomType list + IDB cache | |
 | `erpEnvelope.js` | 18 | unwrap `{success,data}` | 3 more private copies exist |
-| `cloudConn.js`, `connectHandoff.js` | 230, 177 | **legacy** manual connect + `#connect` deep link | target ERP routes no longer exist (KD-15) |
 | `manager.js`, `autosave.js` | 417, 62 | local-project IDB manager (BroadcastChannel); 30 s autosave (no-op in ERP mode) | |
 | `_snapshot.js` | 28 | `buildSnapshot` — `version: 7` | |
 | `schemaVersion.js` | 119 | `runMigrations` (v8→v8 no-op) | **no src importer** |
@@ -337,25 +336,25 @@ All paths under `/api/v1`. Geometry routes use `EditorSessionGuard` and `Validat
 
 | Editor op / caller | Route | Editor sends | Backend DTO accepts | Drift |
 |---|---|---|---|---|
-| ADD_FLOOR | POST `/geometry/buildings/:id/floors` | `sourceEditorId` (floor id, `'F1'`), `floorNumber`, `floorHeight` (ft) | `CreateFloorGeometryDto` | — |
-| UPDATE_FLOOR | — | no-op (liveSync.js:380-383) | no PATCH route | floor edits never sync (KD-10) |
+| ADD_FLOOR | POST `/geometry/buildings/:id/floors` | `sourceEditorId` (floor id, `'F1'`), `floorNumber`, `floorHeight`, `plinthHeight` (ft) | `CreateFloorGeometryDto` | — |
+| UPDATE_FLOOR | PATCH `/geometry/floors/:id` | `floorNumber`, `floorHeight`, `plinthHeight` (ft); never length/width (staff-owned) | `PatchFloorGeometryDto` | — (KD-10 fixed) |
 | DELETE_FLOOR | DELETE `/geometry/floors/:id` | — | soft-deletes subtree | — |
 | ADD_ROOM | POST `/geometry/floors/:floorId/rooms` | `sourceEditorId`=ifc, name, `roomTypeCode` when authored | `CreateRoomGeometryDto` (idempotent by sourceEditorId) | room-type change re-emits ADD_ROOM (PATCH is shape-only) |
 | SAVE_ROOM_VERTICES | POST `/geometry/rooms/:id/vertices` | vertices (mm) | server derives area/perimeter | — |
-| ADD_WALL / UPDATE_WALL / DELETE_WALL | POST `/geometry/rooms/:roomId/walls`, PATCH/DELETE `/geometry/walls/:id` | n1/n2 node refs, `heightMm`, `thicknessMm`, material | Create/PatchWallGeometryDto | walls owned by no room never sync (KD-9) |
+| ADD_WALL / UPDATE_WALL / DELETE_WALL | POST `/geometry/rooms/:roomId/walls` (owned) or `/geometry/floors/:floorId/walls` (no owner room), PATCH/DELETE `/geometry/walls/:id` | n1/n2 node refs, `heightMm`, `thicknessMm`, material, `version` on PATCH | Create/PatchWallGeometryDto | — (KD-9 fixed: a wall later bounded by a room is re-sent under it) |
+| SPLIT_WALL / JOIN_WALLS | POST `/geometry/walls/:id/split`, `/geometry/walls/join` | pieces with their `roomIds` / merged wall + every wall id | Split/JoinWallsGeometryDto | — (XR-16) |
 | ADD_WALL_SURFACE | POST `/geometry/walls/:id/surfaces/adjacent` | wall + adjacent room | ✓ | — |
-| ADD/DELETE_OPENING | POST `/geometry/walls/:wallId/openings`, DELETE `/geometry/openings/:id` | type, `widthMm`, `heightMm`, offset | Create/PatchOpeningGeometryDto | no UPDATE_OPENING emitted (KD-8); `heightFromFloor`, `count` never sent (KD-11) |
+| ADD/UPDATE/DELETE_OPENING | POST `/geometry/walls/:wallId/openings` (create, retype, or move to this wall), PATCH/DELETE `/geometry/openings/:id` | type, `widthMm`, `heightMm`, offset, `heightFromFloorMm` (door 0, window `sillHeight` when set), `count` 1 | Create/PatchOpeningGeometryDto | — (KD-8, KD-11 fixed) |
 | ADD/UPDATE/DELETE_NODE | POST `/geometry/buildings/:id/nodes`, PATCH/DELETE `/geometry/nodes/:id` | x/y mm, kind | ✓ | UPDATE with unresolved id heals by POST (liveSync.js:487-506) |
 | ADD_ELEMENT (structural) | POST `/geometry/buildings/:id/elements` | COLUMN `{posXMm,posYMm}`, BEAM endpoints/span, SLAB thickness+roomIds | `CreateElementGeometryDto` accepts sections, heights, levels, concrete, `bars` | **editor sends none of sections/bars/concrete** (KD-7) |
 | ADD_ELEMENT (MEP) | same | xy, `roomIfcId`, `pointType` | Create DTO has `roomIfcId` (dto:515) | — |
 | UPDATE_ELEMENT (MEP) | PATCH `/geometry/elements/:id` | full `toErpPayload` incl. `roomIfcId` | `PatchElementGeometryDto` has **no `roomIfcId`** | **400 → dead-letter** for any MEP point in a room (KD-5) |
-| UPDATE_ELEMENT (slab) | same | `roomIds` = room **ifcGlobalIds** (unresolved) | `roomIds` `@IsUUID` (dto:726-727) | **400 → dead-letter** (KD-6) |
-| SPLIT_WALL / JOIN_WALLS / UPDATE_ROOM / *_COLUMN/BEAM/SLAB | routes exist | **never emitted** (dead cases in fireLiveOp) | — | dead code |
+| ADD/UPDATE_ELEMENT (slab) | same | `roomIds` resolved to ERP ids; the op waits for every room (`OP_DEPENDENCY` `many('roomIds')`) | `roomIds` `@IsUUID` | — (KD-6 fixed) |
+| UPDATE_ROOM / *_COLUMN/BEAM/SLAB | routes exist | **never emitted** (dead cases in fireLiveOp) | — | dead code |
 | seed / projection check | GET `/geometry/buildings/:id/state` | — | returns walls with `n1NodeSourceEditorId`, `n2NodeSourceEditorId`, `roomSourceEditorId` (geometry-live.service.ts:1237-1244) | `projectionReconstruct` reads `w.n1.sourceEditorId` + `w.wallSurfaces[]` (KD-3) |
 | canonical doc | GET/PUT `/building-structure/buildings/:id/document` | `{baseVersion, schemaVersion:7, checksum, payload}` | CAS on `baseVersion`; 409 `stale-base` | permissions only, **no EditorSessionGuard** (KD-14) |
 | token refresh | POST `/auth/editor-session/refresh` | refresh token | `@Public`, throttled | — |
 | taxonomy | GET `/room-types` | — | ✓ | — |
-| legacy connect | POST `/editor-projects/auth-token`, `/editor-projects/connect-exchange` | api key / code | **no handler exists** | KD-15 |
 
 Units on the wire: integer **mm** for coordinates, heights, thicknesses, lengths (`inToMm`); feet only for floor height and ERP room length/width. Identity: `sourceEditorId = ifcGlobalId`; floors use `'F1'` etc., building-scoped on the ERP.
 
@@ -505,16 +504,16 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-3 | P0 | "Load from ERP" reads `w.n1.sourceEditorId`/`w.wallSurfaces[]`; backend returns flattened `n1NodeSourceEditorId`/`roomSourceEditorId` → synthesized walls → duplicate walls in projection | projectionReconstruct.js:133-146,176,194-223 | boq-02 A-3 → XR-01 |
 | KD-4 | P1 | "Load from ERP" drops columns/beams/slabs/MEP and resets `projectSettings` (floors ≠ F1, specs) | projectionReconstruct.js:237-257; projectionGuard.js:57-67 | boq-02 A-11 → XR-10 |
 | KD-5 | P1 | MEP UPDATE_ELEMENT carries `roomIfcId`, PATCH DTO lacks it (`forbidNonWhitelisted`) → 400 → dead-letter | elementRegistry.js:34-38; liveSync.js:700-707 | boq-02 A-5 → XR-03 |
-| KD-6 | P1 | Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 → XR-09 |
+| KD-6 | P1 | **FIXED 2026-11-03 (XR-09).** Slab UPDATE_ELEMENT sends unresolved room ifc ids as `roomIds` (`@IsUUID`) → 400 → dead-letter | liveSync.js:700-707; elementRegistry.js:96 | boq-02 A-6 → XR-09 |
 | KD-7 | P1 | Structural sections/heights/levels/concrete/bars never synced — ERP BBS-direct steel gets nothing | elementRegistry.js:61-97 | boq-02 A-4 → XR-02 |
-| KD-8 | P1 | Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; → `erp-saas:docs/bugs.md` XR-17 above |
-| KD-9 | P2 | Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 → XR-11 |
-| KD-10 | P2 | UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 → XR-12 |
-| KD-11 | P2 | Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 → XR-07 |
+| KD-8 | P1 | **FIXED 2026-11-03 (XR-17).** Opening resize/move never emits UPDATE_OPENING (openings diffed by id set only), so ERP opening rows keep the old size and position | syncEngine.js:195-198 | boq-02 G4; → `erp-saas:docs/bugs.md` XR-17 above |
+| KD-9 | P2 | **FIXED 2026-11-03 (XR-11; projection only — a faceless wall has no quantity).** Walls owned by no room are never synced | syncEngine.js:140-141; syncEmitters.js:213 | boq-02 G5 → XR-11 |
+| KD-10 | P2 | **FIXED 2026-11-03 (XR-12).** UPDATE_FLOOR is a no-op; floor height edits never reach ERP | liveSync.js:380-383 | boq-02 G7 → XR-12 |
+| KD-11 | P2 | **FIXED 2026-11-03 (XR-07).** Opening `heightFromFloor` and `count` never sent | syncEmitters.js:141-153 | boq-02 A-10 → XR-07 |
 | KD-12 | P2 | Projection queue not paused offline; ops exhaust 5 attempts → `failed` | liveSyncQueue.js; canonicalSyncQueue.js:194 | boq-02 G9 |
 | KD-13 | P1 | Canonical upload failure invisible (no UI consumer of canonical status; permanent PUT error doesn't latch) | canonicalSyncQueue.js:242-248 | boq-02 A-12 |
 | KD-14 | P1 | ERP canonical-document routes not bound to the editor session's building (permissions only) | erp-saas editor-document.controller.ts:15-38 | boq-02 A-8 → XR-04 (= SEC-20) |
-| KD-15 | P2 | Legacy connect path calls ERP routes that don't exist | cloudConn.js:199-205; connectHandoff.js:44-50; App.jsx:80-103 | boq-02 A-9 → XR-06 |
+| KD-15 | P2 | **FIXED 2026-11-03 (XR-06: the legacy connect path is deleted).** Legacy connect path calls ERP routes that don't exist | cloudConn.js:199-205; connectHandoff.js:44-50; App.jsx:80-103 | boq-02 A-9 → XR-06 |
 | KD-16 | P0 | Revisions not permanently retained: cap 30 prunes oldest manual silently; localStorage only; user-deletable; none in ERP mode | revisions/manager.js:15,78-94; RevisionsPanel.jsx:154-157 | boq-02 E |
 | KD-17 | P1 | Canonical design history unreachable: `DesignVersionService.cutVersion` has no controller/caller; old R2 heads orphaned, "Phase 3" pruning planned | erp-saas editor-document.service.ts:94-96 | boq-02 E3 → XR-13 (the service is also listed as dead code in DEAD-01) |
 | KD-18 | P1 | Undo/redo fire twice per keystroke (Canvas + global hook listeners); Delete in Canvas bypasses the confirm dialog | Canvas.jsx:417-424; useKeyboardShortcuts.js:44-63,266-390 | boq-01 A1 |
@@ -536,7 +535,7 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | KD-34 | P2 | `schemaVersion` 7 (payload) vs 8 (`SCHEMA_VERSION`) mismatch | _snapshot.js:8; operations/_schemaVersion.js:12 | boq-02 G10 → XR-14 |
 | KD-35 | P2 | `addBeam*` read `columns[id].floorId` (columns have `baseFloorId`) → falls back to current floor | structuralSlice.js:1070,1105 | boq-01 A8 |
 | KD-36 | P1 | `verify-projection-reconstruct` fixtures use a fictional wall shape → green gate on broken code | scripts/verify-projection-reconstruct.mjs:24-35,76,121 | boq-02 G14 → XR-01 (XR-01 is P0 from KD-3; KD-36 stays P1 by the recorded exception, see note above) |
-| KD-37 | P2 | Slab room reassignment / MEP room change never emits UPDATE (signature built on empty state) | syncEmitters.js:190-195 | boq-02 G3 |
+| KD-37 | P2 | **FIXED 2026-11-03 (element signatures read their own state).** Slab room reassignment / MEP room change never emits UPDATE (signature built on empty state) | syncEmitters.js:190-195 | boq-02 G3 |
 | KD-38 | P2 | RoomDetailPanel per-wall areas use full wall length, paint = plaster, ignores ft-in | RoomDetailPanel.jsx:152-185 | boq-01 A9 |
 | KD-39 | P2 | `acceptGhost` adds an electrical point in two history frames, ignoring `roomId` param | store.js:1815-1817 | boq-01 A8 |
 | KD-40 | P2 | BBS generator fallbacks hard-coded without catalog source (sunshade 1.5 ft/3 in, strap pad Ø10@5 in, covers, loft 4 in) | bbs/generators/*.js; bbs/concrete.js:98-101 | boq-03 F3 |
@@ -559,10 +558,9 @@ Severity: **P0** = data loss / corruption of authoritative data; **P1** = silent
 | `src/store/legacyAccessors.js` | only verify scripts; expired |
 | `canonicalSyncQueue.installCanonicalAutosave / markSnapshotDirty / retryCanonicalUpload / teardownCanonicalSyncQueue` + status pub/sub | no src caller |
 | `syncEngine.reconcileSyncEngine / stopSyncEngine`, non-coordinated mode; `syncCoordinator.stopSyncCoordinator` | no caller |
-| `liveSync.GEOMETRY_OPS / registerErpId / getLiveConn / teardownLiveSync`, `_liveMode`; fireLiveOp cases `SET_WALL_MATERIAL/HEIGHT, SPLIT_WALL, JOIN_WALLS, UPDATE_ROOM, *_COLUMN/BEAM/SLAB`; duplicate `if (!erpId)` branches (liveSync.js:565-568, 607-610, 647-650, 712-715) | never emitted / unreachable |
+| `liveSync.GEOMETRY_OPS / registerErpId / getLiveConn / teardownLiveSync`, `_liveMode`; fireLiveOp cases `UPDATE_ROOM, *_COLUMN/BEAM/SLAB`; duplicate `if (!erpId)` branches (liveSync.js:565-568, 607-610, 647-650, 712-715) | never emitted / unreachable |
 | `elementRegistry.toEditorShape` ×12, `entryForErpKind` | no caller |
 | `editorAuth.teardownEditorAuth`, `revisions/manager.deleteAllRevisionsForProject`, `emitters/*.setCompute*Quantities` | no caller |
-| `cloudConn.js`, `connectHandoff.js`, `ConnectErpDialog`, `ErpConnection` | wired, but backend routes gone (KD-15) |
 | `mep/{electrical,plumbing,hvac,fire,elv}/index.js`, `mep/shared/index.js`, `mep/shared/ifcMapping.js`, `mep/shared/systemGraph.types.js` | 0 importers |
 | Unused MEP exports (boq-03 F4 list: `snapPointToNearestWall`, `simplifyPolyline`, `routeStableHash`, `validateGraph`, solar catalog getters, …) | 0 callers |
 | `specs/catalogManifest.js` (script-only), `reinforcementSpecs` unused constants, `iso/sort.compareFacesBackToFront`, `iso/viewPresets.CARDINAL_PRESETS`, `underlay/pdfRender.renderPdfFirstPageToPng` | script-only / 0 callers |

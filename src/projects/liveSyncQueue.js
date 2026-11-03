@@ -172,7 +172,7 @@ function _dependencyVerdict(item) {
 
     // Some other op will register that id when it succeeds — wait for it.
     const producer = _queue.some(
-      (o) => o !== item && opDependency(o.opType, o.payload).produces === need.editorId,
+      (o) => o !== item && opDependency(o.opType, o.payload).produces.includes(need.editorId),
     )
     if (producer) {
       return { action: 'wait', reason: `waiting for its ${need.kind} "${need.editorId}" to be created` }

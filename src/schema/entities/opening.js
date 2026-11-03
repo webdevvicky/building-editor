@@ -29,6 +29,9 @@ export const openingSchema = Object.freeze({
     subtype:     Object.freeze({ type: 'string',  required: true,  oneOf: SUBTYPE_VALUES }),
     subtypeSource: Object.freeze({ type: 'string', required: true, default: 'HEURISTIC',
                                    oneOf: Object.freeze(['EXPLICIT', 'HEURISTIC']) }),
+    // Sill height of a window (inches above the finished floor); null = not set.
+    // A door's sill is the floor (0) by definition and is not stored.
+    sillHeight:        Object.freeze({ type: 'number|null', default: null, min: 0, unit: 'inches' }),
     hardwareSetId:     Object.freeze({ type: 'string|null', default: null }),
     hardwareOverrides: Object.freeze({ type: 'object|null', default: null }),
     // BBS-categories phase — per-opening sunshade reinforcement spec override.

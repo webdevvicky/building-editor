@@ -105,14 +105,39 @@ header('1. The dependency table states what each op needs and produces')
 {
   const dep = opDependency('ADD_OPENING', { ifcGlobalId: OPENING, wallIfcId: WALL })
   ok('ADD_OPENING needs its wall', dep.needs.length === 1 && dep.needs[0].editorId === WALL, dep.needs[0]?.kind)
-  ok('ADD_OPENING produces its own id', dep.produces === OPENING)
+  ok('ADD_OPENING produces its own id', dep.produces.length === 1 && dep.produces[0] === OPENING)
 
   const resolved = opDependency('ADD_OPENING', { ifcGlobalId: OPENING, wallErpId: 'erp-wall-1' })
   ok('a payload carrying the resolved server id has no dependency', resolved.needs.length === 0)
 
-  ok('ADD_WALL produces its own id', opDependency('ADD_WALL', { ifcGlobalId: WALL, roomIfcId: ROOM }).produces === WALL)
+  ok('ADD_WALL produces its own id', opDependency('ADD_WALL', { ifcGlobalId: WALL, roomIfcId: ROOM }).produces.includes(WALL))
   ok('DELETE_WALL destroys its id', opDependency('DELETE_WALL', { ifcGlobalId: WALL }).destroys.includes(WALL))
-  ok('an op with no declared dependency is unconstrained', opDependency('UPDATE_FLOOR', {}).needs.length === 0)
+  ok('an op with no declared dependency is unconstrained', opDependency('DELETE_NODE', { ifcGlobalId: 'n' }).needs.length === 0)
+
+  const standalone = opDependency('ADD_WALL', { ifcGlobalId: WALL, floorId: 'F2' })
+  ok('a wall no room owns needs its FLOOR (XR-11)', standalone.needs.length === 1 && standalone.needs[0].kind === 'floor' && standalone.needs[0].editorId === 'F2')
+
+  const split = opDependency('SPLIT_WALL', {
+    ifcGlobalId: WALL,
+    newWalls: [{ ifcGlobalId: 'W-a', roomIfcIds: [ROOM] }, { ifcGlobalId: 'W-b', roomIfcIds: [ROOM, 'RoomIfc000000000000002'] }],
+  })
+  ok('SPLIT_WALL needs the wall it cuts and every room a piece bounds',
+    split.needs.map((n) => n.editorId).join(',') === `${WALL},${ROOM},${ROOM},RoomIfc000000000000002`)
+  ok('SPLIT_WALL produces every piece (a piece\'s openings can wait on it)', split.produces.join(',') === 'W-a,W-b')
+  ok('SPLIT_WALL destroys the wall it cuts', split.destroys.includes(WALL))
+
+  const join = opDependency('JOIN_WALLS', { mergedIfcGlobalId: 'W-m', wallIfcIds: ['W-a', 'W-b'] })
+  ok('JOIN_WALLS needs EVERY wall it merges', join.needs.map((n) => n.editorId).join(',') === 'W-a,W-b')
+  ok('JOIN_WALLS produces the merged wall', join.produces.join(',') === 'W-m')
+
+  ok('UPDATE_OPENING waits for its opening', opDependency('UPDATE_OPENING', { ifcGlobalId: OPENING }).needs[0]?.editorId === OPENING)
+  ok('UPDATE_FLOOR waits for its floor', opDependency('UPDATE_FLOOR', { ifcGlobalId: 'F2' }).needs[0]?.kind === 'floor')
+
+  // XR-09: a list of room ids is a list of dependencies — never a list that quietly loses one.
+  const slab = opDependency('ADD_ELEMENT', { ifcGlobalId: 'S1', kind: 'SLAB', roomIds: [ROOM, 'RoomIfc000000000000002'] })
+  ok('an element waits for EVERY room in its roomIds (XR-09)', slab.needs.filter((n) => n.kind === 'room').length === 2)
+  ok('UPDATE_ELEMENT waits for every room in its roomIds too',
+    opDependency('UPDATE_ELEMENT', { ifcGlobalId: 'S1', roomIds: [ROOM] }).needs.length === 1)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,9 +236,15 @@ header('7. Backstop: fireLiveOp refuses to build a /null path at all')
   const cases = [
     ['ADD_OPENING', { ifcGlobalId: OPENING, wallIfcId: 'never-synced' }],
     ['ADD_WALL', { ifcGlobalId: WALL, roomIfcId: 'never-synced' }],
-    ['SPLIT_WALL', { ifcGlobalId: 'never-synced', atFractions: [0.5], newWalls: [] }],
+    ['SPLIT_WALL', { ifcGlobalId: 'never-synced', newWalls: [] }],
     ['ADD_WALL_SURFACE', { wallIfcId: 'never-synced', roomIfcId: 'never-synced' }],
+    ['ADD_WALL', { ifcGlobalId: WALL, floorId: 'F-never-synced' }],
+    ['UPDATE_FLOOR', { ifcGlobalId: 'F-never-synced', floorHeight: 11 }],
+    ['JOIN_WALLS', { mergedIfcGlobalId: 'W-m', wallIfcIds: [WALL, 'never-synced'] }],
+    // XR-09: one unresolved room in the list refuses the op — never a partial list.
+    ['ADD_ELEMENT', { ifcGlobalId: 'S1', kind: 'SLAB', roomIds: ['never-synced'] }],
   ]
+  registerErpId(WALL, 'erp-wall-1')
   for (const [opType, payload] of cases) {
     calls = []
     let threw = null
@@ -222,6 +253,35 @@ header('7. Backstop: fireLiveOp refuses to build a /null path at all')
     ok(`${opType} sent no request`, calls.length === 0)
     ok(`${opType} is marked permanent (→ 400) so it dead-letters`, /→ 400:/.test(String(threw?.message)))
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+header('8. A piece of a split wall is a parent: its opening waits for the SPLIT, then lands on the piece')
+{
+  await freshQueue()
+  registerErpId(WALL, 'erp-wall-1')
+  registerErpId(ROOM, 'erp-room-1')
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, opts = {}) => {
+    const method = opts.method ?? 'GET'
+    const u = String(url)
+    calls.push({ method, url: u, body: opts.body ? JSON.parse(opts.body) : null })
+    if (method === 'POST' && /\/geometry\/walls\/erp-wall-1\/split$/.test(u)) {
+      return okRes({ data: { walls: [{ id: 'erp-piece-a', sourceEditorId: 'W-a', version: 0 }, { id: 'erp-piece-b', sourceEditorId: 'W-b', version: 0 }] } })
+    }
+    return okRes({ data: { id: 'erp-generic' } })
+  }
+  await enqueueGeometryOps([
+    { opType: 'SPLIT_WALL', payload: { ifcGlobalId: WALL, newWalls: [{ ifcGlobalId: 'W-a', lengthMm: 1000, height: 120, thickness: 9, roomIfcIds: [ROOM] }, { ifcGlobalId: 'W-b', lengthMm: 2000, height: 120, thickness: 9, roomIfcIds: [] }] } },
+    { opType: 'ADD_OPENING', payload: { ifcGlobalId: OPENING, wallIfcId: 'W-b', type: 'DOOR', width: 36, height: 84 } },
+  ])
+  await settle()
+  const split = calls.find((c) => /\/split$/.test(c.url))
+  ok('the split names each piece\'s rooms by ERP id', JSON.stringify(split?.body?.newWalls?.map((w) => w.roomIds)) === JSON.stringify([['erp-room-1'], []]))
+  ok('the pieces are registered from the split response', resolveErpId('W-a') === 'erp-piece-a' && resolveErpId('W-b') === 'erp-piece-b')
+  ok('the opening landed on its piece', urls().some((u) => /\/geometry\/walls\/erp-piece-b\/openings$/.test(u)), urls().join(' | '))
+  ok('the queue drained empty', getSyncStatus().total === 0)
+  globalThis.fetch = realFetch
 }
 
 teardownLiveSyncQueue()

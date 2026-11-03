@@ -1,19 +1,15 @@
-// erpConnection.js — the SINGLE source-agnostic authenticated ERP connection.
+// erpConnection.js — the SINGLE authenticated ERP connection registry.
 //
-// The editor can be launched more than one way — the legacy manual "Connect to
-// ERP" dialog (cloudConn) and the ERP-driven `#erpLaunch` session (erpSession).
-// Authenticated services (the room-type taxonomy today; catalogs / reference data
-// tomorrow) MUST NOT know or care which launch path is active. Each launch path
-// PUSHES its ready connection here via setErpConnection(); every authenticated
-// service READS/SUBSCRIBES here. One registry, zero launch-specific wiring in the
-// services — that is the coupling this module exists to eliminate.
+// The ERP-driven `#erpLaunch` session (erpSession) PUSHES its ready connection
+// here via setErpConnection(); every authenticated service (the room-type
+// taxonomy today; catalogs / reference data tomorrow) READS/SUBSCRIBES here and
+// never knows how the editor was launched.
 //
 // Connection shape:
 //   {
 //     erpUrl:   string,                          // ERP API base
 //     getToken: () => Promise<string> | string,  // resolve a fresh access token
 //     buildingId?: string,
-//     source:   'erpLaunch' | 'cloudConn',       // which launch path registered it
 //   }
 
 let _conn = null
@@ -28,18 +24,6 @@ function _emit() {
 /** Register (or replace) the active authenticated ERP connection. */
 export function setErpConnection(conn) {
   _conn = conn ?? null
-  _emit()
-}
-
-/**
- * Clear the connection. When `source` is given, clears ONLY if it matches the
- * current connection's source — so a legacy disconnect can never wipe an active
- * `#erpLaunch` connection (and vice-versa).
- */
-export function clearErpConnection(source) {
-  if (_conn === null) return
-  if (source && _conn.source !== source) return
-  _conn = null
   _emit()
 }
 
@@ -62,8 +46,7 @@ export async function getErpAccessToken() {
 /**
  * Subscribe to connection changes. Fires IMMEDIATELY with the current connection
  * (or null), then on every change. Returns an unsubscribe fn. This is what lets an
- * authenticated service auto-refresh the moment a connection becomes available,
- * regardless of which launch path provided it.
+ * authenticated service auto-refresh the moment a connection becomes available.
  * @param {(conn:object|null)=>void} fn
  * @returns {()=>void}
  */

@@ -6,8 +6,8 @@
 // for the room-type picker. The editor NEVER defines its own canonical RoomType
 // list — the 17 `roomPresets` are UI/geometry shortcuts, NOT a taxonomy.
 //
-// Mirrors the cloudConn cache pattern: in-memory mirror + subscribe (for
-// useSyncExternalStore) + IDB-backed persistence + refresh-on-connect.
+// In-memory mirror + subscribe (for useSyncExternalStore) + IDB-backed
+// persistence + refresh-on-connect.
 
 import { DB_STORES } from './storage/indexedDb.js'
 import { unwrapErpResponse } from './erpEnvelope.js'
@@ -129,8 +129,8 @@ function _reportRoomTypesError(err) {
   _emitError()
 }
 
-// Refresh whenever an authenticated ERP connection appears — from ANY launch path
-// (legacy connect OR #erpLaunch). subscribeErpConnection fires immediately with the
+// Refresh whenever an authenticated ERP connection appears (erpConnection).
+// subscribeErpConnection fires immediately with the
 // current connection, so a live connection refreshes at wire time. Idempotent —
 // safe to call once at boot. No launch-specific wiring lives here.
 let _wired = false

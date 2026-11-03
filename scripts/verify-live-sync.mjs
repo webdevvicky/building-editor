@@ -44,27 +44,23 @@ const mockConn = {
 }
 
 // Ops that intentionally fire NO REST call (handled client-side as a no-op).
-// UPDATE_FLOOR has no PATCH route on /geometry (only POST + GET state), so a
-// floor change is a projection no-op rather than a 404.
 const NOOP_OPS = new Set()
 
 // ── Test cases ────────────────────────────────────────────────────────────────
 const OP_TEST_CASES = [
   // Floors
   ['ADD_FLOOR',         { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 10 }],
-  ['UPDATE_FLOOR',      { ifcGlobalId: 'floor-uid-000000000002', floorNumber: 2, floorHeight: 11 }],
+  ['UPDATE_FLOOR',      { ifcGlobalId: 'F1', floorNumber: 1, floorHeight: 11, plinthHeight: 2 }],
   ['DELETE_FLOOR',      { ifcGlobalId: 'F1' }], // resolves via mockConn.floorIds.F1 → erpFloor1
   // Walls
   ['ADD_WALL',          { ifcGlobalId: 'WallIfc000000000000002', materialKey: 'IS_MODULAR_BRICK', height: 120, thickness: 9, roomIfcId: 'RoomIfc000000000000001' }],
   ['UPDATE_WALL',       { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', height: 130 }],
   ['DELETE_WALL',       { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1' }],
-  ['SET_WALL_MATERIAL', { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', materialKey: 'AAC_BLOCK' }],
-  ['SET_WALL_HEIGHT',   { ifcGlobalId: 'WallIfc000000000000001', wallErpId: 'erpWall1', height: 110 }],
-  ['SPLIT_WALL',        { ifcGlobalId: 'WallIfc000000000000001', atFractions: [0.5], newWalls: [{ ifcGlobalId: 'WallIfc000000000000002', lengthMm: 1200, height: 120, thickness: 9, orientation: 'N' }, { ifcGlobalId: 'WallIfc000000000000003', lengthMm: 1200, height: 120, thickness: 9, orientation: 'N' }] }],
+  ['SPLIT_WALL',        { ifcGlobalId: 'WallIfc000000000000001', newWalls: [{ ifcGlobalId: 'WallIfc000000000000002', lengthMm: 1200, height: 120, thickness: 9, orientation: 'NORTH', roomIfcIds: ['RoomIfc000000000000001'] }, { ifcGlobalId: 'WallIfc000000000000003', lengthMm: 1200, height: 120, thickness: 9, orientation: 'NORTH', roomIfcIds: [] }] }],
   ['JOIN_WALLS',        { wallIfcIds: ['WallIfc000000000000001', 'Wall2Ifc00000000000001'], mergedIfcGlobalId: 'WallIfc000000000000004', height: 120, thickness: 9 }],
   // Openings
   ['ADD_OPENING',       { ifcGlobalId: 'OpenIfc000000000000002', wallIfcId: 'WallIfc000000000000001', type: 'window', width: 36, height: 48 }],
-  ['UPDATE_OPENING',    { ifcGlobalId: 'OpenIfc000000000000001', openingErpId: 'erpOpen1', width: 40, height: 50 }],
+  ['UPDATE_OPENING',    { ifcGlobalId: 'OpenIfc000000000000001', width: 40, height: 50, offset: 12, heightFromFloor: 36, count: 1 }],
   ['DELETE_OPENING',    { ifcGlobalId: 'OpenIfc000000000000001', openingErpId: 'erpOpen1' }],
   // Rooms
   ['ADD_ROOM',          { ifcGlobalId: 'RoomIfc000000000000002', floorId: 'F1', roomShape: 'POLYGON' }],
@@ -169,6 +165,56 @@ for (const [op] of OP_TEST_CASES) {
   } else passed.push('a version clash on a shape PATCH latches read-only (no re-send)')
   _resetEditorWriteGuard()
   globalThis.fetch = realFetch
+}
+
+// ── Wire bodies of the wall / opening / floor ops (XR-07, XR-08, XR-11, XR-12, XR-17) ──
+{
+  const sent = async (opType, payload) => {
+    fetchCalls.length = 0
+    await fireLiveOp(opType, payload, mockConn)
+    const c = fetchCalls[0]
+    return { method: c.method, path: c.url.replace('https://erp.test/api/v1', ''), body: c.body ? JSON.parse(c.body) : undefined }
+  }
+  const check = (label, cond, detail) => (cond ? passed : failed).push(cond ? label : `${label} — ${detail}`)
+
+  // XR-11: a wall no room owns goes on its floor.
+  let r = await sent('ADD_WALL', { ifcGlobalId: 'WallIfc000000000000009', floorId: 'F1', height: 120, thickness: 9, lengthMm: 3000, orientation: 'EAST' })
+  check('a wall no room owns is POSTed on its floor', r.method === 'POST' && r.path === '/geometry/floors/erpFloor1/walls', JSON.stringify(r))
+  check('… and carries no room or exterior face', r.body.isExterior === false && !('roomId' in r.body), JSON.stringify(r.body))
+
+  // XR-12: a floor edit is a PATCH of the row, never a create replay.
+  r = await sent('UPDATE_FLOOR', { ifcGlobalId: 'F1', floorNumber: 1, floorHeight: 11, plinthHeight: 2 })
+  check('UPDATE_FLOOR PATCHes the floor row', r.method === 'PATCH' && r.path === '/geometry/floors/erpFloor1', JSON.stringify(r))
+  check('… with height and plinth, and nothing staff-owned',
+    JSON.stringify(r.body) === JSON.stringify({ floorNumber: 1, floorHeight: 11, plinthHeight: 2 }), JSON.stringify(r.body))
+  r = await sent('ADD_FLOOR', { ifcGlobalId: 'F3', floorNumber: 3, floorHeight: 10, plinthHeight: 0 })
+  check('ADD_FLOOR sends the plinth too', r.body.plinthHeight === 0 && !('floorLength' in r.body), JSON.stringify(r.body))
+
+  // XR-07 / XR-17: sill height and count reach the ERP on add and update.
+  r = await sent('ADD_OPENING', { ifcGlobalId: 'OpenIfc000000000000003', wallIfcId: 'WallIfc000000000000001', type: 'WINDOW', width: 48, height: 48, offset: 24, heightFromFloor: 36, count: 1 })
+  check('ADD_OPENING sends the sill (mm) and count', r.body.heightFromFloorMm === 914 && r.body.count === 1, JSON.stringify(r.body))
+  r = await sent('UPDATE_OPENING', { ifcGlobalId: 'OpenIfc000000000000001', width: 40, height: 50, offset: 12, heightFromFloor: 36, count: 1 })
+  check('UPDATE_OPENING PATCHes size, position, sill and count (no version: the ERP opening has none)',
+    r.method === 'PATCH' && r.path === '/geometry/openings/erpOpen1'
+      && JSON.stringify(Object.keys(r.body).sort()) === JSON.stringify(['count', 'heightFromFloorMm', 'heightMm', 'offsetFromStartMm', 'widthMm']),
+    JSON.stringify(r))
+
+  // XR-08: a split names each piece's rooms by ERP id.
+  r = await sent('SPLIT_WALL', { ifcGlobalId: 'WallIfc000000000000001', newWalls: [{ ifcGlobalId: 'WallIfc00000000000000A', lengthMm: 1200, height: 120, thickness: 9, orientation: 'EAST', roomIfcIds: ['RoomIfc000000000000001'] }] })
+  check('SPLIT_WALL sends each piece with its rooms (ERP ids)', JSON.stringify(r.body.newWalls[0].roomIds) === JSON.stringify(['erpRoom1']) && !('atFractions' in r.body), JSON.stringify(r.body))
+
+  // XR-16: a join merges EVERY wall it names, with the merged wall's nodes.
+  r = await sent('JOIN_WALLS', { mergedIfcGlobalId: 'WallIfc000000000000001', wallIfcIds: ['WallIfc000000000000001', 'Wall2Ifc00000000000001'], n1IfcId: 'NodeIfc000000000000001', height: 120, thickness: 9, lengthMm: 4000, orientation: 'EAST' })
+  check('JOIN_WALLS sends every wall id and the merged node', JSON.stringify(r.body.wallIds) === JSON.stringify(['erpWall1', 'erpWall2']) && r.body.merged.n1NodeId === 'erpNode1', JSON.stringify(r.body))
+
+  // XR-09: the ERP ids of every room — never a list that lost one.
+  r = await sent('ADD_ELEMENT', { ifcGlobalId: 'ElemIfc000000000000003', kind: 'SLAB', roomIds: ['RoomIfc000000000000001'] })
+  check('an element\'s rooms go as ERP ids', JSON.stringify(r.body.roomIds) === JSON.stringify(['erpRoom1']), JSON.stringify(r.body))
+  r = await sent('UPDATE_ELEMENT', { ifcGlobalId: 'ElemIfc000000000000001', roomIds: ['RoomIfc000000000000001'] })
+  check('UPDATE_ELEMENT resolves its rooms too (it used to send editor ids → 400)', JSON.stringify(r.body.roomIds) === JSON.stringify(['erpRoom1']), JSON.stringify(r.body))
+  let partial = ''
+  try { await fireLiveOp('ADD_ELEMENT', { ifcGlobalId: 'ElemIfc000000000000004', kind: 'SLAB', roomIds: ['RoomIfc000000000000001', 'RoomNeverSynced000001'] }, mockConn) } catch (e) { partial = e.message }
+  check('one unresolved room refuses the op (permanent 400), never a partial list', /→ 400:/.test(partial), partial || 'did not throw')
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

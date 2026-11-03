@@ -5,7 +5,6 @@ import App from './App.jsx'
 import { useStore } from './store'
 import { installAutosave } from './projects/autosave'
 import { getCurrentProjectId, bootPersistence } from './projects/manager'
-import { hydrateConnCache } from './projects/cloudConn'
 import { hydrateRoomTypesCache, initRoomTypesSync } from './projects/taxonomy'
 import { parseErpLaunchHash, setErpLaunchContext, getErpLaunchContext } from './projects/erpLaunchContext'
 import { initErpSession } from './projects/erpSession'
@@ -41,17 +40,12 @@ installAutosave(useStore, getCurrentProjectId)
 // Deterministic boot: AWAIT the IDB-backed persistence layer before rendering
 // <App/>. The migration shim runs once (localStorage → IDB) and the in-memory
 // cache (current project id, projects list) hydrates here — so by the time the
-// app mounts, getCurrentProjectId() is stable. This removes the boot/handoff
-// race where the #connect deep link read a null current-project id and the
-// hydrate then clobbered the id it had just set. The boot skeleton in
+// app mounts, getCurrentProjectId() is stable. The boot skeleton in
 // index.html covers this window (< 500ms in practice).
 async function boot() {
   try {
     await bootPersistence()
     console.log('[ERP] boot persistence done')
-    // Hydrate the in-memory cloud-connection mirror so getCachedConn() (autosave
-    // hot path) and the sync badge are correct from first render.
-    await hydrateConnCache()
     // Canonical RoomType taxonomy: load the offline cache first (picker has data
     // before render), then wire the connect-driven refresh (fetches from the ERP
     // whenever a connection is present). The editor consumes this taxonomy; it

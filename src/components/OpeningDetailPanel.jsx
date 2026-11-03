@@ -152,6 +152,21 @@ export default function OpeningDetailPanel() {
         </Field>
       </div>
 
+      {/* Window sill height (a door stands on the floor) */}
+      {isWindow && (
+        <div style={{ marginBottom: 'var(--space-2)' }}>
+          <Field label="Sill" inline hint="Height of the window's bottom above the floor">
+            <FeetInchesInput
+              value={typeof opening.sillHeight === 'number' ? opening.sillHeight / GRID_IN : null}
+              onCommit={ft => updateOpening(sel.wallId, sel.openingId, { sillHeight: ft * GRID_IN })}
+              min={0}
+              precision={DEFAULT_PRECISION.opening}
+              placeholder="Not set"
+            />
+          </Field>
+        </div>
+      )}
+
       {/* Offset + quick buttons */}
       <div style={{ marginBottom: 'var(--space-2)' }}>
         <Field

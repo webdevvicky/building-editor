@@ -1425,7 +1425,7 @@ export const useStore = create((set, get) => ({
           if (!alreadyHasMain) subtype = OPENING_SUBTYPE.MAIN_DOOR
         }
       }
-      const opening = { ...seed, subtype, subtypeSource: SUBTYPE_SOURCE.HEURISTIC, hasGrill: null }
+      const opening = { ...seed, subtype, subtypeSource: SUBTYPE_SOURCE.HEURISTIC, hasGrill: null, sillHeight: null }
       return { walls: { ...s.walls, [wallId]: { ...wall, openings: [...(wall.openings || []), opening] } } }
     })
     // Live ERP sync: syncEngine detects the new opening in the wall's openings[]
@@ -1523,6 +1523,7 @@ export const useStore = create((set, get) => ({
         } else {
           next.hasSunshade = false
           next.orient = next.orient ?? 0
+          next.sillHeight = null // a door stands on the floor
         }
         // Rev 2 — subtype must follow the parent type when it swaps.
         // Reset to heuristic default for the new type; clear EXPLICIT flag.
@@ -1533,6 +1534,8 @@ export const useStore = create((set, get) => ({
       if (typeof next.width === 'number')  next.width  = Math.max(12, Math.min(next.width,  Math.max(12, wallLenIn - (next.offset ?? 0))))
       if (typeof next.height === 'number') next.height = Math.max(12, Math.min(next.height, 144))
       if (typeof next.offset === 'number') next.offset = Math.max(0,  Math.min(next.offset, Math.max(0, wallLenIn - (next.width ?? 0))))
+      // A window's sill sits between the floor and the top of the wall less the window.
+      if (typeof next.sillHeight === 'number') next.sillHeight = Math.max(0, Math.min(next.sillHeight, Math.max(0, (wall.height ?? 120) - (next.height ?? 0))))
       return {
         walls: { ...s.walls, [wallId]: {
           ...wall,

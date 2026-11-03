@@ -4,10 +4,9 @@
 // *fragment*:
 //   #erpLaunch?buildingId=<id>&token=<jwt>&erpUrl=<erpApiBase>
 //
-// Why a hash fragment (mirrors connectHandoff.js):
+// Why a hash fragment:
 //   - fragments are never sent to the server, so the JWT stays out of access
 //     logs / proxies,
-//   - the editor already reads window.location.hash on boot (same pattern),
 //   - main.jsx strips it immediately (history.replaceState) so the token is
 //     never visible in the address bar or bookmarkable.
 //

@@ -142,7 +142,6 @@ export async function initErpSession() {
     erpUrl: ctx.erpUrl,
     getToken: conn.getToken,
     buildingId: ctx.buildingId,
-    source: 'erpLaunch',
   })
   console.log('[ERP] liveMode after init:', getLiveMode())
 
