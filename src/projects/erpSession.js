@@ -1,3 +1,4 @@
+import { loadBbsSettings } from './bbsSettingsSession.js'
 // erpSession.js — activate live ERP sync from an erpLaunchContext.
 //
 // Boot order (main.jsx):
@@ -107,6 +108,7 @@ export async function initErpSession() {
     ? { buildingId: ctx.buildingId, erpUrl: ctx.erpUrl, hasToken: !!ctx.token }
     : null)
   if (!ctx) return false
+  useStore.setState({ bbsSettingsRequired: true, bbsSettingsStatus: 'loading', bbsSettingsError: null })
 
   // Surface connection loss (doc 48A Phase 0): a disconnected editor must never *look*
   // saved-to-server. This marks the read-only/offline banner + pauses uploads while
@@ -153,6 +155,7 @@ export async function initErpSession() {
   // with the id-map seeded in every path. A brand-new building has nothing to load —
   // start on a blank canvas.
   let reopenVersion = null
+  let reopenSource = 'empty'
   if (!isNewBuilding) {
     const loadProject = useStore.getState().loadProject
     const res = await reopenCanvas(conn, ctx.buildingId, loadProject).catch((err) => {
@@ -160,6 +163,7 @@ export async function initErpSession() {
       return null
     })
     reopenVersion = res?.snapshotVersion ?? null
+    reopenSource = res?.source
     console.log('[erpSession] reopen source', res?.source ?? 'unknown')
 
     // VERSION CLASH on reopen (XR-15): this device held unsent edits made on an older
@@ -201,6 +205,8 @@ export async function initErpSession() {
       }
     }).catch(() => {})
   }
+
+  if (!await loadBbsSettings(useStore, conn, { initial: isNewBuilding || reopenSource === 'empty' })) return true
 
   // The ONE ORDERED write pipeline (Invariants #5/#7). Init the canonical upload
   // outbox first (baseVersion seed; failures swallowed so a sync hiccup never

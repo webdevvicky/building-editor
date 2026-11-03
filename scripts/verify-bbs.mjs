@@ -246,26 +246,26 @@ reset()
   // Worked example for a 9″×12″ rect column, height = plinth(1.5) + floor(10) +
   // slab(5/12) = 11.9167 ft, 6-T12 longitudinal, T8@150 stirrups, cover 25mm:
   //
-  //   LONGITUDINAL: heightMm 3631.5 + lapMm 679.2 (56.6d Fe500/M20) = 4310.7 mm
-  //     6 bars × 4.311 m × 0.888 kg/m = 22.99 kg  ← IS 456 correct lap
+  //   LONGITUDINAL: heightMm 3631.5 + lapMm 600 (explicit spec 50d) = 4231.5 mm
+  //     6 bars × 4.2315 m × 0.888 kg/m = 22.57 kg  ← explicit member/spec lap override
   //   STIRRUP: net 178.6mm × 254.8mm, perimeter 866.8 + 2×9×8 − 4×2×8 = 946.8 mm
   //     stirrupCount = ceil(11.9167×12/6) = 24
   //     24 × 0.9468 m × 0.395 kg/m = 8.98 kg  ← IS 2502 bend deductions + 9d hooks
-  //   TOTAL = 31.97 kg
+  //   TOTAL = 31.55 kg
   //
   // Legacy `computeBBSQuantities` reports ~35.6 kg for the SAME column. The
   // delta is documented as BE-Legacy-001: `FT_PER_MM` in reinforcementSpecs.js
   // is effectively m/mm not ft/mm, so legacy lap is silently ~5d not 50d;
   // partially offset by legacy's flat 0.5 ft (~15d at 8mm) hook return per
   // stirrup end and missing IS 2502 corner deductions. New path is IS-correct.
-  ok('LONGITUDINAL totalWeightKg = 22.99 kg (lap = 56.6d Fe500/M20 catalog)',
-     long && Math.abs(long.totalWeightKg - 22.99) < 0.1,
+  ok('LONGITUDINAL totalWeightKg = 22.57 kg (lap = explicit 50d spec override)',
+     long && Math.abs(long.totalWeightKg - 22.57) < 0.1,
      `got ${long?.totalWeightKg.toFixed(2)}kg`)
   ok('STIRRUP totalWeightKg = 8.98 kg (9d hooks + IS 2502 bend deductions)',
      stir && Math.abs(stir.totalWeightKg - 8.98) < 0.1,
      `got ${stir?.totalWeightKg.toFixed(2)}kg`)
-  ok('Column total = 31.97 kg (IS-correct, hand-calc verified)',
-     Math.abs(newKg - 31.97) < 0.2, `got ${newKg.toFixed(2)}kg`)
+  ok('Column total = 31.55 kg (IS-correct, hand-calc verified)',
+     Math.abs(newKg - 31.55) < 0.2, `got ${newKg.toFixed(2)}kg`)
   ok('Legacy computeBBSQuantities reports ≈ 35.6 kg (BE-Legacy-001 documented delta)',
      oldKg > 0 && Math.abs(oldKg - 35.6) < 1.0,
      `legacy=${oldKg.toFixed(2)}kg`)
@@ -530,11 +530,11 @@ reset()
   // category. For column it should be tight (±5%).
   const newColKg = newOut.totals.byCategory.column
   const oldColKg = oldOut.byColumn.reduce((s, c) => s + c.kg.total, 0)
-  // EXACT assertion — 4 identical columns × 31.97 kg = 127.88 kg new total.
+  // EXACT assertion — 4 identical columns × 31.55 kg = 126.20 kg new total.
   // Legacy reports ≈ 142.3 kg (4 × 35.57). Both are exact, neither is a
   // tolerance; the delta is BE-Legacy-001 documented.
-  ok('New column total = 127.88 kg exact (4 × 31.97 IS-correct)',
-     Math.abs(newColKg - 127.88) < 0.5,
+  ok('New column total = 126.20 kg exact (4 × 31.55 with explicit 50d)',
+     Math.abs(newColKg - 126.20) < 0.5,
      `new=${newColKg.toFixed(1)}kg`)
   ok('Legacy column total ≈ 142.3 kg (4 × 35.57, BE-Legacy-001 known delta)',
      oldColKg > 0 && Math.abs(oldColKg - 142.3) < 2.0,

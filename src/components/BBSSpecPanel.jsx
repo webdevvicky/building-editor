@@ -1,3 +1,4 @@
+import { effectiveStockBarLength } from '../specs/effectiveBbsSettings.js'
 // Phase 1.7 — Reinforcement Spec editor.
 //
 // Mounted when activeTool === 'bbs'. Reads + writes
@@ -88,15 +89,15 @@ const selectStyle = {
 
 const ELEMENT_TYPES = ['COLUMN', 'BEAM', 'FOOTING', 'SLAB']
 
-function NumField({ label, value, onChange, step = 1, min = 0 }) {
+function NumField({ label, value, onChange, step = 1, min = 0, inherited = false }) {
   return (
     <div style={fieldRow}>
       <span style={lbl}>{label}</span>
       <input
         type="number" min={min} step={step}
-        style={numInput} value={value ?? 0}
+        style={numInput} value={value ?? (inherited ? '' : 0)} placeholder={inherited ? 'Inherited' : undefined}
         onKeyDown={e => e.stopPropagation()}
-        onChange={e => onChange(parseFloat(e.target.value))}
+        onChange={e => onChange(inherited && e.target.value === '' ? null : parseFloat(e.target.value))}
       />
     </div>
   )
@@ -145,9 +146,9 @@ function SpecEditor({ spec, onChange }) {
             onChange={v => setField('stirrupBarDiaMm', v)} />
           <NumField label="Stirrup spacing (in)" value={spec.stirrupSpacingIn} step={0.5}
             onChange={v => setField('stirrupSpacingIn', v)} />
-          <NumField label="Cover (mm)"           value={spec.coverMm} step={5}
+          <NumField inherited label="Cover (mm)"           value={spec.coverMm} step={5}
             onChange={v => setField('coverMm', v)} />
-          <NumField label="Lap × dia"            value={spec.lapLengthMultiplier} step={5}
+          <NumField inherited label="Lap × dia"            value={spec.lapLengthMultiplier} step={5}
             onChange={v => setField('lapLengthMultiplier', v)} />
         </>
       )}
@@ -166,7 +167,7 @@ function SpecEditor({ spec, onChange }) {
             onChange={v => setField('stirrupBarDiaMm', v)} />
           <NumField label="Stirrup spacing (in)"  value={spec.stirrupSpacingIn}  step={0.5}
             onChange={v => setField('stirrupSpacingIn', v)} />
-          <NumField label="Cover (mm)"            value={spec.coverMm}           step={5}
+          <NumField inherited label="Cover (mm)"            value={spec.coverMm}           step={5}
             onChange={v => setField('coverMm', v)} />
         </>
       )}
@@ -181,9 +182,9 @@ function SpecEditor({ spec, onChange }) {
             onChange={v => setNested('yBars', 'count', v)} />
           <NumField label="Y bar dia (mm)"   value={spec.yBars?.diaMm} step={2}
             onChange={v => setNested('yBars', 'diaMm', v)} />
-          <NumField label="Dev. length × dia" value={spec.developmentLengthMultiplier} step={5}
+          <NumField inherited label="Dev. length × dia" value={spec.developmentLengthMultiplier} step={5}
             onChange={v => setField('developmentLengthMultiplier', v)} />
-          <NumField label="Cover (mm)"       value={spec.coverMm} step={5}
+          <NumField inherited label="Cover (mm)"       value={spec.coverMm} step={5}
             onChange={v => setField('coverMm', v)} />
         </>
       )}
@@ -198,7 +199,7 @@ function SpecEditor({ spec, onChange }) {
             onChange={v => setField('distBarDiaMm', v)} />
           <NumField label="Dist. spacing (in)"    value={spec.distBarSpacingIn} step={0.5}
             onChange={v => setField('distBarSpacingIn', v)} />
-          <NumField label="Cover (mm)"            value={spec.coverMm}         step={5}
+          <NumField inherited label="Cover (mm)"            value={spec.coverMm}         step={5}
             onChange={v => setField('coverMm', v)} />
           <div style={{ ...fieldRow, cursor: 'pointer' }}
                onClick={() => setField('twoWay', !spec.twoWay)}>
@@ -230,7 +231,6 @@ export default function BBSSpecPanel() {
   const defaults = projectSettings?.bbsDefaults ?? {}
   const allowanceMode = projectSettings?.bbsAllowanceMode ?? 'IS_STRICT'
   const specs = Object.values(specMap)
-  const selected = selectedId ? specMap[selectedId] : null
 
   const updateSpecMap = (next) =>
     setProjectSettings({ reinforcementSpecs: next })
@@ -304,16 +304,15 @@ export default function BBSSpecPanel() {
     let spec
     if (newType === 'COLUMN') {
       spec = { ...base, longitudinalBarCount: 4, longitudinalBarDiaMm: 12,
-        stirrupBarDiaMm: 8, stirrupSpacingIn: 6, coverMm: 25, lapLengthMultiplier: 50 }
+        stirrupBarDiaMm: 8, stirrupSpacingIn: 6 }
     } else if (newType === 'BEAM') {
       spec = { ...base, topBars: { count: 2, diaMm: 12 }, bottomBars: { count: 2, diaMm: 12 },
-        stirrupBarDiaMm: 8, stirrupSpacingIn: 6, coverMm: 25 }
+        stirrupBarDiaMm: 8, stirrupSpacingIn: 6 }
     } else if (newType === 'FOOTING') {
-      spec = { ...base, xBars: { count: 6, diaMm: 12 }, yBars: { count: 6, diaMm: 12 },
-        developmentLengthMultiplier: 50, coverMm: 40 }
+      spec = { ...base, xBars: { count: 6, diaMm: 12 }, yBars: { count: 6, diaMm: 12 } }
     } else {
       spec = { ...base, mainBarDiaMm: 10, mainBarSpacingIn: 6,
-        distBarDiaMm: 8, distBarSpacingIn: 8, coverMm: 20, twoWay: false }
+        distBarDiaMm: 8, distBarSpacingIn: 8, twoWay: false }
     }
     updateSpecMap({ ...specMap, [id]: spec })
     setSelectedId(id)
@@ -427,9 +426,8 @@ export default function BBSSpecPanel() {
 
       <div style={divider} />
 
-      {/* BBS-0.5 — Procurement: standard bar length (12 / 9 / 6 m). Default
-          flipped 6 → 12 on 2026-05-28 to match Indian TMT-market reality.
-          Per-project override here. */}
+      {/* Procurement stock length inherits the applied settings unless explicitly overridden. */}
+      <p>Blank cover, lap and development fields inherit the drawing’s saved defaults or IS-code parameters. Clear a field to remove its override.</p>
       <div style={sectionHead}>Procurement</div>
       <div style={fieldRow}>
         <span style={lbl} title="Standard bar length used for byDiameter procurement piece counts in the BOQ.">
@@ -437,15 +435,16 @@ export default function BBSSpecPanel() {
         </span>
         <select
           style={selectStyle}
-          value={defaults.standardBarLengthM ?? 12}
+          value={defaults.standardBarLengthM ?? ''}
           onKeyDown={e => e.stopPropagation()}
           onChange={e => setProjectSettings({
-            bbsDefaults: { ...defaults, standardBarLengthM: Number(e.target.value) },
+            bbsDefaults: { ...defaults, standardBarLengthM: e.target.value === '' ? null : Number(e.target.value) },
           })}
         >
-          <option value={12}>12 m (Indian market standard, default)</option>
+          <option value="">Inherited ({effectiveStockBarLength({ projectSettings: { ...projectSettings, bbsDefaults: {} } })} m)</option>
+          <option value={12}>12 m</option>
           <option value={9}>9 m</option>
-          <option value={6}>6 m (legacy)</option>
+          <option value={6}>6 m</option>
         </select>
       </div>
 
@@ -461,8 +460,8 @@ export default function BBSSpecPanel() {
           onKeyDown={e => e.stopPropagation()}
           onChange={e => setBbsAllowanceMode(e.target.value)}
         >
-          <option value="IS_STRICT">IS 2502 strict (9d hooks, 56.6d lap, Ld anchorage)</option>
-          <option value="SITE_PRACTICE">Site practice (flat allowances, 50d lap)</option>
+          <option value="IS_STRICT">IS 2502 strict (diameter-based hooks and anchorage)</option>
+          <option value="SITE_PRACTICE">Site practice (flat hook and anchorage allowances)</option>
         </select>
       </div>
       <div
@@ -472,7 +471,7 @@ export default function BBSSpecPanel() {
           marginBottom: 'var(--space-2)',
         }}
       >
-        IS_STRICT is IS-correct (default). SITE_PRACTICE matches a contractor's hand BBS within a few %.
+        Company lap settings apply in either mode. Explicit spec overrides take precedence.
       </div>
 
       <div style={sectionHead}>Project defaults</div>

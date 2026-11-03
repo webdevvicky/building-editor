@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Strap (eccentric / cantilever) footing rebar — IS 456 + IS 2502.
 //
 // 2026-05-29 (BBS-categories phase). Pure helper imported by footingRebar.js
@@ -35,6 +36,7 @@ export function buildStrapFootingGroups(state, params, foundation) {
   const resolved = resolveStrapReinforcementSpec(state, foundation)
   if (!resolved.spec) return []
   const spec = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
 
   const geom = foundation.geometry || {}
   const padA = geom.padA || {}
@@ -54,7 +56,7 @@ export function buildStrapFootingGroups(state, params, foundation) {
   // ── Pad bottom mesh (both pads, X + Y). ─────────────────────────────────────
   const padDia = spec.pad?.barDiaMm ?? 10
   const padSpacingIn = spec.pad?.barSpacingIn ?? 5
-  const padCoverMm = spec.padCoverMm ?? 60
+  const padCoverMm = spec.padCoverMm
   const padHookMm = allowanceMm({ kind: 'footingHook', diaMm: padDia, params })
   const addPad = (pad, tag) => {
     const lFt = pad.lengthFt ?? 0, wFt = pad.widthFt ?? 0
@@ -114,7 +116,7 @@ export function buildStrapFootingGroups(state, params, foundation) {
     const stDia = sb.stirrupBarDiaMm
     const stSpacingIn = sb.stirrupSpacingIn
     if (stDia > 0 && stSpacingIn > 0) {
-      const coverIn = (spec.coverMm ?? 30) / 25.4
+      const coverIn = (spec.coverMm) / 25.4
       const netW = inToMm(Math.max(0, sWidthIn - 2 * coverIn))
       const netD = inToMm(Math.max(0, sDepthIn - 2 * coverIn))
       const stCut = computeStirrupCuttingLengthMm({ netWidthMm: netW, netDepthMm: netD, diaMm: stDia, params })

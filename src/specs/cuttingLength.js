@@ -1,3 +1,4 @@
+import { OFFLINE_BBS_SETTINGS, resolveCuttingParams } from './effectiveBbsSettings.js'
 // IS 2502 / SP 34 cutting-length engine + override-able parameter catalog.
 //
 // 2026-05-28. The single source of truth for every bend deduction, hook
@@ -62,13 +63,8 @@ export const DEFAULT_IS2502_PARAMS = Object.freeze({
   // 90° if the project opts out of seismic detailing entirely.
   stirrupHookAngleDeg: 135,
 
-  // Standard procurement bar length (m). Indian residential market reality
-  // is 12 m bundles; user has chosen to keep the existing reinforcementSpecs
-  // default of 6 m and surface a UI choice. Reading order at compute time:
-  //   projectSettings.bbsDefaults.standardBarLengthM      ← user-set
-  //   ?? params.standardBarLengthM                        ← this catalog
-  //   ?? STANDARD_BAR_LENGTH_M (reinforcementSpecs.js)    ← legacy fallback
-  standardBarLengthM: 12,
+  // Offline procurement baseline; ERP snapshots and explicit overrides resolve in effectiveBbsSettings.
+  standardBarLengthM: OFFLINE_BBS_SETTINGS.stockBarLengthM,
 
   // Development length Ld factor, in diameters (d). IS 456 Cl 26.2.1 derives
   // Ld = (φ × σs) / (4 × τbd). For Fe500 in M20 concrete (residential
@@ -230,25 +226,7 @@ export const SITE_PRACTICE_PARAMS = Object.freeze({
 // object overrides merge one level deep. Stamps `allowanceMode` so the
 // allowanceMm() resolver can switch. Pure function of state.projectSettings.
 export function getIs2502Params(state) {
-  const mode = state?.projectSettings?.bbsAllowanceMode === 'SITE_PRACTICE'
-    ? 'SITE_PRACTICE' : 'IS_STRICT'
-  const layers = mode === 'SITE_PRACTICE'
-    ? [SITE_PRACTICE_PARAMS, state?.projectSettings?.is2502Params ?? {}]
-    : [state?.projectSettings?.is2502Params ?? {}]
-  const merged = { ...DEFAULT_IS2502_PARAMS }
-  for (const overrides of layers) {
-    for (const [k, v] of Object.entries(overrides)) {
-      const dv = merged[k]
-      if (dv && typeof dv === 'object' && !Array.isArray(dv) &&
-          v && typeof v === 'object' && !Array.isArray(v)) {
-        merged[k] = { ...dv, ...v }
-      } else {
-        merged[k] = v
-      }
-    }
-  }
-  merged.allowanceMode = mode
-  return merged
+  return resolveCuttingParams(state, DEFAULT_IS2502_PARAMS, SITE_PRACTICE_PARAMS)
 }
 
 // ── Allowance resolver (CLOSED kind enum, mode is the ONLY switch) ───────────

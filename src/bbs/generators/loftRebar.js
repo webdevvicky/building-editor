@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Loft rebar generator — RCC storage shelf cast into a wall. IS 456 + IS 2502.
 //
 // 2026-05-29 (BBS-categories phase). Pure function. A loft is a shallow slab
@@ -22,7 +23,8 @@ import {
 
 export function generateLoftRebarGroups(ctx, wall) {
   if (!ctx || !wall) return []
-  const { state, params } = ctx
+  const { state } = ctx
+  let { params } = ctx
   if (!state || !params) return []
   const loft = wall.loft
   if (!loft || loft.enabled !== true) return []
@@ -34,6 +36,7 @@ export function generateLoftRebarGroups(ctx, wall) {
   const resolved = resolveLoftReinforcementSpec(state, wall)
   if (!resolved.spec) return []
   const spec = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
 
   const widthMm = ftToMm(widthFt)
   const depthMm = ftToMm(depthFt)

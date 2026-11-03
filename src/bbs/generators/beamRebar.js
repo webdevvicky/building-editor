@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Beam rebar group generator.
 //
 // 2026-05-28. Pure function — given a beam entity (explicit or wall-derived)
@@ -82,13 +83,15 @@ function _floorIdFor(state, beam) {
 }
 
 export function generateBeamRebarGroups(ctx, beam) {
-  const { state, params } = ctx
+  const { state } = ctx
+  let { params } = ctx
   if (!beam || !state || !params) return []
 
   const resolved = resolveBeamReinforcementSpec(state, beam)
   if (!resolved.spec) return []   // ESTIMATE — kg/m³ pool handles it
 
   const spec       = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
   const specId     = resolved.specId
   const specSource = resolved.source
 

@@ -6,7 +6,6 @@
 // Phase 1.7 consumers (BBS) use barLayoutZones + stirrupLengthFt — stubs today,
 // filled in when columnType.reinforcementSpecId points at a real spec.
 
-const DEFAULT_COVER_IN = 1.5  // typical cover for residential RCC columns
 const DEFAULT_STIRRUP_HOOK_FT = 10 / 12 // ~10 in 90°/135° hook return (BBS Phase 1.7 will derive from bar dia)
 
 const COLUMN_SHAPES = {
@@ -18,7 +17,7 @@ const COLUMN_SHAPES = {
     // Reinforcement bar layout zones (Phase 1.7 BBS will read from reinforcementSpec)
     barLayoutZones: () => ({ corners: 4, intermediate: 0, ring: false }),
     // Stirrup perimeter inside the cover + hook returns. Phase 1.7 overrides hook from bar dia.
-    stirrupLengthFt: (ct, coverIn = DEFAULT_COVER_IN) => {
+    stirrupLengthFt: (ct, coverIn) => {
       const wIn = Math.max(0, ct.widthIn - 2 * coverIn)
       const dIn = Math.max(0, ct.depthIn - 2 * coverIn)
       return 2 * (wIn + dIn) / 12 + 2 * DEFAULT_STIRRUP_HOOK_FT
@@ -34,7 +33,7 @@ const COLUMN_SHAPES = {
     areaFt2: ct => Math.PI * Math.pow(ct.diamIn / 2, 2) / 144,
     perimeterFt: ct => Math.PI * ct.diamIn / 12,
     barLayoutZones: () => ({ corners: 0, intermediate: 0, ring: true }),
-    stirrupLengthFt: (ct, coverIn = DEFAULT_COVER_IN) => {
+    stirrupLengthFt: (ct, coverIn) => {
       const dIn = Math.max(0, ct.diamIn - 2 * coverIn)
       return Math.PI * dIn / 12 + DEFAULT_STIRRUP_HOOK_FT
     },

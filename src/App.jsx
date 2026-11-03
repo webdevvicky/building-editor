@@ -1,3 +1,6 @@
+import { useStore } from './store.js'
+import BbsSettingsBanner from './components/BbsSettingsBanner.jsx'
+import { getErpLaunchContext } from './projects/erpLaunchContext.js'
 import Canvas from './components/Canvas'
 import Toolbar from './components/Toolbar'
 import BOQPanel from './components/BOQPanel'
@@ -39,48 +42,57 @@ import { DesktopGate } from './components/DesktopGate'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 
 export default function App() {
-  useKeyboardShortcuts()
+  const status = useStore(s => s.bbsSettingsStatus)
+  const settings = useStore(s => s.projectSettings.bbsSettings)
+  if (getErpLaunchContext() && (status !== 'ready' || settings?.source !== 'ERP')) return <BbsSettingsBanner />
+  return <EditorWorkspace />
+}
 
+function EditorWorkspace() {
+  useKeyboardShortcuts()
   return (
     <DesktopGate>
-      <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-        <Toolbar />
-        <FloorSwitcher />
-        <OpeningPanel />
-        <OpeningDetailPanel />
-        <StampPanel />
-        <BulkWallPanel />
-        <RoomDetailPanel />
-        <ColumnPanel />
-        <BeamPanel />
-        <StaircasePanel />
-        <SlabPanel />
-        <FoundationPanel />
-        <CalibrationModal />
-        <PDFPagePickerModal />
-        <FloorsManagerPanel />
-        <BBSSpecPanel />
-        <BBSSchedulePanel />
-        <PlumbingFixturePanel />
-        <ElectricalPointPanel />
-        <HvacPanel />
-        <FirePanel />
-        <ElvPanel />
-        <MepDefaultsModal />
-        <ProjectSettingsPanel />
-        <ProjectsPanel />
-        <RevisionsPanel />
-        <IsoView />
-        <HelpGuide />
-        <RoomBreakdownPanel />
-        <LayersPanel />
-        <BOQPanel />
-        <Canvas />
-        <DialogHost />
-        <ToastHost />
-        <SyncStatusBadge />
-        <EditorReadOnlyBanner />
-        <ProjectionMismatchBanner />
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+        <BbsSettingsBanner />
+        <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <Toolbar />
+          <FloorSwitcher />
+          <OpeningPanel />
+          <OpeningDetailPanel />
+          <StampPanel />
+          <BulkWallPanel />
+          <RoomDetailPanel />
+          <ColumnPanel />
+          <BeamPanel />
+          <StaircasePanel />
+          <SlabPanel />
+          <FoundationPanel />
+          <CalibrationModal />
+          <PDFPagePickerModal />
+          <FloorsManagerPanel />
+          <BBSSpecPanel />
+          <BBSSchedulePanel />
+          <PlumbingFixturePanel />
+          <ElectricalPointPanel />
+          <HvacPanel />
+          <FirePanel />
+          <ElvPanel />
+          <MepDefaultsModal />
+          <ProjectSettingsPanel />
+          <ProjectsPanel />
+          <RevisionsPanel />
+          <IsoView />
+          <HelpGuide />
+          <RoomBreakdownPanel />
+          <LayersPanel />
+          <BOQPanel />
+          <Canvas />
+          <DialogHost />
+          <ToastHost />
+          <SyncStatusBadge />
+          <EditorReadOnlyBanner />
+          <ProjectionMismatchBanner />
+        </div>
       </div>
     </DesktopGate>
   )

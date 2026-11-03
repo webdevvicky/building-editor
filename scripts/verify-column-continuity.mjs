@@ -15,7 +15,7 @@
 //      the workbook uses a 50d site lap (header "50 d mm", 1.968 ft = 600 mm =
 //      50×12 mm); the catalog IS_STRICT default is 56.6d (679.2 mm @ 12 mm).
 //      Both produce one-lap-per-lift — only the lap multiple differs. We assert
-//      against the catalog default (56.6d); 50d is reachable via SITE_PRACTICE.
+//      against the fixture’s explicit 50d override; the IS catalog remains 56.6d.
 //   G. column_unsupported validation (warning, dismissable).
 //   H. Single-floor BBS byte-identity (collapses to the pre-phase emission).
 
@@ -73,7 +73,7 @@ function setupTwoFloor(extra = {}) {
 const LIFT_F1 = 1.5 + 10            // 11.5  (base: plinth + floor, no slab)
 const LIFT_F2 = 9 + 5 / 12          // 9.41667 (top: floor + slab)
 const FULL    = LIFT_F1 + LIFT_F2   // 20.91667
-const LAP_12  = 56.6 * 12           // 679.2 mm  (IS 456 56.6d, Fe500/M20)
+const LAP_12  = 50 * 12             // 600 mm: the fixture explicitly overrides lap to 50d
 
 // ── A. Lift decomposition ─────────────────────────────────────────────────
 header('A. Per-floor lift-height decomposition')
@@ -173,7 +173,7 @@ setupTwoFloor()
 }
 
 // ── F. Per-floor BBS lifts — first-principles cutting lengths ─────────────
-header('F. per-floor BBS lifts (one lap per lift, 56.6d catalog)')
+header('F. per-floor BBS lifts (one lap per lift, explicit 50d spec)')
 setupTwoFloor()
 {
   const id = s().addColumn(0, 0, 'C1')
@@ -185,9 +185,9 @@ setupTwoFloor()
   const lF2 = longs.find(g => g.floorId === 'F2')
   ok('F1 lift carries floorId F1', !!lF1)
   ok('F2 lift carries floorId F2', !!lF2)
-  // cutting = ftToMm(lift) + one lap (56.6d).
-  ok('F1 cutting = 11.5ft + 56.6d = 4184.4mm', lF1 && near(lF1.cuttingLengthMm, ftToMm(LIFT_F1) + LAP_12))
-  ok('F2 cutting = 9.41667ft + 56.6d = 3549.4mm', lF2 && near(lF2.cuttingLengthMm, ftToMm(LIFT_F2) + LAP_12))
+  // cutting = ftToMm(lift) + one lap (explicit 50d).
+  ok('F1 cutting = 11.5ft + 50d = 4105.2mm', lF1 && near(lF1.cuttingLengthMm, ftToMm(LIFT_F1) + LAP_12))
+  ok('F2 cutting = 9.41667ft + 50d = 3470.2mm', lF2 && near(lF2.cuttingLengthMm, ftToMm(LIFT_F2) + LAP_12))
   // Per-lift-lap proof: total lift cutting exceeds a single full-height bar by
   // exactly ONE extra lap (the second lift's splice).
   const singleFull = ftToMm(FULL) + LAP_12

@@ -100,7 +100,7 @@ export function buildBbsWorkbookModel(state, opts = {}) {
   const grandKg = safeR2(totalRows.reduce((a, r) => a + r.totalKg, 0))
   const grandM3 = round3(totalRows.reduce((a, r) => a + r.concreteM3, 0))
   const weightPer12mByDia = {}
-  for (const d of DIA_COLS) weightPer12mByDia[d] = safeR2((result.standardBarLengthM ?? 12) * (d * d) / 162)
+  for (const d of DIA_COLS) weightPer12mByDia[d] = safeR2((result.standardBarLengthM) * (d * d) / 162)
 
   const totalSheet = {
     diaCols: DIA_COLS,
@@ -109,7 +109,7 @@ export function buildBbsWorkbookModel(state, opts = {}) {
     grandM3,
     grandKgPerM3: grandM3 > 0 ? safeR2(grandKg / grandM3) : null,
     weightPerBarByDia: weightPer12mByDia,
-    standardBarLengthM: result.standardBarLengthM ?? 12,
+    standardBarLengthM: result.standardBarLengthM,
   }
 
   return {
@@ -127,7 +127,7 @@ export function buildBbsWorkbookModel(state, opts = {}) {
 
 // ── Excel ─────────────────────────────────────────────────────────────────────
 function _safeFile(name) {
-  return String(name || 'project').replace(/[^a-z0-9_\-]+/gi, '_').slice(0, 50) || 'project'
+  return String(name || 'project').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 50) || 'project'
 }
 function _todayStamp() {
   const d = new Date()

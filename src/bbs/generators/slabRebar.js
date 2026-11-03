@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Slab rebar generator — IS 2502 / SP 34 / IS 456.
 //
 // 2026-05-28. Emits RebarGroup[] for a single slab. Spans/widths derive from
@@ -29,7 +30,6 @@ import {
   computeCrankBarCuttingLengthMm,
   developmentLengthMm,
   ftToMm,
-  MM_PER_FT,
   MM_PER_IN,
 } from '../../specs/cuttingLength.js'
 import {
@@ -58,13 +58,15 @@ function barsAcross(lengthFt, spacingIn) {
 
 export function generateSlabRebarGroups(ctx, slab) {
   if (!ctx || !slab) return []
-  const { state, params } = ctx
+  const { state } = ctx
+  let { params } = ctx
   if (!state || !params) return []
 
   // ── Resolve spec via centralized chain. ESTIMATE → no rebar groups.
   const resolved = resolveSlabReinforcementSpecForSlab(state, slab)
   if (!resolved || !resolved.spec) return []
   const spec = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
 
   // ── Geometry from getRoomGeometry — REAL span/width, not √area.
   const validSet = new Set(state.getValidRoomIds?.() ?? [])
@@ -96,7 +98,7 @@ export function generateSlabRebarGroups(ctx, slab) {
     slab.thicknessIn
     ?? state.projectSettings?.slabSettings?.mainThicknessIn
     ?? DEFAULT_SLAB_THICKNESS_IN_FALLBACK
-  const coverIn = (spec.coverMm ?? 20) / MM_PER_IN
+  const coverIn = (spec.coverMm) / MM_PER_IN
   const effectiveDepthIn = Math.max(2, slabThicknessIn - 2 * coverIn)
   const effectiveDepthMm = effectiveDepthIn * MM_PER_IN
 

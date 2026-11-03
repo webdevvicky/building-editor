@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Sunshade / chajja rebar generator — IS 456 cantilever + IS 2502.
 //
 // 2026-05-29 (BBS-categories phase). Pure function. A sunshade is a cantilever
@@ -28,7 +29,8 @@ import {
 // descriptor: { wall, opening }
 export function generateSunshadeRebarGroups(ctx, descriptor) {
   if (!ctx || !descriptor) return []
-  const { state, params } = ctx
+  const { state } = ctx
+  let { params } = ctx
   const { wall, opening } = descriptor
   if (!state || !params || !wall || !opening) return []
   // Sunshades sit over window openings (matches getSunshadeQuantities).
@@ -37,6 +39,7 @@ export function generateSunshadeRebarGroups(ctx, descriptor) {
   const resolved = resolveSunshadeReinforcementSpec(state, opening)
   if (!resolved.spec) return []   // ESTIMATE — no rebar groups
   const spec = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
 
   const ss = state.projectSettings?.sunshadeSettings ?? {}
   const projectionFt = ss.projectionFt ?? 1.5

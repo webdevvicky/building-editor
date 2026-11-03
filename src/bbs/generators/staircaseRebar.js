@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Staircase rebar generator — dog-legged waist slab. IS 456 Cl 33 + SP 34.
 //
 // 2026-05-29 (BBS-categories phase). Pure function. ESTIMATE-grade per the
@@ -26,12 +27,14 @@ import {
 
 export function generateStaircaseRebarGroups(ctx, staircase) {
   if (!ctx || !staircase) return []
-  const { state, params } = ctx
+  const { state } = ctx
+  let { params } = ctx
   if (!state || !params) return []
 
   const resolved = resolveStaircaseReinforcementSpec(state, staircase)
   if (!resolved.spec) return []
   const spec = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
 
   const stepsPerFlight = staircase.stepsPerFlight ?? 0
   const flightCount    = staircase.flightCount ?? 2

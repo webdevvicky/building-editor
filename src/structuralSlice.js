@@ -1,3 +1,4 @@
+import { OFFLINE_BBS_SNAPSHOT } from './specs/effectiveBbsSettings.js'
 // Structural BOQ state slice.
 // Usage: spread into the main Zustand create() call.
 //   export const useStore = create((set, get) => ({
@@ -8,7 +9,7 @@
 
 import { MATERIAL_LIBRARY, BONDING } from './materials'
 import {
-  CONCRETE_GRADE, CEMENT_BAGS_PER_M3, STEEL_KG_PER_M3, AGGREGATE_SPLIT,
+  CEMENT_BAGS_PER_M3, STEEL_KG_PER_M3, AGGREGATE_SPLIT,
   SAND_M3_PER_M3_DRY, AGGREGATE_M3_PER_M3_DRY, PCC_BEDDING_THICKNESS_FT,
   BEAM_LEVEL_REGISTRY,
 } from './constants/structural'
@@ -24,11 +25,9 @@ import {
 } from './specs/hardware/hardwareSets'
 import { DEFAULT_PROJECT_COSTS } from './boq/projectCosts'
 import { buildDefaultTargetSettings } from './snap/targets.js'
-import { STANDARD_BAR_LENGTH_M } from './specs/reinforcementSpecs'
 import { getColumnAreaFt2 } from './lib/columnShapes'
 import { createMemo } from './topology/cache.js'
 import {
-  getNodesOnFloor as topoGetNodesOnFloor,
   getWallsOnFloor as topoGetWallsOnFloor,
   getRoomsOnFloor as topoGetRoomsOnFloor,
   getStampsOnFloor as topoGetStampsOnFloor,
@@ -242,9 +241,6 @@ export const DEFAULT_PROJECT_SETTINGS = {
     LOFT:      null,
     STAIRCASE: null,
     STRAP:     null,
-    // Gap 3 — standard bar length (m) for the per-Ø procurement rollup.
-    // 6m matches user spec; 12m allowed for crane-handled work.
-    standardBarLengthM: STANDARD_BAR_LENGTH_M,
   },
 
   // BBS allowance convention. IS_STRICT (default) = full IS 2502 (9d hooks,
@@ -252,6 +248,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // ft allowances + 50d lap matching a contractor's hand BBS. Toggling
   // recomputes all RebarGroups (computed state — no trace change).
   bbsAllowanceMode: 'IS_STRICT',
+  bbsSettings: OFFLINE_BBS_SNAPSHOT,
 
   // ── Gap 1 — Project metadata (Excel cover + PDF cover) ───────────────────
   projectMeta: {
@@ -1901,7 +1898,7 @@ export const createStructuralSlice = (set, get, uid) => ({
   getSteelQuantities: (opts = {}) => {
     const state = get()
     const steelRatios = state.projectSettings.rccSpecs?.steelKgPerM3 ?? STEEL_KG_PER_M3
-    const { columns, slabs, foundations, projectSettings, nodes } = state
+    const { columns, slabs, projectSettings } = state
     const { columnTypes, beamDimensions, slabSettings } = projectSettings
 
     const toSet = (v) => v instanceof Set ? v : new Set(v ?? [])
