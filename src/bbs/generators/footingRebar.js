@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Footing rebar group generator — IS 2502 / SP 34 compliant.
 //
 // 2026-05-28. Pure function. No React, no DOM, no Zustand. Emits
@@ -170,9 +171,10 @@ function _buildMeshGroups({
   lengthFt, widthFt, footingLabel,
   elementId, floorId, footingCount,
 }) {
+  params = cuttingParamsForSpec(params, spec)
   const widthMm  = ftToMm(widthFt)
   const lengthMm = ftToMm(lengthFt)
-  const coverMm  = spec.coverMm ?? 40
+  const coverMm  = spec.coverMm
 
   // BE-Footing-Ld-001 fix (2026-05-29): a footing mesh bar SPANS the pad — its
   // length is the pad dimension minus cover each side, plus a standard end hook
@@ -248,7 +250,7 @@ function _buildMeshGroups({
 // When the foundation carries multiple column types, the dowel markId
 // suffix is `-D-<typeMark>` so each group is distinct.
 function _buildDowelGroupsForFoundation({
-  state, params, foundation, resolved: _footingResolved, footingLabel,
+  state, params, foundation, footingLabel,
 }) {
   const columnIds = Array.isArray(foundation.columnIds) ? foundation.columnIds : []
   if (columnIds.length === 0) return []
@@ -321,6 +323,7 @@ function _buildDowelGroup({
   const diaMm = columnSpec.longitudinalBarDiaMm
 
   // Leg A — embed straight down into footing (Ld_compression).
+  params = cuttingParamsForSpec(params, columnSpec)
   const legEmbedMm = developmentLengthCompressionMm({
     diaMm,
     gradeKey: params.defaultGradeKey,

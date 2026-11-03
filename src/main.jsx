@@ -59,11 +59,11 @@ async function boot() {
     if (_erpLaunch) {
       await initErpSession().catch((err) => {
         console.warn('[boot] ERP session init failed', err)
+        useStore.setState({ bbsSettingsStatus: 'error', bbsSettingsError: err.message })
       })
       console.log('[ERP] erp session init done')
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.warn('[boot] persistence init failed', err)
   }
   createRoot(document.getElementById('root')).render(

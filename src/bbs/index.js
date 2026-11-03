@@ -1,3 +1,4 @@
+import { effectiveStockBarLength } from '../specs/effectiveBbsSettings.js'
 // BBS — Bar Bending Schedule entry point.
 //
 // 2026-05-28. computeRebarGroups(state, opts) is the single top-level
@@ -267,7 +268,7 @@ function _summarize(groups, params, state) {
     ent.byDiaLengthM[g.diaMm] = (ent.byDiaLengthM[g.diaMm] ?? 0) + g.totalLengthM
   }
 
-  const standardBarLengthM = state?.projectSettings?.bbsDefaults?.standardBarLengthM ?? params.standardBarLengthM
+  const standardBarLengthM = effectiveStockBarLength(state)
   const byDiameter = {}
   for (const diaStr of Object.keys(byDia).sort((a, b) => Number(a) - Number(b))) {
     const dia = Number(diaStr)
@@ -331,7 +332,7 @@ function _emptyOutput() {
       [ELEMENT_TYPE.FOOTING]: {}, [ELEMENT_TYPE.SLAB]: {},
     },
     totals: { totalWeightKg: 0, byCategory: { column: 0, beam: 0, footing: 0, slab: 0 }, byDiameter: {}, byBbsCategory: {} },
-    standardBarLengthM: 12,
+    standardBarLengthM: effectiveStockBarLength(null),
     paramsVersion: CATALOG_VERSION,
   }
 }

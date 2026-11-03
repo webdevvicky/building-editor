@@ -68,6 +68,25 @@ Geometry (flat zustand store)  →  Topology (pure)  →  Quantities  →  boq/ 
 
 ## Key Design Rules (engineering invariants)
 
+- **Company/project structural settings (ERP D-275, D-278):** `specs/effectiveBbsSettings.js` is the one editor resolver.
+  Member/spec overrides win over the applied `projectSettings.bbsSettings` snapshot (ERP project → company).
+  Presets omit inherited cover/lap/development fields; empty spec inputs clear overrides. Stock length also uses
+  this resolver in BBS, the quantity adapter, the panel and exports. Development-length tables remain the existing
+  IS-2502 catalog; explicit spec factors are honored by every generator through `cuttingParamsForSpec`.
+- **Saved bar inputs:** canonical documents include applied values/source/version in `projectSettings.bbsSettings`.
+  `bbsSettingsSession.loadBbsSettings` fetches the building-addressed editor-config after canonical reopen and before
+  sync starts. Only a fresh drawing adopts automatically. Reopen keeps saved inputs; “Company bar settings changed —
+  review” presents old/new values and an explicit apply action. Applying uses the existing project-settings action,
+  so whole-state structural signatures re-send affected bars. A connected fetch failure blocks the workspace and
+  exposes Retry, never silently using offline defaults. A reopened drawing with no saved ERP snapshot is status
+  `review`: `writePipeline.beginWritePipeline` defers the canonical queue, sync engine and coordinator (their
+  signatures call BBS), and Apply (`applyPendingBbsSettings`) starts them, re-projects every element and only then
+  moves to `ready`; a failed start resets what it started. An integrity-failed reopen ends in status `aborted`, and
+  `App.jsx` renders `EditorReadOnlyBanner` outside the settings gate so the real error and Reload stay visible.
+  `scripts/verify-bbs-startup.mjs` covers both. Standalone mode explicitly labels built-in IS-code defaults.
+  Wastage is captured with the snapshot; procurement wastage is applied by the ERP's same project/company reader.
+  `verify-bbs-settings.mjs` covers the drawing action, calculations, snapshot/reopen, overrides, review/apply and failures.
+
 These are the load-bearing rules. They are an adopted design basis; no owner decision is recorded for them unless a
 rule says so. The full list (about 29 rule blocks), each with status and authority, is in
 [`docs/DOMAIN-RULES.md`](docs/DOMAIN-RULES.md).
@@ -76,19 +95,15 @@ rule says so. The full list (about 29 rule blocks), each with status and authori
    authoring boundary (`src/draw/faceToCenterline.js`); nothing downstream knows the mode.
 2. **Walls are full entities, never auto-split.** T-junctions are `wall.junctions[]`; rooms use sub-spans via the
    topology graph. Only the explicit user Split tool (`splitWall`) cuts a wall.
-3. **IS 2502 catalog is the single source for BBS.** Every bend deduction, hook, Ld, lap and bar length comes from
-   `src/specs/cuttingLength.js`. ⚠️ **NOT currently enforced** — BOQ steel is priced from the legacy
-   `computeBBSQuantities` path with a lap-unit bug, D²/162 is re-implemented 3×, and generators carry hard-coded
-   fallbacks. See CODEBASE_MAP Known Defects **KD-29, KD-30, KD-40**. Origin: the build agent's Phase BBS rules
-   (2026-05-28), not an owner or engineer sign-off. The BBS defaults themselves (lap, cover, confinement…) are
-   **unsigned choices** — `docs/DOMAIN-RULES.md` §11.3 (open questions OQ-027…OQ-055 in
-   `erp-saas:docs/open-questions.md` §17). The **bar-length default is disputed**, not merely unsigned: the
-   per-project 6 / 9 / 12 m choice is owner decision D-114, and the ERP register records "the default stays 6 m" as
-   part of D-114, but the code default is 12 m and the phase log says "flipped 6 → 12" with no owner quote.
-   The sources are compared in `docs/DOMAIN-RULES.md` §11.4; the decision is open question OQ-029.
+3. **IS 2502 catalog and structural settings have separate owners.** Engineering tables for bends, hooks and
+   development lengths live in `src/specs/cuttingLength.js`; inherited cover, lap and stock-length resolution lives
+   in `effectiveBbsSettings.js`. ERP D-275/D-278 approve company defaults and the project/editor precedence.
+   Remaining engineering choices (confinement and detailing) are documented in `docs/DOMAIN-RULES.md` §11.3.
+   BOQ steel still uses the older `computeBBSQuantities` formula with its existing lap-unit defect, and D²/162 is
+   repeated (KD-29/KD-30); both quantity and BBS paths now receive the same resolved settings.
 4. **Beam endpoints are a 4-type union** `{type: COLUMN|BEAM|WALL|POINT, …}` — always resolve through
    `resolveBeamEndpoint()`.
-5. **RebarGroup is computed, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
+5. **RebarGroup is computed from saved settings, never persisted.** `computeRebarGroups(state)` regenerates deterministically and feeds
    the BBS panel, the BBS export and the bars sent to the ERP (`projects/structuralFacts.js`, D-271). The legacy `computeBBSQuantities` is meant to be deprecated but is **still the live
    source of every BOQ steel line** (`boq/lines.js:37,248`) — KD-29. `verify-bbs` currently pins the legacy numbers.
 6. **IFC readiness.** Every entity has `id` (UUID) **and** `ifcGlobalId` (22-char IFC GUID), minted only in

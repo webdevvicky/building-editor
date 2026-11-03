@@ -1,3 +1,5 @@
+import { getIs2502Params } from './cuttingLength.js'
+import { resolveBbsSpec } from './effectiveBbsSettings.js'
 // Centralized reinforcement-spec resolution.
 //
 // ALL fallback chains for column/beam/slab/footing reinforcement specs MUST
@@ -46,9 +48,9 @@ function lookupSpec(state, specId) {
 function makeEstimate() {
   return { spec: null, specId: null, specLabel: ESTIMATE_LABEL, source: 'ESTIMATE' }
 }
-function makeResolved(spec, source) {
+function makeResolved(state, spec, source) {
   if (!spec) return makeEstimate()
-  return { spec, specId: spec.id, specLabel: spec.label ?? spec.id, source }
+  return { spec: resolveBbsSpec(state, spec, getIs2502Params(state)), specId: spec.id, specLabel: spec.label ?? spec.id, source }
 }
 
 // ── Column resolver ──────────────────────────────────────────────────────────
@@ -73,16 +75,16 @@ export function resolveColumnReinforcementSpecForColumn(state, column, columnTyp
 
   const segOverride = floorId ? column.segments?.[floorId] : null
   const segmentSpec = lookupSpec(state, segOverride?.reinforcementSpecId)
-  if (segmentSpec) return makeResolved(segmentSpec, 'SEGMENT')
+  if (segmentSpec) return makeResolved(state, segmentSpec, 'SEGMENT')
 
   const instanceSpec = lookupSpec(state, column.reinforcementSpecId)
-  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
 
   const typeSpec = lookupSpec(state, columnType?.reinforcementSpecId)
-  if (typeSpec) return makeResolved(typeSpec, 'TYPE')
+  if (typeSpec) return makeResolved(state, typeSpec, 'TYPE')
 
   const defaultSpec = lookupSpec(state, defaults.COLUMN)
-  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
 
   return makeEstimate()
 }
@@ -126,7 +128,7 @@ export function resolveBeamReinforcementSpec(state, beamOrId) {
 
   if (isExplicit) {
     const instanceSpec = lookupSpec(state, beam.reinforcementSpecId)
-    if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+    if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
   } else {
     // BBS-4 — WALL_INSTANCE tier: wall-derived beam inherits from its
     // parent wall's per-class spec slot when set.
@@ -134,13 +136,13 @@ export function resolveBeamReinforcementSpec(state, beamOrId) {
     const wallSpecs = wall?.wallBeamSpecs
     const wallSpecId = wallSpecs && typeof wallSpecs === 'object' ? wallSpecs[beamClass] : null
     const wallInstanceSpec = lookupSpec(state, wallSpecId)
-    if (wallInstanceSpec) return makeResolved(wallInstanceSpec, 'WALL_INSTANCE')
+    if (wallInstanceSpec) return makeResolved(state, wallInstanceSpec, 'WALL_INSTANCE')
   }
 
   // bbsDefaults.BEAM is per-class object: { plinth, lintel, roof } → specId | null
   const beamDefaults = defaults.BEAM ?? {}
   const classSpec = lookupSpec(state, beamDefaults[beamClass])
-  if (classSpec) return makeResolved(classSpec, 'CLASS')
+  if (classSpec) return makeResolved(state, classSpec, 'CLASS')
 
   return makeEstimate()
 }
@@ -158,10 +160,10 @@ export function resolveSlabReinforcementSpecForSlab(state, slab) {
   const defaults = defaultsOf(state)
 
   const instanceSpec = lookupSpec(state, slab.reinforcementSpecId)
-  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
 
   const defaultSpec = lookupSpec(state, defaults.SLAB)
-  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
 
   return makeEstimate()
 }
@@ -186,10 +188,10 @@ export function resolveFootingReinforcementSpec(state, opts) {
     const f = state.foundations?.[opts.foundationId]
     if (!f) return makeEstimate()
     const instanceSpec = lookupSpec(state, f.reinforcementSpecId)
-    if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+    if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
 
     const defaultSpec = lookupSpec(state, defaults.FOOTING)
-    if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+    if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
 
     return makeEstimate()
   }
@@ -197,10 +199,10 @@ export function resolveFootingReinforcementSpec(state, opts) {
   if (opts?.columnTypeId) {
     const ct = (state.projectSettings?.columnTypes ?? []).find(t => t.id === opts.columnTypeId)
     const typeSpec = lookupSpec(state, ct?.reinforcementSpecId)
-    if (typeSpec) return makeResolved(typeSpec, 'TYPE')
+    if (typeSpec) return makeResolved(state, typeSpec, 'TYPE')
 
     const defaultSpec = lookupSpec(state, defaults.FOOTING)
-    if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+    if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
 
     return makeEstimate()
   }
@@ -215,9 +217,9 @@ export function resolveSunshadeReinforcementSpec(state, opening) {
   if (!opening) return makeEstimate()
   const defaults = defaultsOf(state)
   const instanceSpec = lookupSpec(state, opening.sunshadeSpecId)
-  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
   const defaultSpec = lookupSpec(state, defaults.SUNSHADE)
-  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
   return makeEstimate()
 }
 
@@ -227,9 +229,9 @@ export function resolveLoftReinforcementSpec(state, wall) {
   if (!wall) return makeEstimate()
   const defaults = defaultsOf(state)
   const instanceSpec = lookupSpec(state, wall.loftSpecId)
-  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
   const defaultSpec = lookupSpec(state, defaults.LOFT)
-  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
   return makeEstimate()
 }
 
@@ -242,9 +244,9 @@ export function resolveStaircaseReinforcementSpec(state, staircaseOrId) {
   if (!stair) return makeEstimate()
   const defaults = defaultsOf(state)
   const instanceSpec = lookupSpec(state, stair.reinforcementSpecId)
-  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
   const defaultSpec = lookupSpec(state, defaults.STAIRCASE)
-  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
   return makeEstimate()
 }
 
@@ -257,9 +259,9 @@ export function resolveStrapReinforcementSpec(state, foundationOrId) {
   if (!f) return makeEstimate()
   const defaults = defaultsOf(state)
   const instanceSpec = lookupSpec(state, f.reinforcementSpecId)
-  if (instanceSpec) return makeResolved(instanceSpec, 'INSTANCE')
+  if (instanceSpec) return makeResolved(state, instanceSpec, 'INSTANCE')
   const defaultSpec = lookupSpec(state, defaults.STRAP)
-  if (defaultSpec) return makeResolved(defaultSpec, 'PROJECT_DEFAULT')
+  if (defaultSpec) return makeResolved(state, defaultSpec, 'PROJECT_DEFAULT')
   return makeEstimate()
 }
 

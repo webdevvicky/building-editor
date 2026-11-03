@@ -1,3 +1,4 @@
+import { effectiveStockBarLength } from '../specs/effectiveBbsSettings.js'
 // BBS-5 — Bar Bending Schedule panel.
 //
 // Purely presentational. computeRebarGroups(state, { floorId }) is the
@@ -282,7 +283,7 @@ export default function BBSSchedulePanel() {
     : groups.filter(g => g.elementType === selectedElement)
 
   const projectTitle = projectSettings?.projectMeta?.projectTitle || 'Untitled project'
-  const stdBarLengthM = result?.standardBarLengthM ?? 6
+  const stdBarLengthM = result?.standardBarLengthM ?? effectiveStockBarLength(useStore.getState())
   const floors = [...(projectSettings?.floors ?? [])].sort(
     (a, b) => (a.sequence ?? 0) - (b.sequence ?? 0),
   )

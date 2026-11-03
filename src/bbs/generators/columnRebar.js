@@ -1,3 +1,4 @@
+import { cuttingParamsForSpec } from '../../specs/effectiveBbsSettings.js'
 // Column rebar group generator.
 //
 // 2026-05-28 / 2026-05-29 (sub/super split). Pure function — given a column
@@ -66,7 +67,8 @@ function _stirrupGeom(ct, spec, params) {
 }
 
 export function generateColumnRebarGroups(ctx, column) {
-  const { state, params } = ctx
+  const { state } = ctx
+  const { params } = ctx
   if (!column || !state || !params) return []
 
   // Phase ColumnStack — emit one "lift" per floor in the column's span. Each
@@ -97,7 +99,8 @@ export function generateColumnRebarGroups(ctx, column) {
 // Emit one lift's RebarGroups. `isBase` gates the sub/super grade split (only
 // the base lift straddles the grade beam); upper lifts are super-columns.
 function _emitLift(ctx, column, columnTypes, floorId, isBase, liftHeightFt) {
-  const { state, params } = ctx
+  const { state } = ctx
+  let { params } = ctx
   const ct = resolveColumnTypeForColumn(state, column, columnTypes, floorId)
   if (!ct) return []
 
@@ -105,6 +108,7 @@ function _emitLift(ctx, column, columnTypes, floorId, isBase, liftHeightFt) {
   if (!resolved.spec) return []   // ESTIMATE — kg/m³ pool handles it
 
   const spec       = resolved.spec
+  params = cuttingParamsForSpec(params, spec)
   const specId     = resolved.specId
   const specSource = resolved.source
 

@@ -27,32 +27,10 @@ export const STEEL_UNIT_WEIGHT_KG_PER_M = {
   32: 6.313,
 }
 
-// Standard procurement bar length (m). Default 12 m matches Indian market
-// reality — TMT bars are sold in 12 m bundles (~45-55 kg each). 6 m and 9 m
-// cuts exist but at premium. Default flipped 6 → 12 on 2026-05-28 to align
-// with research-confirmed residential procurement. Override via
-// projectSettings.bbsDefaults.standardBarLengthM (single source) — the
-// BBSSpecPanel Procurement dropdown surfaces 12 / 9 / 6 m choices.
-export const STANDARD_BAR_LENGTH_M = 12
-
-// Allowed standard bar lengths (validation hint, no enforcement).
-export const STANDARD_BAR_LENGTHS_ALLOWED_M = Object.freeze([6, 9, 12])
-
-// Concrete cover defaults per IS 456 (mm). Foundations need maximum cover for
-// soil contact; slabs use the lightest. Specs may override.
-export const DEFAULT_COVER_MM_BY_ELEMENT = {
-  FOUNDATION: 40,
-  COLUMN:     25,
-  BEAM:       25,
-  SLAB:       20,
-}
+// Stock length is resolved by effectiveBbsSettings before procurement helpers are called.
 
 // 90°/135° hook return on each end of a stirrup. ~6 in standard for residential.
 export const DEFAULT_HOOK_LENGTH_FT = 0.5
-
-// Lap length ≈ 50 × bar diameter (IS 456 typical for M20). Applied once per
-// column lift / per development end on footings.
-export const DEFAULT_LAP_LENGTH_MULTIPLIER = 50
 
 // ── Spec presets ─────────────────────────────────────────────────────────────
 
@@ -65,8 +43,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     longitudinalBarDiaMm: 12,
     stirrupBarDiaMm: 8,
     stirrupSpacingIn: 6,
-    coverMm: 25,
-    lapLengthMultiplier: 50,
   },
   COLUMN_C2_HEAVY: {
     id: 'COLUMN_C2_HEAVY',
@@ -76,8 +52,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     longitudinalBarDiaMm: 16,
     stirrupBarDiaMm: 8,
     stirrupSpacingIn: 6,
-    coverMm: 25,
-    lapLengthMultiplier: 50,
   },
   BEAM_PLINTH_STD: {
     id: 'BEAM_PLINTH_STD',
@@ -87,7 +61,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     bottomBars: { count: 2, diaMm: 16 },
     stirrupBarDiaMm: 8,
     stirrupSpacingIn: 6,
-    coverMm: 25,
   },
   FOOTING_STD: {
     id: 'FOOTING_STD',
@@ -95,8 +68,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     elementType: 'FOOTING',
     xBars: { count: 6, diaMm: 12 },
     yBars: { count: 6, diaMm: 12 },
-    developmentLengthMultiplier: 50,
-    coverMm: 40,
   },
   SLAB_MAIN_STD: {
     id: 'SLAB_MAIN_STD',
@@ -106,7 +77,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     mainBarSpacingIn: 6,
     distBarDiaMm: 8,
     distBarSpacingIn: 8,
-    coverMm: 20,
     twoWay: false,
   },
   SLAB_SUNKEN_STD: {
@@ -117,7 +87,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     mainBarSpacingIn: 6,
     distBarDiaMm: 8,
     distBarSpacingIn: 8,
-    coverMm: 20,
     twoWay: true,
   },
 
@@ -134,7 +103,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     bottomBars: { count: 2, diaMm: 12 },
     stirrupBarDiaMm: 8,
     stirrupSpacingIn: 8,
-    coverMm: 30,
   },
   LINTEL_BAND_STD: {
     id: 'LINTEL_BAND_STD',
@@ -144,7 +112,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     bottomBars: { count: 2, diaMm: 8 },
     stirrupBarDiaMm: 8,
     stirrupSpacingIn: 6,
-    coverMm: 30,
   },
   // Sunshade / chajja — top steel only (cantilever). Ø8 @6" main + Ø8 dist.
   SUNSHADE_STD: {
@@ -155,7 +122,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     mainBarSpacingIn: 6,
     distBarDiaMm: 8,
     distBarSpacingIn: 8,
-    coverMm: 20,
   },
   // Loft — light mat, top + bottom Ø8 + distribution.
   LOFT_STD: {
@@ -166,7 +132,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     mainBarSpacingIn: 8,
     distBarDiaMm: 8,
     distBarSpacingIn: 8,
-    coverMm: 20,
   },
   // Staircase waist slab — Ø12 @125 main + Ø8 @150 dist (refined per research).
   STAIRCASE_STD: {
@@ -177,7 +142,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
     waistMainSpacingIn: 5,
     distBarDiaMm: 8,
     distBarSpacingIn: 6,
-    coverMm: 20,
   },
   // Strap (eccentric) footing — pad bottom mesh + strap beam (top-primary).
   // Reference: Karthick EF1–EF6 — pad mesh Ø10, strap top Ø12/16, bottom Ø16,
@@ -194,8 +158,6 @@ export const REINFORCEMENT_SPEC_PRESETS = {
       stirrupBarDiaMm: 8,
       stirrupSpacingIn: 6,
     },
-    coverMm: 30,
-    padCoverMm: 60,
   },
 }
 
@@ -323,7 +285,7 @@ export function computeSlabBBS(spec, areaFt2, spanFt, widthFt) {
 // ── Per-diameter procurement helpers ────────────────────────────────────────
 // Convert a kg total at a given diameter into number of standard-length
 // bar pieces (rounded up — procurement orders whole bars).
-export function piecesForDia(totalKg, diaMm, standardBarLengthM = STANDARD_BAR_LENGTH_M) {
+export function piecesForDia(totalKg, diaMm, standardBarLengthM) {
   const w = STEEL_UNIT_WEIGHT_KG_PER_M[diaMm]
   if (!w || totalKg <= 0) return 0
   const perPieceKg = standardBarLengthM * w
@@ -331,7 +293,7 @@ export function piecesForDia(totalKg, diaMm, standardBarLengthM = STANDARD_BAR_L
   return Math.ceil(totalKg / perPieceKg)
 }
 
-export function weightPerPieceKg(diaMm, standardBarLengthM = STANDARD_BAR_LENGTH_M) {
+export function weightPerPieceKg(diaMm, standardBarLengthM) {
   const w = STEEL_UNIT_WEIGHT_KG_PER_M[diaMm]
   if (!w) return 0
   return standardBarLengthM * w

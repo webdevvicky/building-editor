@@ -1,3 +1,4 @@
+import { effectiveStockBarLength } from '../specs/effectiveBbsSettings.js'
 // Phase 1.7+ — Bar Bending Schedule aggregator (per-instance + grouped-by-spec).
 //
 // Every entity (column / explicit beam / slab / foundation / inline footing
@@ -12,7 +13,7 @@
 //
 // Gap 3 (2026-05-26): byDiameter rollup added — buckets total kg per
 // bar diameter (8/10/12/16/20/25/32 mm) across every BBS'd entity, with
-// piece count at projectSettings.bbsDefaults.standardBarLengthM (default 6m).
+// piece count at the resolved stock length (explicit override or saved bar settings).
 // Drives the "Steel — by Bar Diameter" procurement section.
 //
 // Output shape additions:
@@ -32,7 +33,6 @@ import {
   computeSlabBBS,
   piecesForDia,
   weightPerPieceKg,
-  STANDARD_BAR_LENGTH_M,
 } from '../specs/reinforcementSpecs'
 import {
   resolveColumnReinforcementSpecForColumn,
@@ -88,7 +88,7 @@ function _accumulateByDia(accumulator, kgByDia, category, multiplier = 1) {
 export function computeBBSQuantities(state) {
   const { columns, beams, slabs, foundations, projectSettings } = state
   const columnTypes = projectSettings?.columnTypes ?? []
-  const standardBarLengthM = projectSettings?.bbsDefaults?.standardBarLengthM ?? STANDARD_BAR_LENGTH_M
+  const standardBarLengthM = effectiveStockBarLength(state)
 
   const byColumn  = []
   const byBeam    = []
