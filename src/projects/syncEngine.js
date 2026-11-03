@@ -24,6 +24,10 @@ let _unsub = null
 let _scheduled = false
 let _shadow = {}
 let _floorShadow = {}
+// Element signatures as last sent, taken on the WHOLE state of that flush: an element's
+// payload depends on the state around it (sizes, bars, rooms), so comparing the element
+// object alone would miss a change made elsewhere (XR-02, KD-37).
+let _elementSigShadow = new Map()
 let _coordinated = false
 
 function _snapshot(st) {
@@ -35,6 +39,14 @@ function _snapshot(st) {
 // Floors are NOT a top-level store collection — they live in
 // projectSettings.floors[]. Snapshot them as an { id → floor } map so the diff
 // can detect new/changed floors the same way COLLECTIONS are diffed.
+function _elementSignatures(st) {
+  const sigs = new Map()
+  for (const coll of ELEMENT_COLLECTIONS) {
+    for (const id in (st[coll] ?? {})) sigs.set(`${coll}:${id}`, E.signature(coll, st[coll][id], st))
+  }
+  return sigs
+}
+
 function _floorMap(st) {
   const m = {}
   for (const f of (st.projectSettings?.floors ?? [])) if (f && f.id) m[f.id] = f
@@ -48,6 +60,7 @@ export function startSyncEngine(store, opts = {}) {
   _coordinated = !!opts.coordinated
   _shadow = _snapshot(store.getState()) // seed: existing geometry is NOT re-emitted
   _floorShadow = _floorMap(store.getState()) // seed: existing/reopened floors are NOT re-emitted
+  _elementSigShadow = _elementSignatures(store.getState())
   // In COORDINATED mode the sync coordinator is the SOLE driver: it calls
   // flushSyncEngine() only AFTER the canonical pipeline has durably accepted the
   // mutation (Invariant #5), so the engine must NOT self-subscribe.
@@ -56,7 +69,7 @@ export function startSyncEngine(store, opts = {}) {
 
 export function stopSyncEngine() {
   if (_unsub) { _unsub(); _unsub = null }
-  _active = false; _store = null; _shadow = {}; _floorShadow = {}; _scheduled = false; _coordinated = false
+  _active = false; _store = null; _shadow = {}; _floorShadow = {}; _elementSigShadow = new Map(); _scheduled = false; _coordinated = false
 }
 
 /** Re-baseline the shadow to current state WITHOUT emitting (used after a
@@ -65,6 +78,7 @@ export function reconcileSyncEngine(stateOverride) {
   if (_active && _store) {
     _shadow = _snapshot(stateOverride ?? _store.getState())
     _floorShadow = _floorMap(stateOverride ?? _store.getState())
+    _elementSigShadow = _elementSignatures(stateOverride ?? _store.getState())
   }
 }
 
@@ -196,12 +210,14 @@ async function _flush(stateOverride, doc) {
     for (const o of (w.openings ?? [])) if (!oldSet.has(o.ifcGlobalId)) openingOps.push(E.openingAddOp(w, o))
     for (const o of (p.openings ?? [])) if (!newSet.has(o.ifcGlobalId)) deleteOps.push(E.openingDeleteOp(o.ifcGlobalId))
   }
-  // UPDATES — every element kind, registry-driven
+  // UPDATES — every element kind, registry-driven, on the whole-state signature
+  const curElementSigs = _elementSignatures(st)
   for (const entry of ELEMENT_ENTRIES) {
     const coll = entry.collection
     for (const id in (cur[coll] ?? {})) {
-      const p = prev[coll]?.[id]
-      if (p && E.signature(coll, cur[coll][id]) !== E.signature(coll, p)) updateOps.push(E.elementUpdateOp(st, entry, cur[coll][id]))
+      if (!prev[coll]?.[id]) continue
+      const key = `${coll}:${id}`
+      if (curElementSigs.get(key) !== _elementSigShadow.get(key)) updateOps.push(E.elementUpdateOp(st, entry, cur[coll][id]))
     }
   }
 
@@ -216,4 +232,5 @@ async function _flush(stateOverride, doc) {
   if (ops.length || doc) await enqueueGeometryOps(ops, doc)
   _shadow = cur
   _floorShadow = curFloors
+  _elementSigShadow = curElementSigs
 }

@@ -11,6 +11,9 @@ const IN_TO_MM = 25.4
 /** Inches → integer millimetres (matches liveSync.inToMm). */
 export function inToMm(v) { return Math.round((Number(v) || 0) * IN_TO_MM) }
 
+/** Feet → integer millimetres (structural sizes the editor keeps in feet). */
+export function ftToMm(v) { return inToMm((Number(v) || 0) * 12) }
+
 /** Millimetres → inches. The single mm→inch conversion for reconstruction. */
 export function mmToIn(v) { return (Number(v) || 0) / IN_TO_MM }
 

@@ -20,23 +20,26 @@
 // foundation's footing, a column's type. References inside it name other entities
 // by ifcGlobalId — the identity the projection keeps — never by editor-local id.
 //
-// The /25.4 conversion lives ONLY in syncMappers (inToMm/mmToIn); registry
-// entries compose it. No per-kind branching exists outside this file.
+// Structural elements (XR-02, erp-saas D-271) also carry what the ERP needs to
+// quantify them — sizes, grades and the IS-2502 bars — from ONE pure function,
+// `structuralFacts` (./structuralFacts.js). `toErpPayload(el, state)` therefore needs
+// the WHOLE project state, and the change signature is taken on it, so an edit that
+// changes an element's size or bars without touching the element (a column type, a
+// cover, a room's area) re-sends it.
+//
+// The /25.4 conversion lives ONLY in syncMappers (inToMm/ftToMm/mmToIn); registry
+// entries compose it. No per-kind branching exists outside this file and its
+// structural half, structuralFacts.js.
 
-import { inToMm, mmToIn, edgeLengthMm } from './syncMappers.js'
+import { inToMm, mmToIn } from './syncMappers.js'
+import { structuralFacts } from './structuralFacts.js'
+import { resolveBeamEndpoint } from '../topology/beams.js'
 
 const xy = (el) => ({ posXMm: inToMm(el.x), posYMm: inToMm(el.y) })
 const point = (e) => ({ x: mmToIn(e.posXMm), y: mmToIn(e.posYMm) })
 const ifcOf = (coll, id) => (id ? coll?.[id]?.ifcGlobalId ?? null : null)
 const ifcsOf = (coll, ids) => (ids ?? []).map((id) => ifcOf(coll, id)).filter(Boolean)
 const floorOf = (e, ctx) => ctx?.floorFor?.(e.floorId) ?? undefined
-
-function beamPoint(state, ref) {
-  if (!ref) return null
-  if (ref.type === 'POINT') return { x: ref.x, y: ref.y }
-  if (ref.type === 'COLUMN') { const c = state?.columns?.[ref.columnId]; return c ? { x: c.x, y: c.y } : null }
-  return null
-}
 
 // A beam endpoint for the projection: the union with its reference named by ifcGlobalId.
 function endpointToSpec(state, ref) {
@@ -60,7 +63,7 @@ function endpointFromSpec(spec, fallback) {
 const mep = (collection, erpKind, discipline) => ({
   collection, erpKind, erpOpType: 'ADD_ELEMENT',
   toErpPayload: (el, state) => {
-    const roomIfcId = el.roomId ? state?.rooms?.[el.roomId]?.ifcGlobalId ?? null : null
+    const roomIfcId = el.roomId ? state.rooms?.[el.roomId]?.ifcGlobalId ?? null : null
     return {
       ifcGlobalId: el.ifcGlobalId,
       ...xy(el),
@@ -93,8 +96,9 @@ const mep = (collection, erpKind, discipline) => ({
 export const ELEMENT_REGISTRY = Object.freeze({
   COLUMN: {
     collection: 'columns', erpKind: 'COLUMN', erpOpType: 'ADD_ELEMENT',
-    toErpPayload: (el) => ({
+    toErpPayload: (el, state) => ({
       ifcGlobalId: el.ifcGlobalId, ...xy(el),
+      ...structuralFacts('COLUMN', el, state),
       spec: {
         columnTypeId: el.columnTypeId ?? null,
         topFloorId: el.topFloorId ?? null,
@@ -117,15 +121,16 @@ export const ELEMENT_REGISTRY = Object.freeze({
   BEAM: {
     collection: 'beams', erpKind: 'BEAM', erpOpType: 'ADD_ELEMENT',
     toErpPayload: (el, state) => {
-      const f = beamPoint(state, el.endpoints?.from)
-      const t = beamPoint(state, el.endpoints?.to)
+      const f = resolveBeamEndpoint(state, el.endpoints?.from)
+      const t = resolveBeamEndpoint(state, el.endpoints?.to)
       const p = { ifcGlobalId: el.ifcGlobalId }
       if (f && t) {
         p.fromXMm = inToMm(f.x); p.fromYMm = inToMm(f.y)
         p.toXMm = inToMm(t.x); p.toYMm = inToMm(t.y)
-        p.spanMm = edgeLengthMm(f, t)
+        p.spanMm = inToMm(Math.hypot(t.x - f.x, t.y - f.y))
       }
       if (el.level) p.structuralLevel = el.level
+      Object.assign(p, structuralFacts('BEAM', el, state))
       p.spec = {
         source: el.source ?? 'EXPLICIT',
         from: endpointToSpec(state, el.endpoints?.from),
@@ -148,7 +153,8 @@ export const ELEMENT_REGISTRY = Object.freeze({
     toErpPayload: (el, state) => ({
       ifcGlobalId: el.ifcGlobalId,
       thicknessMm: inToMm(el.thicknessIn),
-      roomIds: (el.roomIds ?? []).map((rid) => state?.rooms?.[rid]?.ifcGlobalId).filter(Boolean),
+      ...structuralFacts('SLAB', el, state),
+      roomIds: (el.roomIds ?? []).map((rid) => state.rooms?.[rid]?.ifcGlobalId).filter(Boolean),
       ...(el.type ? { slabType: el.type } : {}),
       ...(el.role ? { slabRole: el.role } : {}),
       spec: {
@@ -172,8 +178,9 @@ export const ELEMENT_REGISTRY = Object.freeze({
   },
   STAIRCASE: {
     collection: 'staircases', erpKind: 'STAIRCASE', erpOpType: 'ADD_ELEMENT',
-    toErpPayload: (el) => ({
+    toErpPayload: (el, state) => ({
       ifcGlobalId: el.ifcGlobalId, ...xy({ x: el.x ?? 0, y: el.y ?? 0 }),
+      ...structuralFacts('STAIRCASE', el, state),
       spec: {
         type: el.type ?? null, flightCount: el.flightCount ?? null, stepsPerFlight: el.stepsPerFlight ?? null,
         treadIn: el.treadIn ?? null, riserIn: el.riserIn ?? null, waistSlabIn: el.waistSlabIn ?? null,
@@ -188,6 +195,7 @@ export const ELEMENT_REGISTRY = Object.freeze({
     collection: 'foundations', erpKind: 'FOUNDATION', erpOpType: 'ADD_ELEMENT',
     toErpPayload: (el, state) => ({
       ifcGlobalId: el.ifcGlobalId, ...xy({ x: el.x ?? 0, y: el.y ?? 0 }),
+      ...structuralFacts('FOUNDATION', el, state),
       spec: {
         type: el.type ?? null,
         columnIfcIds: ifcsOf(state?.columns, el.columnIds),

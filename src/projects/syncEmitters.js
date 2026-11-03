@@ -178,8 +178,11 @@ export function elementDeleteOp(ifcGlobalId) {
 }
 
 // ── Per-collection change signature (excludes volatile labelNo/meta) ─────────
-// Element collections sign on their full toErpPayload (the synced fields).
-export function signature(collection, e) {
+// Element collections sign on their full toErpPayload over the WHOLE project state
+// (`state` is required for them): an element's sizes, bars and room references are
+// worked out from the state around it, so a column-type, cover, room-area or room
+// change re-sends the elements it reaches (XR-02, KD-37).
+export function signature(collection, e, state) {
   if (collection === 'nodes') return `${e.x},${e.y},${e.kind ?? 'CORNER'}`
   if (collection === 'walls') {
     const ops = (e.openings ?? []).map((o) => `${o.ifcGlobalId}:${o.type}:${o.width}:${o.height}:${o.offset}`).join('|')
@@ -187,12 +190,9 @@ export function signature(collection, e) {
   }
   if (collection === 'rooms') return (e.wallIds ?? []).slice().sort().join(',')
   const entry = entryForCollection(collection)
-  if (entry) return JSON.stringify(entry.toErpPayload(e, _SIG_STATE))
+  if (entry) return JSON.stringify(entry.toErpPayload(e, state))
   return JSON.stringify(e)
 }
-// Signature is a pure change-detector; toErpPayload only reads state for slab
-// roomIds / beam endpoints, irrelevant to detecting a moved element → empty state.
-const _SIG_STATE = {}
 
 // ── Full re-sync (resyncAll) — rebuild every op from current state ────────────
 // Order: nodes → rooms → walls → elements. Idempotent via sourceEditorId.
