@@ -192,6 +192,7 @@ for coordinates, heights, thicknesses and lengths; feet only for floor height an
   canvas from it), then loads the copy the save rule picks (see Canonical Building Document above).
 
 ### Locked rules
+- **Opening usage (ERP D-357):** syncMappers.openingUsage maps the authored MAIN_DOOR / INTERNAL_DOOR subtype to MAIN_ENTRANCE / INTERNAL, with UNCLASSIFIED for a door needing review and NOT_APPLICABLE for other forms. Both ADD and PATCH carry usage; it participates in the shape signature so a subtype-only change is an UPDATE. Load from ERP restores subtype/source from usage, including an explicit UNCLASSIFIED door that loadProject must not reclassify from size. verify-wall-opening-sync exports ERP_OPENING_FIXTURE through the real dispatcher; verify-erp-roundtrip covers usage recovery.
 - The **editor owns topology**; the **ERP owns business state** (room name after creation, status, finishes, costs).
   Geometry mutations are editor-session-bound (`/geometry/*` behind `EditorSessionGuard`).
 - **Default floor uses the CONSTANT `sourceEditorId` `'F1'`** (`DEFAULT_FLOOR_ID`) for every building, so floor

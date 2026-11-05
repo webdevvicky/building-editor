@@ -71,7 +71,7 @@ function state() {
       lengthMm: w.lengthMm, heightMm: w.heightMm, thicknessMm: w.thicknessMm, wallMaterial: w.wallMaterial,
       roomSourceEditorIds: [...new Set([w.roomId, ...db.faces.filter((f) => live(f) && f.wallId === w.id).map((f) => f.roomId)]
         .filter((rid) => live(byId('rooms', rid))).map((rid) => sidOf('rooms', rid)))],
-      openings: db.openings.filter((o) => live(o) && o.wallId === w.id).map((o) => ({ id: o.id, sourceEditorId: o.sourceEditorId, openingType: o.openingType, widthMm: o.widthMm, heightMm: o.heightMm, offsetFromStartMm: o.offsetFromStartMm ?? null, heightFromFloorMm: null })),
+      openings: db.openings.filter((o) => live(o) && o.wallId === w.id).map((o) => ({ id: o.id, sourceEditorId: o.sourceEditorId, openingType: o.openingType, usage: o.usage, widthMm: o.widthMm, heightMm: o.heightMm, offsetFromStartMm: o.offsetFromStartMm ?? null, heightFromFloorMm: null })),
       completionPct: null,
     })),
     elements: db.elements.filter(live).map((e) => ({
@@ -156,9 +156,9 @@ const doc = {
   nodes: { n1: node('n1', 0, 0), n2: node('n2', 120, 0), n3: node('n3', 120, 120), n4: node('n4', 0, 120), n5: node('n5', 240, 0), n6: node('n6', 240, 120) },
   walls: {
     w1: wall('w1', 'n1', 'n2', [{ id: 'o1', ifcGlobalId: 'ifc-o1', type: 'door', subtype: 'INTERNAL_DOOR', width: 35, height: 85, offset: 20, orient: 0 }]),
-    w2: wall('w2', 'n2', 'n3'),
+    w2: wall('w2', 'n2', 'n3', [{ id: 'o-main', ifcGlobalId: 'ifc-o-main', type: 'door', subtype: 'MAIN_DOOR', width: 35, height: 85, offset: 20 }]),
     w3: wall('w3', 'n3', 'n4', [{ id: 'o2', ifcGlobalId: 'ifc-o2', type: 'window', width: 48, height: 48, offset: 30, orient: 0, hasSunshade: true }]),
-    w4: wall('w4', 'n4', 'n1'),
+    w4: wall('w4', 'n4', 'n1', [{ id: 'o-review', ifcGlobalId: 'ifc-o-review', type: 'door', subtype: 'UNCLASSIFIED', width: 48, height: 96, offset: 20 }]),
     w5: wall('w5', 'n2', 'n5'), w6: wall('w6', 'n5', 'n6'), w7: wall('w7', 'n6', 'n3'),
   },
   rooms: {
@@ -239,6 +239,9 @@ async function main() {
   ok('staircase, riser keep their type', payload.staircases['ifc-st1'].type === 'STRAIGHT' && payload.risers['ifc-rs1'].kind === 'SOIL_STACK')
   ok('MEP keeps type, room, wall, point type', payload.plumbingFixtures['ifc-p1'].type === 'WC' && payload.plumbingFixtures['ifc-p1'].roomId === 'ifc-r1'
     && payload.plumbingFixtures['ifc-p1'].wallId === 'ifc-w1' && payload.electricalPoints['ifc-e1'].pointType === 'AC')
+  for (const [wallId, subtype] of [['ifc-w1', 'INTERNAL_DOOR'], ['ifc-w2', 'MAIN_DOOR'], ['ifc-w4', 'UNCLASSIFIED']]) {
+    ok(`Load from ERP restores ${subtype} independently of size`, payload.walls[wallId].openings[0].subtype === subtype)
+  }
   ok('the window keeps its sunshade (rebuilt from its derived member)', payload.walls['ifc-w3'].openings[0].hasSunshade === true)
   ok('settings kept, floors from the ERP', payload.projectSettings.name === doc.projectSettings.name && payload.projectSettings.floors[0].label === 'Ground')
 

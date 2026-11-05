@@ -1,3 +1,5 @@
+import { OPENING_SUBTYPE, SUBTYPE_SOURCE } from '../constants/joinery.js'
+
 // projectionReconstruct.js — ERP projection → editor canvas state (pure).
 //
 // The ONE sanctioned reverse mapping, used only by the projection-mismatch
@@ -52,7 +54,7 @@ function materialKeyFor(erpMaterial) {
   return 'IS_MODULAR_BRICK'
 }
 
-/** ERP OpeningType enum → editor opening base type (subtype re-derives on load). */
+/** ERP OpeningType enum → editor opening base type; semantic subtype is restored from usage. */
 function openingTypeFor(erpType) {
   const t = String(erpType ?? '').toUpperCase()
   if (t === 'WINDOW' || t === 'VENTILATOR') return 'window'
@@ -70,6 +72,11 @@ function mapOpenings(erpOpenings) {
       width: mmToIn(o.widthMm),
       height: mmToIn(o.heightMm),
       type,
+      subtype: type === 'door'
+        ? (o.usage === 'MAIN_ENTRANCE' ? OPENING_SUBTYPE.MAIN_DOOR
+          : o.usage === 'INTERNAL' ? OPENING_SUBTYPE.INTERNAL_DOOR : OPENING_SUBTYPE.UNCLASSIFIED)
+        : (o.openingType === 'VENTILATOR' ? OPENING_SUBTYPE.VENTILATOR : OPENING_SUBTYPE.WINDOW),
+      subtypeSource: SUBTYPE_SOURCE.EXPLICIT,
       orient: 0,
       // A window's sill as the ERP holds it; a door stands on the floor.
       sillHeight: type === 'window' && o.heightFromFloorMm != null ? mmToIn(o.heightFromFloorMm) : null,

@@ -234,6 +234,7 @@ function _sillOf(opening) {
 function _openingShape(opening) {
   const sill = _sillOf(opening)
   return {
+    usage: M.openingUsage(opening.type, opening.subtype),
     width: opening.width,
     height: opening.height,
     offset: opening.offset,
@@ -255,7 +256,7 @@ export function openingAddOp(wall, opening) {
   }
 }
 // A resize / move along the wall / sill change of an opening that stays on its wall
-// and keeps its type (XR-17). The PATCH carries shape only; a type change re-sends
+// and keeps its type (XR-17). Semantic usage rides the same PATCH; a type change re-sends
 // the ADD (the ERP's type-setting path, as for a room type).
 export function openingUpdateOp(opening) {
   return { opType: 'UPDATE_OPENING', payload: { ifcGlobalId: opening.ifcGlobalId, ..._openingShape(opening) } }
@@ -268,7 +269,7 @@ export function openingTypeSignature(opening) {
 }
 export function openingShapeSignature(opening) {
   const o = _openingShape(opening)
-  return `${o.width},${o.height},${o.offset},${o.heightFromFloor ?? ''}`
+  return `${o.width},${o.height},${o.offset},${o.heightFromFloor ?? ''},${o.usage}`
 }
 
 // ── Structural elements ──────────────────────────────────────────────────────

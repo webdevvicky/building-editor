@@ -460,6 +460,7 @@ export async function fireLiveOp(opType, payload, conn) {
       const body = {
         ...(payload.ifcGlobalId ? { sourceEditorId: payload.ifcGlobalId } : {}),
         openingType: payload.type ?? 'WINDOW',
+        usage: payload.usage,
         widthMm: inToMm(payload.width ?? 36),
         heightMm: inToMm(payload.height ?? 48),
         ...(payload.offset !== undefined ? { offsetFromStartMm: inToMm(payload.offset) } : {}),
@@ -479,6 +480,7 @@ export async function fireLiveOp(opType, payload, conn) {
       if (payload.height !== undefined) body.heightMm = inToMm(payload.height)
       if (payload.offset !== undefined) body.offsetFromStartMm = inToMm(payload.offset)
       if (payload.heightFromFloor !== undefined) body.heightFromFloorMm = inToMm(payload.heightFromFloor)
+      if (payload.usage !== undefined) body.usage = payload.usage
       if (payload.count !== undefined) body.count = payload.count
       res = await _request('PATCH', `/geometry/openings/${openingErpId}`, body, c)
       break

@@ -11,6 +11,7 @@
 //                    No shutter; frame + area only.
 
 export const OPENING_SUBTYPE = Object.freeze({
+  UNCLASSIFIED:  'UNCLASSIFIED',
   MAIN_DOOR:     'MAIN_DOOR',
   INTERNAL_DOOR: 'INTERNAL_DOOR',
   WINDOW:        'WINDOW',
@@ -18,6 +19,7 @@ export const OPENING_SUBTYPE = Object.freeze({
 })
 
 export const OPENING_SUBTYPE_REGISTRY = Object.freeze([
+  Object.freeze({ id: OPENING_SUBTYPE.UNCLASSIFIED, label: 'Unclassified door — review', parentType: 'door', hasShutter: true }),
   Object.freeze({ id: OPENING_SUBTYPE.MAIN_DOOR,     label: 'Main door',     parentType: 'door',   hasShutter: true  }),
   Object.freeze({ id: OPENING_SUBTYPE.INTERNAL_DOOR, label: 'Internal door', parentType: 'door',   hasShutter: true  }),
   Object.freeze({ id: OPENING_SUBTYPE.WINDOW,        label: 'Window',        parentType: 'window', hasShutter: true  }),

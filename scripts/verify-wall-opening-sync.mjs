@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs'
 import { initCheckpointTest } from './checkpoint-test-setup.mjs'
 // scripts/verify-wall-opening-sync.mjs
 //
@@ -35,6 +36,7 @@ function header(t) { console.log(`\n${t}`) }
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
 // ── Fake ERP backend: mints ids, answers each geometry route in its real shape ──
+const openingBodies = {}
 let calls = []
 let seq = 0
 const okRes = (data) => ({ ok: true, status: 200, text: async () => '', json: async () => ({ success: true, data }) })
@@ -43,6 +45,8 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url).replace('http://erp.test/api/v1', '')
   const body = opts.body ? JSON.parse(opts.body) : null
   calls.push({ method, url: u, body })
+  if (method === 'POST' && /\/openings$/.test(u)) openingBodies.add = body
+  if (method === 'PATCH' && /\/openings\//.test(u)) openingBodies.patch = body
   if (method === 'POST' && /\/split$/.test(u)) {
     return okRes({ walls: body.newWalls.map((w) => ({ id: `erp-${++seq}`, sourceEditorId: w.sourceEditorId, version: 0 })) })
   }
@@ -123,6 +127,16 @@ async function main() {
     retype.length === 1 && retype[0].body.sourceEditorId === opening.ifcGlobalId && retype[0].body.openingType === 'DOOR', JSON.stringify(retype[0]?.body))
   ok('… a door\'s sill is the floor (0)', retype[0]?.body?.heightFromFloorMm === 0)
   ok('… nothing deleted', find(cs, 'DELETE', /openings/).length === 0)
+
+  for (const [subtype, usage] of [['MAIN_DOOR', 'MAIN_ENTRANCE'], ['INTERNAL_DOOR', 'INTERNAL'], ['UNCLASSIFIED', 'UNCLASSIFIED']]) {
+    s().updateOpening(shared, opening.id, { subtype, subtypeSource: 'EXPLICIT' })
+    cs = await sync()
+    const usagePatch = find(cs, 'PATCH', /^\/geometry\/openings\//)
+    ok(`subtype-only ${subtype} change PATCHes usage`, usagePatch.length === 1 && usagePatch[0].body.usage === usage)
+    ok('usage change keeps opening identity', find(cs, 'POST', /\/openings$/).length === 0 && find(cs, 'DELETE', /openings/).length === 0)
+  }
+  if (process.env.ERP_OPENING_FIXTURE) writeFileSync(process.env.ERP_OPENING_FIXTURE, JSON.stringify(openingBodies, null, 2) + '\n')
+
 
   // ── XR-16: wall height / material ─────────────────────────────────────────────
   header('XR-16 — a wall height or material change PATCHes the wall')

@@ -1,3 +1,5 @@
+import { OPENING_SUBTYPE } from '../constants/joinery.js'
+
 // syncMappers.js — pure editor → ERP translation.
 //
 // The editor's taxonomies (materialKey strings, opening types, MEP disciplines)
@@ -76,3 +78,14 @@ export function openingType(type, subtype) {
 
 // MEP discipline ⇄ BuildingElementKind mapping moved to elementRegistry.js
 // (the single source of truth for all element kinds).
+
+/** @typedef {'MAIN_ENTRANCE' | 'INTERNAL' | 'UNCLASSIFIED' | 'NOT_APPLICABLE'} OpeningUsage */
+/** Authored semantic subtype only; dimensions never determine ERP usage.
+ * @returns {OpeningUsage}
+ */
+export function openingUsage(type, subtype) {
+  if (type !== 'door') return 'NOT_APPLICABLE'
+  if (subtype === OPENING_SUBTYPE.MAIN_DOOR) return 'MAIN_ENTRANCE'
+  if (subtype === OPENING_SUBTYPE.INTERNAL_DOOR) return 'INTERNAL'
+  return 'UNCLASSIFIED'
+}
